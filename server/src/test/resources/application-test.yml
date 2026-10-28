@@ -1,0 +1,32 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:wechat_bot;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    open-in-view: false
+  flyway:
+    enabled: false
+  data:
+    redis:
+      repositories:
+        enabled: false
+      host: localhost
+      port: 6399
+      timeout: 100ms
+      connect-timeout: 100ms
+
+app:
+  security:
+    admin-token: test-admin
+    agent-token: test-agent
+    secret-key: test-only-secret-key
+  cors:
+    allowed-origins: http://localhost:5173
+  wechat:
+    hook:
+      enabled: false
+      outbox-enabled: false

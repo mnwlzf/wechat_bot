@@ -1,0 +1,19 @@
+{
+  "name": "aixed/WeChat-Hook prebuilt version.dll",
+  "targetWeChatVersion": "4.1.10.27",
+  "releaseTag": "v411027_",
+  "releaseName": "4.1.10.27_new",
+  "publishedAt": "2026-06-29T03:13:58Z",
+  "sourceUrl": "https://github.com/aixed/WeChat-Hook/releases/download/v411027_/version.dll",
+  "sourceRepository": "https://github.com/aixed/WeChat-Hook",
+  "fileName": "version.dll",
+  "size": 606208,
+  "sha256": "23948e7d933ff40735ddc0cc516641fd9f935d67ffdec476bb8db61b79940f29",
+  "authenticode": "NotSigned",
+  "trustModel": "Pinned upstream release hash. Verify before installation.",
+  "supportedProtocols": [
+    "UPSTREAM_PREBUILT",
+    "OVERLAY"
+  ],
+  "licenseStatus": "Upstream repository does not declare an explicit license. Confirm authorization before redistribution or commercial use."
+}

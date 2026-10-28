@@ -1,0 +1,35 @@
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.iml
+
+# Java
+server/target/
+*.class
+*.log
+
+# Node
+web/node_modules/
+web/dist/
+web/.vite/
+npm-debug.log*
+
+# Local config / secrets
+.env
+*.local
+application-local.yml
+application-local.yaml
+
+
+# Runtime data
+data/
+logs/
+# Windows hook build/runtime
+windows-agent/state/
+vendor/WeChat-Hook/
+vendor/wechat-hook.zip
+
+
+
