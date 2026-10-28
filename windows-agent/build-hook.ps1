@@ -1,4 +1,4 @@
-param([string]$MsBuild = '', [string]$BuildDirectory = '', [string]$OutputDirectory = '', [switch]$ValidateOnly)
+﻿param([string]$MsBuild = '', [string]$BuildDirectory = '', [string]$OutputDirectory = '', [switch]$ValidateOnly)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $source = Join-Path $root 'vendor\WeChat-Hook-src\WeChat-Hook-e905d07ade50d2c6472e4eb3bd4f3fe19cf662c6'

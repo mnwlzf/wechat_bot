@@ -73,11 +73,19 @@ docs/                   架构与 API 文档
 
 ### 5.1 配置
 
+项目所有通过环境变量注入的配置项都集中在**根目录唯一的一份 `.env`**：Docker Compose、Spring Boot 后端和 Vite 前端共用它，不再维护 `web/.env`。
+
 ```powershell
 Copy-Item .env.example .env
-# 修改 PostgreSQL、Redis、ADMIN_TOKEN、APP_SECRET_KEY
-# 填入 WECHAT_HOOK_URL、WECHAT_ALLOWED_CHATS
+# 按需修改 PostgreSQL / Redis / Token / 微信 Hook 各项即可
 ```
+
+读取方式：
+
+- `scripts\*.ps1` 启动前会调用 `scripts\load-env.ps1` 把 `.env` 注入当前进程环境
+- `web\vite.config.ts` 通过 `envDir` 指向仓库根目录，直接读取同一份 `.env`（只有 `VITE_` 前缀会进入浏览器端代码）
+- 变量留空 = 不注入，落回 `application.yml` / `vite.config.ts` 的内置默认值；数据库只需提供主机、端口、库名、账号、密码，JDBC 连接串由后端自动拼装，不需要手写
+- 直接用 `mvn`、IDE 或 `java -jar` 启动时不会自动加载 `.env`，可先执行 `.\scripts\load-env.ps1`，或在 IDE 运行配置中导入这些变量
 
 官方预编译 DLL 没有 Bearer Token 鉴权。必须保证 `30001` 只允许本机访问，例如安装时执行：
 
@@ -139,6 +147,25 @@ WECHAT_HOOK_SKIP_HISTORY=true
 修改后重启 Spring Boot。`WECHAT_ACCOUNT` 在官方预编译 DLL 下可以留空，后端会从 `/GetSelfProfile` 自动识别；覆盖层模式下建议显式填写。
 
 ## 7. 核心配置
+
+全部变量都在根目录 `.env` 中，完整清单与注释见 [.env.example](.env.example)。
+
+基础设施与服务：
+
+| 环境变量 | 默认值 | 说明 |
+|---|---|---|
+| `POSTGRES_HOST` / `POSTGRES_PORT` | `127.0.0.1` / `5432` | 数据库主机与端口；后端据此自动拼装 JDBC 连接串，连远程库只改 IP |
+| `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD` | `wechat_bot` / `wechat` / - | 库名与账号密码，docker-compose 与后端共用 |
+| `REDIS_HOST` / `REDIS_PORT` / `REDIS_USERNAME` / `REDIS_PASSWORD` / `REDIS_DATABASE` | `localhost` / `6379` / 空 / - / `0` | Redis 连接；`REDIS_USERNAME` 对应 Redis 6+ ACL 账号（留空即只用密码认证），`REDIS_DATABASE` 为库号 |
+| `SERVER_PORT` | `8080` | 后端端口 |
+| `ADMIN_TOKEN` / `AGENT_TOKEN` | 开发默认值 | 管理端与 Agent 鉴权 |
+| `APP_SECRET_KEY` | 开发默认值 | 模型密钥加密，上线必须替换 |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | 跨域白名单 |
+| `VITE_API_BASE_URL` | 空 | 前端接口基地址，空 = 走 Vite 代理 |
+| `VITE_DEV_PORT` | `5173` | Vite 开发服务器端口 |
+| `VITE_PROXY_TARGET` | `http://127.0.0.1:${SERVER_PORT}` | Vite 代理转发的后端地址 |
+
+微信 Hook：
 
 | 环境变量 | 默认值 | 说明 |
 |---|---|---|

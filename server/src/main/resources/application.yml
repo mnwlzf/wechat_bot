@@ -6,9 +6,10 @@ spring:
   application:
     name: wechat-bot-server
   datasource:
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/wechat_bot}
-    username: ${DB_USERNAME:wechat}
-    password: ${DB_PASSWORD:change-me-postgres}
+    # 只需提供主机 / 端口 / 库名 / 账号 / 密码，JDBC 连接串在这里自动拼装
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:wechat_bot}
+    username: ${POSTGRES_USER:wechat}
+    password: ${POSTGRES_PASSWORD:change-me-postgres}
     hikari:
       maximum-pool-size: 12
       minimum-idle: 2
@@ -31,7 +32,11 @@ spring:
         enabled: false
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
+      # Redis 6+ ACL 用户名；留空 = 传统 AUTH <password> 认证
+      username: ${REDIS_USERNAME:}
       password: ${REDIS_PASSWORD:change-me-redis}
+      # 库号（0-15）；数据不在默认 0 号库时修改
+      database: ${REDIS_DATABASE:0}
       timeout: 2s
       connect-timeout: 2s
   jackson:
