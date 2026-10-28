@@ -7,6 +7,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.util.UUID;
+
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -42,5 +44,26 @@ class ApiSmokeTest {
     void rejectsAgentRequestWithAdminToken() throws Exception {
         mockMvc.perform(get("/api/agent/outbox").header("X-Agent-Token", "test-admin"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void listsConversationsWithAndWithoutKeyword() throws Exception {
+        mockMvc.perform(get("/api/admin/conversations").header("Authorization", "Bearer test-admin"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isArray())
+                .andExpect(jsonPath("$.totalElements").exists());
+
+        mockMvc.perform(get("/api/admin/conversations").param("query", "wxid")
+                        .header("Authorization", "Bearer test-admin"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content").isArray());
+    }
+
+    @Test
+    void returnsNotFoundForUnknownConversationMessages() throws Exception {
+        mockMvc.perform(get("/api/admin/conversations/{id}/messages", UUID.randomUUID())
+                        .header("Authorization", "Bearer test-admin"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value(404));
     }
 }

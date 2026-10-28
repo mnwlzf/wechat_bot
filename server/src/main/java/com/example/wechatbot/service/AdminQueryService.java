@@ -53,7 +53,10 @@ public class AdminQueryService {
     public Page<AdminDtos.ConversationView> conversations(String query, int page, int size) {
         String normalized = query == null || query.isBlank() ? null : query.trim();
         var pageable = PageRequest.of(Math.max(0, page), Math.max(1, Math.min(size, 100)));
-        return conversationRepository.search(normalized, pageable).map(this::toConversationView);
+        var result = normalized == null
+                ? conversationRepository.findAllByOrderByLastMessageAtDesc(pageable)
+                : conversationRepository.search(normalized, pageable);
+        return result.map(this::toConversationView);
     }
 
     public Page<AdminDtos.MessageView> messages(UUID conversationId, int page, int size) {
