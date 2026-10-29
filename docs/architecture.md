@@ -112,6 +112,33 @@ Java 轮询流程：
 
 旧版 `/api/agent/outbox` 仍保留，供外部调试或迁移期驱动使用，但默认生产链路不再依赖它。
 
+### 6.1 伪装层
+
+`ChatOrchestrator` 不再把模型输出直接写 outbox，而是先经过 `disguise` 包：
+
+1. `StyleNormalizer` 去掉 Markdown、结构词、AI 自称和客套结尾
+2. `ReplyComposer` 按句切成 1~3 条
+3. `DisguiseClock` 判断是否处于睡眠/离线窗口，必要时整体顺延
+4. `QuotaGuard` 按分钟/10 分钟/小时/天与全局配额排队
+5. `PacingModel` 按“读 + 想 + 打字 + 昼夜节律”计算延迟
+6. 每条气泡写一行 `outbox_message`，各自带 `next_attempt_at`
+
+`OutboxService.lease` 保证同一会话同一时刻只有一条在途消息，分条不会被并发发出。
+完整策略见 [disguise.md](disguise.md)。
+
+### 6.2 模型 Provider 引导
+
+`LlmProviderBootstrap` 在 bean 初始化阶段执行（`InitializingBean`，早于 Web 端口开放，且晚于 Flyway）：
+
+1. 读取 `app.llm.bootstrap.primary` / `fallback` 两个槽位
+2. 按 `name` 做幂等 upsert；`overwrite=true` 时以环境变量为准
+3. API Key 用 `SecretCipher`（AES-GCM）加密后落库，日志只输出尾 4 位
+4. `assign-to-bot=true` 时，把还没有模型的机器人挂到 primary 上
+5. 结果通过 `GET /api/admin/providers/bootstrap` 暴露，密钥永不回显
+
+`LlmGateway` 仍然按 `priority` 升序尝试所有启用 provider，primary 失败会自动回退到 fallback。
+Base URL 只填域名时客户端自动补 `/v1`，429/5xx 单次重试。
+
 ## 7. 数据模型
 
 | 表 | 作用 |

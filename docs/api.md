@@ -58,12 +58,90 @@ $headers = @{ Authorization = "Bearer dev-admin-token" }
 | GET | `/api/admin/conversations` | 会话分页列表 |
 | GET | `/api/admin/conversations/{id}/messages` | 会话消息 |
 | GET/POST/PUT/DELETE | `/api/admin/providers` | 模型提供方 |
-| POST | `/api/admin/providers/{id}/test` | 模型连通测试 |
+| GET | `/api/admin/providers/bootstrap` | 本次启动的环境变量引导结果（密钥掩码） |
+| POST | `/api/admin/providers/{id}/test` | 模型连通测试（主 Key 失败会自动用备用 Key） |
+| POST | `/api/admin/providers/{id}/search?q=` | 用该提供方的主/备 Key 调 DeepSeek 官方搜索 |
+| GET | `/api/admin/settings` | 运行时策略快照（值 + 来源 db/env） |
+| PUT | `/api/admin/settings/wechat` | 会话白名单 / 全量接收 / 群聊开关，立即生效 |
+| PUT | `/api/admin/settings/llm` | 备用链路与联网搜索开关，立即生效 |
 | GET | `/api/admin/bots` | 机器人配置 |
 | PUT | `/api/admin/bots/{id}` | 更新机器人配置 |
 | POST | `/api/admin/debug/chat` | 在线调试（不发送微信） |
+| GET | `/api/admin/disguise` | 伪装层状态、配额、最近决策 |
+| POST | `/api/admin/disguise/preview` | 预览文风清洗、分条与延迟（不占配额） |
 
 具体请求/响应结构见 `server/src/main/java/com/example/wechatbot/web/dto/AdminDtos.java`。
+
+### 模型 Provider 环境变量引导
+
+启动时若提供了 `LLM_BASE_URL` / `LLM_MODEL`，后端会按同名 upsert 一个 provider，并把 `LLM_API_KEY`（以及可选的 `LLM_BACKUP_API_KEY`）加密落库。`GET /api/admin/providers/bootstrap` 返回本次启动的结果：
+
+```json
+{
+  "enabled": true,
+  "overwrite": true,
+  "assignToBot": true,
+  "providers": [
+    {
+      "role": "primary",
+      "name": "deepseek",
+      "baseUrl": "https://api.deepseek.com/v1",
+      "model": "deepseek-chat",
+      "priority": 10,
+      "action": "created"
+    }
+  ],
+  "assignedBots": 1,
+  "warnings": []
+}
+```
+
+`action` 取值：`created` / `updated` / `unchanged` / `skipped`。`warnings` 会给出“Base URL 不是 http(s)”“缺少 API Key”“现有密钥无法用当前 `APP_SECRET_KEY` 解密”等提示；API Key 本身永不回显。
+
+### 伪装层 API
+
+`GET /api/admin/disguise` 返回当前在线状态、下次活跃时间、配额上限、累计计数与最近 40 次决策：
+
+```json
+{
+  "enabled": true,
+  "state": "ACTIVE",
+  "zone": "Asia/Shanghai",
+  "quietHours": "00:30-07:30",
+  "nextActiveAt": "2026-10-29T10:20:00+08:00",
+  "partsLimit": 3,
+  "perMinute": 3,
+  "per10Minutes": 8,
+  "perHour": 20,
+  "perDay": 120,
+  "planned": 12,
+  "dropped": 0,
+  "deferred": 3,
+  "repetitive": 1,
+  "globalSentToday": 9
+}
+```
+
+`POST /api/admin/disguise/preview` 走完整条伪装链路但不写库、不占配额：
+
+```json
+{
+  "chatId": "wxid_demo",
+  "chatType": "PRIVATE",
+  "text": "**好的**！首先，我为您整理如下：`code`"
+}
+```
+
+```json
+{
+  "decision": "SEND",
+  "note": "延迟 7 秒，分 1 条",
+  "dropped": false,
+  "aiScore": 4,
+  "parts": [{ "text": "好的！整理如下：code", "delaySeconds": 7 }]
+}
+```
+
 
 ## 4. 外部集成 API
 
