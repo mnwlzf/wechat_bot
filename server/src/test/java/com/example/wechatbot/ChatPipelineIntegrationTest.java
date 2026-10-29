@@ -105,11 +105,11 @@ class ChatPipelineIntegrationTest {
 
         LlmReply reply = chatOrchestrator.generateReply(bot.getId(), conversation.getId(), inbound.getId());
 
-        assertThat(reply.content()).isEqualTo("你好，我是测试机器人。");
+        assertThat(reply.content()).isEqualTo("你好，我是测试机器人");
         assertThat(reply.providerName()).isEqualTo("Mock OpenAI");
         assertThat(messageRepository.count()).isEqualTo(2);
         assertThat(outboxRepository.count()).isEqualTo(1);
-        assertThat(outboxRepository.findAll().getFirst().getContent()).isEqualTo("你好，我是测试机器人。");
+        assertThat(outboxRepository.findAll().getFirst().getContent()).isEqualTo("你好，我是测试机器人");
 
         MessageLog debugInbound = new MessageLog();
         debugInbound.setConversationId(conversation.getId());
