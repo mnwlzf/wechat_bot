@@ -65,18 +65,15 @@ function logout() {
         </el-menu-item>
       </el-menu>
 
-      <div class="sidebar-status">
-        <div class="status-head"><span class="status-dot"></span><span>后端 API 已连接</span></div>
-        <p>Redis 异常时自动本地降级</p>
+      <div class="sidebar-foot">
+        <span class="status-dot"></span>
+        <span>本地运行</span>
       </div>
     </aside>
 
     <section class="workspace">
       <header class="topbar">
-        <div>
-          <span class="topbar-kicker">WECHAT AUTOMATION</span>
-          <h2>{{ title }}</h2>
-        </div>
+        <h2>{{ title }}</h2>
         <div class="topbar-actions">
           <span class="env-badge">LOCAL</span>
           <button class="user-chip" type="button" @click="logout">
@@ -177,24 +174,17 @@ function logout() {
   box-shadow: inset 2px 0 #60a5fa;
 }
 
-.sidebar-status {
-  padding: 14px;
-  border: 1px solid rgba(148, 163, 184, 0.09);
-  border-radius: 12px;
-  background: rgba(148, 163, 184, 0.04);
-}
-
-.status-head {
+.sidebar-foot {
   display: flex;
   align-items: center;
-  color: #cbd5e1;
+  gap: 4px;
+  padding: 12px 14px;
+  color: #64748b;
   font-size: 12px;
 }
 
-.sidebar-status p {
-  margin: 7px 0 0 14px;
-  color: #475569;
-  font-size: 11px;
+.sidebar-foot .status-dot {
+  margin-right: 6px;
 }
 
 .workspace {
@@ -208,28 +198,22 @@ function logout() {
   top: 0;
   z-index: 15;
   display: flex;
-  min-height: 84px;
+  min-height: 68px;
   align-items: center;
   justify-content: space-between;
   gap: 24px;
-  padding: 0 34px;
+  padding: 0 32px;
   border-bottom: 1px solid rgba(226, 232, 240, 0.8);
-  background: rgba(243, 246, 251, 0.86);
-  backdrop-filter: blur(18px);
-}
-
-.topbar-kicker {
-  color: #3b82f6;
-  font-size: 11px;
-  font-weight: 750;
-  letter-spacing: 0.14em;
+  background: rgba(244, 246, 251, 0.88);
+  backdrop-filter: blur(16px);
 }
 
 .topbar h2 {
-  margin: 4px 0 0;
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: -0.03em;
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--ink);
 }
 
 .topbar-actions {
@@ -304,7 +288,7 @@ function logout() {
 }
 
 .content {
-  padding: 30px 34px 48px;
+  padding: 28px 32px 48px;
 }
 
 @media (max-width: 900px) {
@@ -316,7 +300,7 @@ function logout() {
 
   .brand-copy,
   .side-menu :deep(.el-menu-item span),
-  .sidebar-status {
+  .sidebar-foot {
     display: none;
   }
 
@@ -351,16 +335,15 @@ function logout() {
 
 @media (max-width: 560px) {
   .topbar {
-    min-height: 72px;
+    min-height: 60px;
   }
 
-  .topbar-kicker,
   .env-badge {
     display: none;
   }
 
   .content {
-    padding: 20px 14px 36px;
+    padding: 18px 14px 32px;
   }
 }
 </style>
