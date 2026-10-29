@@ -37,11 +37,15 @@ public class WebConfig implements WebMvcConfigurer {
                 .addResolver(new PathResourceResolver() {
                     @Override
                     protected Resource getResource(String resourcePath, Resource location) throws IOException {
-                        Resource requested = location.createRelative(resourcePath);
-                        if (requested.exists() && requested.isReadable()) {
-                            return requested;
+                        // 空路径 = 目录本身，不能当静态资源返回，否则读取目录会抛异常（表现为 500）
+                        if (!resourcePath.isBlank()) {
+                            Resource requested = location.createRelative(resourcePath);
+                            if (requested.exists() && requested.isReadable() && requested.isFile()) {
+                                return requested;
+                            }
                         }
-                        if (resourcePath.startsWith("api/") || resourcePath.startsWith("actuator/")) {
+                        if (resourcePath.startsWith("api/") || resourcePath.startsWith("actuator/")
+                                || resourcePath.startsWith("assets/")) {
                             return null;
                         }
                         Resource index = new ClassPathResource("static/index.html");
