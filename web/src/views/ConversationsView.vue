@@ -223,7 +223,7 @@ onMounted(load)
 }
 
 .search-input { width: min(360px, 48vw); }
-.total-label { margin-left: auto; color: #94a3b8; font-size: 10px; }
+.total-label { margin-left: auto; color: #94a3b8; font-size: 12px; }
 .conversation-table { min-height: 180px; padding: 0 20px; }
 .conversation-cell { display: flex; align-items: center; gap: 11px; cursor: pointer; }
 
@@ -236,21 +236,21 @@ onMounted(load)
   border-radius: 11px;
   color: #1d4ed8;
   background: #eff6ff;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 750;
 }
 
 .chat-avatar.group { color: #b45309; background: #fffbeb; }
 .chat-avatar.large { width: 44px; height: 44px; border-radius: 13px; }
 .conversation-cell strong, .conversation-cell small { display: block; }
-.conversation-cell strong { color: #1e293b; font-size: 12px; }
+.conversation-cell strong { color: #1e293b; font-size: 13px; }
 
 .conversation-cell small {
   max-width: 200px;
   overflow: hidden;
   margin-top: 3px;
   color: #94a3b8;
-  font-size: 9px;
+  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -260,12 +260,12 @@ onMounted(load)
   max-width: 430px;
   overflow: hidden;
   color: #64748b;
-  font-size: 11px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.open-link { color: #3b82f6; font-size: 10px; }
+.open-link { color: #3b82f6; font-size: 12px; }
 :deep(.el-table__row) { cursor: pointer; }
 .pagination { display: flex; justify-content: flex-end; padding: 18px 20px; border-top: 1px solid #f1f5f9; }
 .chat-drawer { display: flex; height: 100vh; flex-direction: column; background: #f8fafc; }
@@ -286,7 +286,7 @@ onMounted(load)
   overflow: hidden;
   margin: 4px 0 0;
   color: #94a3b8;
-  font-size: 9px;
+  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -304,7 +304,7 @@ onMounted(load)
   border-radius: 9px;
   color: #475569;
   background: #e2e8f0;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -318,7 +318,7 @@ onMounted(load)
   gap: 8px;
   margin-bottom: 5px;
   color: #94a3b8;
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .outbound .message-info { justify-content: flex-end; }
@@ -330,7 +330,7 @@ onMounted(load)
   color: #334155;
   background: #fff;
   box-shadow: 0 2px 9px rgba(15, 23, 42, 0.04);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.75;
   text-align: left;
   white-space: pre-wrap;
@@ -355,7 +355,7 @@ onMounted(load)
   font-size: 8px;
 }
 
-.error-text { margin-top: 5px; color: #dc2626; font-size: 9px; text-align: left; }
+.error-text { margin-top: 5px; color: #dc2626; font-size: 11px; text-align: left; }
 
 @media (max-width: 660px) {
   .toolbar { flex-wrap: wrap; }

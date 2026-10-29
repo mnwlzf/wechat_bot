@@ -150,7 +150,7 @@ function logout() {
 .brand-copy span {
   margin-top: 3px;
   color: #64748b;
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -188,13 +188,13 @@ function logout() {
   display: flex;
   align-items: center;
   color: #cbd5e1;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .sidebar-status p {
   margin: 7px 0 0 14px;
   color: #475569;
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .workspace {
@@ -220,7 +220,7 @@ function logout() {
 
 .topbar-kicker {
   color: #3b82f6;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 750;
   letter-spacing: 0.14em;
 }
@@ -244,7 +244,7 @@ function logout() {
   border-radius: 6px;
   color: #2563eb;
   background: #eff6ff;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 750;
   letter-spacing: 0.1em;
 }
@@ -274,7 +274,7 @@ function logout() {
   border-radius: 10px;
   color: #fff;
   background: linear-gradient(145deg, #0f172a, #334155);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
 }
 
@@ -289,13 +289,13 @@ function logout() {
 
 .user-copy strong {
   color: #334155;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .user-copy small {
   margin-top: 2px;
   color: #94a3b8;
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .user-chip > .el-icon {

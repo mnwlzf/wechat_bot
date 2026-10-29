@@ -5,6 +5,8 @@ import type {
   Conversation,
   Dashboard,
   HookStatus,
+  HookSession,
+  HookContact,
   DebugResult,
   LlmPolicyInput,
   Message,
@@ -70,6 +72,14 @@ export const adminApi = {
   },
   async conversations(params: { query?: string; page: number; size: number }) {
     const { data } = await http.get<PageResult<Conversation>>('/api/admin/conversations', { params })
+    return data
+  },
+  async sessions(limit = 200) {
+    const { data } = await http.get<HookSession[]>('/api/admin/wechat/sessions', { params: { limit } })
+    return data
+  },
+  async contacts(limit = 200) {
+    const { data } = await http.get<HookContact[]>('/api/admin/wechat/contacts', { params: { limit } })
     return data
   },
   async messages(conversationId: string, page = 0, size = 200) {

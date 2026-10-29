@@ -1,18 +1,21 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Refresh } from '@element-plus/icons-vue'
+import { ChatDotRound, Refresh, User } from '@element-plus/icons-vue'
 import { adminApi } from '@/api'
-import type { SettingsSnapshot } from '@/api/types'
+import type { ChatCandidate, SettingsSnapshot } from '@/api/types'
 import { getErrorMessage } from '@/api/client'
 
 const loading = ref(false)
+const loadingCandidates = ref(false)
 const savingChat = ref(false)
 const savingLlm = ref(false)
 const snapshot = ref<SettingsSnapshot | null>(null)
+const candidates = ref<ChatCandidate[]>([])
+const candidateHint = ref('')
 
 const chatForm = reactive({
-  allowedChatsText: '',
+  allowedChats: [] as string[],
   acceptAll: true,
   groupsEnabled: false,
 })
@@ -22,12 +25,48 @@ const llmForm = reactive({
   searchEnabled: true,
 })
 
+const chatDirty = computed(() => {
+  const saved = snapshot.value
+  if (!saved) return false
+  const savedChats = [...saved.allowedChats.value].sort().join(',')
+  const currentChats = [...chatForm.allowedChats].sort().join(',')
+  return (
+    savedChats !== currentChats ||
+    saved.acceptAll.value !== chatForm.acceptAll ||
+    saved.groupsEnabled.value !== chatForm.groupsEnabled
+  )
+})
+
+const llmDirty = computed(() => {
+  const saved = snapshot.value
+  if (!saved) return false
+  return (
+    saved.fallbackEnabled.value !== llmForm.fallbackEnabled ||
+    saved.searchEnabled.value !== llmForm.searchEnabled
+  )
+})
+
+const selectedRows = computed(() =>
+  chatForm.allowedChats.map((chatId) => {
+    const known = candidates.value.find((item) => item.chatId === chatId)
+    return {
+      chatId,
+      name: known?.name || chatId,
+      group: known ? known.group : chatId.endsWith('@chatroom'),
+      unknown: !known,
+    }
+  }),
+)
+
+const groupOptions = computed(() => candidates.value.filter((item) => item.group))
+const privateOptions = computed(() => candidates.value.filter((item) => !item.group))
+
 async function load() {
   loading.value = true
   try {
     const data = await adminApi.settings()
     snapshot.value = data
-    chatForm.allowedChatsText = data.allowedChats.value.join('\n')
+    chatForm.allowedChats = [...data.allowedChats.value]
     chatForm.acceptAll = data.acceptAll.value
     chatForm.groupsEnabled = data.groupsEnabled.value
     llmForm.fallbackEnabled = data.fallbackEnabled.value
@@ -39,17 +78,72 @@ async function load() {
   }
 }
 
+/** 会话候选：历史会话（后端库）+ 微信当前会话 + 联系人，任一来源可用即可。 */
+async function loadCandidates(notify = false) {
+  loadingCandidates.value = true
+  const merged = new Map<string, ChatCandidate>()
+
+  const push = (chatId: string, name: string, source: ChatCandidate['source']) => {
+    if (!chatId) return
+    const group = chatId.endsWith('@chatroom')
+    const existing = merged.get(chatId)
+    if (!existing) {
+      merged.set(chatId, { chatId, name: name || chatId, group, source })
+      return
+    }
+    if ((!existing.name || existing.name === chatId) && name) {
+      existing.name = name
+    }
+    if (source === 'contact') existing.source = 'contact'
+  }
+
+  try {
+    const conversations = await adminApi.conversations({ page: 0, size: 200 })
+    conversations.content.forEach((item) => push(item.chatId, item.chatName, 'conversation'))
+  } catch {
+    /* 后端会话库为空时忽略 */
+  }
+
+  let hookWarning = ''
+  try {
+    const sessions = await adminApi.sessions(200)
+    sessions.forEach((row) => push(row.username || '', row.username || '', 'session'))
+  } catch (error) {
+    hookWarning = getErrorMessage(error)
+  }
+  try {
+    const contacts = await adminApi.contacts(200)
+    contacts.forEach((row) => {
+      const name = row.remark || row.nick_name || row.alias || row.username || ''
+      push(row.username || '', name, 'contact')
+    })
+  } catch (error) {
+    hookWarning = hookWarning || getErrorMessage(error)
+  }
+
+  candidates.value = [...merged.values()].sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN'))
+  loadingCandidates.value = false
+
+  candidateHint.value = hookWarning
+    ? `已载入 ${candidates.value.length} 个历史会话；微信实时会话不可用（${hookWarning}）`
+    : `来自历史会话 ${candidates.value.length} 个`
+
+  if (notify) {
+    if (candidates.value.length) {
+      ElMessage.success(`已载入 ${candidates.value.length} 个候选会话`)
+    } else {
+      ElMessage.warning('没有拿到会话列表，可直接输入 wxid 或 @chatroom 后回车')
+    }
+  }
+}
+
 async function saveChat() {
   savingChat.value = true
   try {
-    const allowedChats = chatForm.allowedChatsText
-      .split(/[\n,]/)
-      .map((item) => item.trim())
-      .filter(Boolean)
     snapshot.value = await adminApi.updateWeChatPolicy({
       groupsEnabled: chatForm.groupsEnabled,
       acceptAll: chatForm.acceptAll,
-      allowedChats,
+      allowedChats: chatForm.allowedChats,
     })
     ElMessage.success('会话策略已生效，无需重启')
   } catch (error) {
@@ -74,11 +168,18 @@ async function saveLlm() {
   }
 }
 
+function removeChat(chatId: string) {
+  chatForm.allowedChats = chatForm.allowedChats.filter((item) => item !== chatId)
+}
+
 function sourceLabel(source?: string) {
   return source === 'db' ? '数据库' : '环境变量'
 }
 
-onMounted(load)
+onMounted(async () => {
+  await load()
+  await loadCandidates()
+})
 </script>
 
 <template>
@@ -86,42 +187,119 @@ onMounted(load)
     <div class="page-head">
       <div>
         <h1>运行策略</h1>
-        <p>这里的改动写入数据库并立即生效，不需要重启后端，也不需要改 .env。</p>
+        <p>改动写入数据库并立即生效，不需要重启后端，也不用改 .env。</p>
       </div>
-      <el-button :icon="Refresh" @click="load">刷新</el-button>
+      <div class="head-actions">
+        <el-button :icon="Refresh" @click="load">刷新</el-button>
+      </div>
     </div>
 
     <section class="surface-card">
       <div class="surface-card__head">
         <div>
           <h2>会话白名单</h2>
-          <p class="head-desc">每行一个 wxid 或 @chatroom；留空且开启“全量接收”时，所有私聊都会被回复。</p>
+          <p class="head-desc">只有名单内的会话才会被回复。留空且开启「全量接收」时，所有私聊都会被回复。</p>
         </div>
         <span class="count-badge">{{ snapshot ? sourceLabel(snapshot.allowedChats.source) : '—' }}</span>
       </div>
-      <div class="card-body">
-        <el-input
-          v-model="chatForm.allowedChatsText"
-          type="textarea"
-          :rows="6"
-          placeholder="wxid_friend&#10;49878296302@chatroom"
-        />
-        <div class="switch-row">
-          <div>
-            <strong>全量接收</strong>
-            <small>白名单为空时是否接收所有私聊</small>
-          </div>
-          <el-switch v-model="chatForm.acceptAll" />
+
+      <div class="surface-card__body">
+        <div class="picker-head">
+          <span class="hint">{{ candidateHint || '从会话列表选择，或直接粘贴 wxid / @chatroom 后回车' }}</span>
+          <el-button
+            size="small"
+            :loading="loadingCandidates"
+            :icon="Refresh"
+            @click="loadCandidates(true)"
+          >
+            载入微信会话
+          </el-button>
         </div>
-        <div class="switch-row">
-          <div>
-            <strong>处理群聊消息</strong>
-            <small>关闭时群消息直接忽略；开启后还需要命中唤醒词才会回复</small>
+
+        <el-select
+          v-model="chatForm.allowedChats"
+          class="picker"
+          multiple
+          filterable
+          allow-create
+          default-first-option
+          collapse-tags
+          collapse-tags-tooltip
+          :reserve-keyword="false"
+          placeholder="搜索昵称、备注或 wxid"
+        >
+          <el-option-group v-if="groupOptions.length" label="群聊">
+            <el-option
+              v-for="item in groupOptions"
+              :key="item.chatId"
+              :label="item.name"
+              :value="item.chatId"
+            >
+              <div class="option-row">
+                <span class="option-name">{{ item.name }}</span>
+                <span v-if="item.name !== item.chatId" class="option-id mono">{{ item.chatId }}</span>
+              </div>
+            </el-option>
+          </el-option-group>
+          <el-option-group v-if="privateOptions.length" label="好友与私聊">
+            <el-option
+              v-for="item in privateOptions"
+              :key="item.chatId"
+              :label="item.name"
+              :value="item.chatId"
+            >
+              <div class="option-row">
+                <span class="option-name">{{ item.name }}</span>
+                <span v-if="item.name !== item.chatId" class="option-id mono">{{ item.chatId }}</span>
+              </div>
+            </el-option>
+          </el-option-group>
+        </el-select>
+
+        <ul v-if="selectedRows.length" class="chat-list">
+          <li v-for="row in selectedRows" :key="row.chatId" class="chat-item">
+            <span class="chat-icon">
+              <el-icon><component :is="row.group ? ChatDotRound : User" /></el-icon>
+            </span>
+            <span class="chat-copy">
+              <strong>{{ row.name }}</strong>
+              <span v-if="row.name !== row.chatId" class="mono chat-id">{{ row.chatId }}</span>
+            </span>
+            <el-tag :type="row.group ? 'warning' : 'info'" effect="plain" size="small">
+              {{ row.group ? '群聊' : '私聊' }}
+            </el-tag>
+            <el-tag v-if="row.unknown" type="info" effect="plain" size="small">未识别</el-tag>
+            <el-button text type="danger" size="small" @click="removeChat(row.chatId)">移除</el-button>
+          </li>
+        </ul>
+        <div v-else class="chat-empty hint">还没有白名单条目</div>
+
+        <div class="settings-block">
+          <div class="setting-row">
+            <div>
+              <strong>全量接收私聊</strong>
+              <small>白名单为空时，是否接收所有私聊消息</small>
+            </div>
+            <div class="setting-row__control">
+              <el-switch v-model="chatForm.acceptAll" />
+            </div>
           </div>
-          <el-switch v-model="chatForm.groupsEnabled" />
+          <div class="setting-row">
+            <div>
+              <strong>处理群聊消息</strong>
+              <small>关闭时群消息直接忽略；开启后还要命中唤醒词才会回复</small>
+            </div>
+            <div class="setting-row__control">
+              <el-switch v-model="chatForm.groupsEnabled" />
+            </div>
+          </div>
         </div>
+
         <div class="card-actions">
-          <el-button type="primary" :loading="savingChat" @click="saveChat">保存并生效</el-button>
+          <span v-if="chatDirty" class="dirty-dot">有未保存的改动</span>
+          <el-button type="primary" :disabled="!chatDirty" :loading="savingChat" @click="saveChat">
+            保存并生效
+          </el-button>
         </div>
       </div>
     </section>
@@ -130,27 +308,36 @@ onMounted(load)
       <div class="surface-card__head">
         <div>
           <h2>模型链路</h2>
-          <p class="head-desc">关闭备用链路后，只使用主 Provider 的主/备双 Key 兜底，不再切换到下一个 Provider。</p>
+          <p class="head-desc">关闭备用链路后，只使用主 Provider 的主 / 备双 Key 兜底，不再切换到下一个 Provider。</p>
         </div>
         <span class="count-badge">{{ snapshot ? sourceLabel(snapshot.fallbackEnabled.source) : '—' }}</span>
       </div>
-      <div class="card-body">
-        <div class="switch-row">
+
+      <div class="surface-card__body">
+        <div class="setting-row">
           <div>
-            <strong>启用备用链路（多 Provider 回退）</strong>
-            <small>开启：主 Provider 主备 Key 都失败后，按 priority 继续尝试下一个 Provider</small>
+            <strong>启用备用链路</strong>
+            <small>主 Provider 主备 Key 都失败后，按优先级继续尝试下一个 Provider</small>
           </div>
-          <el-switch v-model="llmForm.fallbackEnabled" />
+          <div class="setting-row__control">
+            <el-switch v-model="llmForm.fallbackEnabled" />
+          </div>
         </div>
-        <div class="switch-row">
+        <div class="setting-row">
           <div>
             <strong>联网搜索</strong>
-            <small>需要 DeepSeek 官方 Key（LLM_SEARCH_API_KEY 或在模型配置里填）</small>
+            <small>需要 DeepSeek 官方 Key（LLM_SEARCH_API_KEY 或在模型配置里填写）</small>
           </div>
-          <el-switch v-model="llmForm.searchEnabled" />
+          <div class="setting-row__control">
+            <el-switch v-model="llmForm.searchEnabled" />
+          </div>
         </div>
+
         <div class="card-actions">
-          <el-button type="primary" :loading="savingLlm" @click="saveLlm">保存并生效</el-button>
+          <span v-if="llmDirty" class="dirty-dot">有未保存的改动</span>
+          <el-button type="primary" :disabled="!llmDirty" :loading="savingLlm" @click="saveLlm">
+            保存并生效
+          </el-button>
         </div>
       </div>
     </section>
@@ -158,74 +345,133 @@ onMounted(load)
 </template>
 
 <style scoped>
-.page-head {
+.picker-head {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 18px;
+  gap: 12px;
+  margin-bottom: 10px;
 }
 
-.page-head h1 {
-  margin: 0;
-  font-size: 19px;
+.picker {
+  width: 100%;
 }
 
-.page-head p {
-  margin: 6px 0 0;
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.head-desc {
-  margin: 4px 0 0;
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.count-badge {
-  padding: 5px 9px;
-  border-radius: 7px;
-  color: #64748b;
-  background: #f1f5f9;
-  font-size: 9px;
-  font-weight: 650;
-  letter-spacing: 0.06em;
-}
-
-.card-body {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 0 20px 20px;
-}
-
-.switch-row {
+.option-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 12px 14px;
-  border: 1px solid #eef2f7;
-  border-radius: 11px;
-  background: #fbfdff;
 }
 
-.switch-row strong {
-  display: block;
-  color: #1e293b;
-  font-size: 12px;
+.option-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.switch-row small {
-  display: block;
-  margin-top: 4px;
-  color: #94a3b8;
-  font-size: 10px;
+.option-id {
+  color: var(--muted-soft);
+  font-size: 11px;
+}
+
+.chat-list {
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chat-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  background: #fbfcfe;
+}
+
+.chat-icon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 9px;
+  color: var(--brand-deep);
+  background: #eff6ff;
+}
+
+.chat-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chat-copy strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-md);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.chat-id {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted-soft);
+  font-size: 11px;
+}
+
+.chat-empty {
+  margin-top: 14px;
+  padding: 18px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-sm);
+  text-align: center;
+}
+
+.settings-block {
+  margin-top: 22px;
 }
 
 .card-actions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.dirty-dot {
+  color: var(--warning);
+  font-size: var(--fs-xs);
+}
+
+@media (max-width: 680px) {
+  .picker-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .chat-item {
+    flex-wrap: wrap;
+  }
+
+  .card-actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .card-actions .el-button {
+    width: 100%;
+  }
 }
 </style>

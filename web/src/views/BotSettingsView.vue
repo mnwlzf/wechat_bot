@@ -299,7 +299,7 @@ onMounted(load)
 
 .bot-kicker {
   color: #60a5fa;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 750;
   letter-spacing: 0.15em;
 }
@@ -314,7 +314,7 @@ onMounted(load)
 .bot-card > p {
   margin: 0;
   color: #8192ad;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.7;
 }
 
@@ -324,7 +324,7 @@ onMounted(load)
   gap: 8px;
   margin-top: 18px;
   color: #86efac;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .state-dot {
@@ -355,7 +355,7 @@ onMounted(load)
   justify-content: space-between;
   gap: 14px;
   padding: 8px 0;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .bot-card dt { color: #64748b; }
@@ -371,7 +371,7 @@ onMounted(load)
   gap: 8px;
   margin-bottom: 12px;
   color: #334155;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .health-head .el-icon { color: #3b82f6; }
@@ -382,7 +382,7 @@ onMounted(load)
   justify-content: space-between;
   padding: 9px 0;
   color: #64748b;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .settings-card {
@@ -425,7 +425,7 @@ onMounted(load)
 .section-title p {
   margin: 0;
   color: #94a3b8;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .form-grid {
@@ -447,13 +447,13 @@ onMounted(load)
 
 .switch-field span {
   color: #64748b;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .field-hint {
   margin-top: 5px;
   color: #94a3b8;
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.5;
 }
 
@@ -482,13 +482,13 @@ onMounted(load)
 
 .toggle-card strong {
   color: #334155;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .toggle-card span {
   margin-top: 4px;
   color: #94a3b8;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .prompt-block {
@@ -509,7 +509,7 @@ onMounted(load)
 
 .form-footer span {
   color: #94a3b8;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 :deep(.el-input-number) {

@@ -28,6 +28,29 @@ export interface WeChatPolicyInput {
   allowedChats: string[]
 }
 
+/** 微信 Hook 返回的原始会话行（字段名取决于客户端库，可能缺失） */
+export interface HookSession {
+  username?: string
+  sort_timestamp?: number
+  last_timestamp?: number
+  unread_count?: number
+}
+
+/** 微信 Hook 返回的原始联系人行 */
+export interface HookContact {
+  username?: string
+  remark?: string
+  nick_name?: string
+  alias?: string
+}
+
+export interface ChatCandidate {
+  chatId: string
+  name: string
+  group: boolean
+  source: 'conversation' | 'session' | 'contact'
+}
+
 export interface LlmPolicyInput {
   fallbackEnabled: boolean
   searchEnabled: boolean

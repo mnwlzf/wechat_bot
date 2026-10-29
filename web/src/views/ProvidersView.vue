@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
-import dayjs from 'dayjs'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { Connection, Delete, EditPen, Plus, Refresh } from '@element-plus/icons-vue'
 import { adminApi } from '@/api'
@@ -16,6 +15,11 @@ const formRef = ref<FormInstance>()
 const testingId = ref<string | null>(null)
 const testResult = ref<ProviderTestResult | null>(null)
 const testDialogVisible = ref(false)
+const clearBackupKey = ref(false)
+
+const editingProvider = computed(
+  () => providers.value.find((item) => item.id === editingId.value) ?? null,
+)
 
 const emptyForm = (): ProviderInput => ({
   name: '',
@@ -59,12 +63,14 @@ async function load() {
 
 function openCreate() {
   editingId.value = null
+  clearBackupKey.value = false
   Object.assign(form, emptyForm())
   dialogVisible.value = true
 }
 
 function openEdit(provider: Provider) {
   editingId.value = provider.id
+  clearBackupKey.value = false
   Object.assign(form, {
     name: provider.name,
     baseUrl: provider.baseUrl,
@@ -99,7 +105,7 @@ async function submit() {
     const payload: ProviderInput = {
       ...form,
       apiKey: form.apiKey?.trim() || undefined,
-      backupApiKey: form.backupApiKey?.trim() || undefined,
+      backupApiKey: clearBackupKey.value ? '' : form.backupApiKey?.trim() || undefined,
     }
     if (editingId.value) {
       await adminApi.updateProvider(editingId.value, payload)
@@ -146,10 +152,6 @@ async function test(provider: Provider) {
   }
 }
 
-function formatTime(value: string) {
-  return dayjs(value).format('YYYY-MM-DD HH:mm')
-}
-
 onMounted(load)
 </script>
 
@@ -184,40 +186,43 @@ onMounted(load)
       </div>
       <div class="table-wrap" v-loading="loading">
         <el-table v-if="providers.length" :data="providers" style="width: 100%">
-          <el-table-column label="提供方" min-width="170">
+          <el-table-column label="提供方" min-width="230">
             <template #default="{ row }">
               <div class="provider-cell">
                 <span class="provider-logo">{{ row.name.slice(0, 1).toUpperCase() }}</span>
-                <div>
+                <div class="provider-meta">
                   <strong>{{ row.name }}</strong>
-                  <small>
-                    {{ row.apiKeyHint || '未设置 Key' }}
-                    <span v-if="row.hasBackupApiKey"> · 备用 {{ row.backupApiKeyHint }}</span>
-                    <span v-else> · 无备用 Key</span>
-                    <span v-if="row.webSearchEnabled"> · 联网</span>
-                  </small>
+                  <small class="mono">{{ row.apiKeyHint || '未设置 Key' }}</small>
+                  <div class="key-tags">
+                    <el-tag v-if="row.hasBackupApiKey" size="small" effect="plain" type="success">
+                      备用 Key
+                    </el-tag>
+                    <el-tag v-else size="small" effect="plain" type="info">单 Key</el-tag>
+                    <el-tag v-if="row.webSearchEnabled" size="small" effect="plain" type="primary">
+                      联网
+                    </el-tag>
+                  </div>
                 </div>
               </div>
             </template>
           </el-table-column>
-          <el-table-column prop="model" label="模型" min-width="150">
-            <template #default="{ row }"><span class="model-chip">{{ row.model }}</span></template>
-          </el-table-column>
-          <el-table-column prop="baseUrl" label="Base URL" min-width="260" show-overflow-tooltip>
-            <template #default="{ row }"><span class="mono url-text">{{ row.baseUrl }}</span></template>
-          </el-table-column>
-          <el-table-column label="状态" width="92">
+          <el-table-column label="模型 / 接口" min-width="260">
             <template #default="{ row }">
-              <el-tag :type="row.enabled ? 'success' : 'info'" effect="light" size="small">
-                {{ row.enabled ? '启用' : '停用' }}
-              </el-tag>
+              <div class="model-cell">
+                <span class="model-chip">{{ row.model }}</span>
+                <span class="mono url-text">{{ row.baseUrl }}</span>
+              </div>
             </template>
           </el-table-column>
-          <el-table-column prop="priority" label="优先级" width="82" align="center" />
-          <el-table-column label="更新时间" width="144">
-            <template #default="{ row }">{{ formatTime(row.updatedAt) }}</template>
+          <el-table-column label="状态" width="104">
+            <template #default="{ row }">
+              <span class="state" :class="{ off: !row.enabled }">
+                <i class="state-dot"></i>{{ row.enabled ? '启用' : '停用' }}
+              </span>
+            </template>
           </el-table-column>
-          <el-table-column label="操作" width="210" fixed="right">
+          <el-table-column prop="priority" label="优先级" width="92" align="center" />
+          <el-table-column label="操作" width="196" fixed="right">
             <template #default="{ row }">
               <el-button text type="primary" size="small" :loading="testingId === row.id" @click="test(row)">
                 测试
@@ -247,53 +252,98 @@ onMounted(load)
         </el-button>
       </div>
       <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
-        <div class="form-grid">
-          <el-form-item label="名称" prop="name">
-            <el-input v-model="form.name" placeholder="例如 DeepSeek 主模型" />
+        <div class="form-section">
+          <div class="form-section__title">基础信息</div>
+          <div class="form-grid">
+            <el-form-item label="名称" prop="name">
+              <el-input v-model="form.name" placeholder="例如 DeepSeek 主模型" />
+            </el-form-item>
+            <el-form-item label="模型 ID" prop="model">
+              <el-input v-model="form.model" placeholder="deepseek-chat" />
+            </el-form-item>
+          </div>
+          <el-form-item label="Base URL" prop="baseUrl">
+            <el-input v-model="form.baseUrl" placeholder="https://api.deepseek.com/v1" />
+            <div class="field-hint">需要包含版本路径，后端会拼接 <code>/chat/completions</code>。</div>
           </el-form-item>
-          <el-form-item label="模型 ID" prop="model">
-            <el-input v-model="form.model" placeholder="deepseek-chat" />
+          <div class="form-grid three">
+            <el-form-item label="启用">
+              <el-switch v-model="form.enabled" />
+            </el-form-item>
+            <el-form-item label="优先级">
+              <el-input-number v-model="form.priority" :min="0" :max="10000" controls-position="right" />
+            </el-form-item>
+            <el-form-item label="超时（秒）">
+              <el-input-number v-model="form.timeoutSeconds" :min="5" :max="300" controls-position="right" />
+            </el-form-item>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section__title">
+            密钥
+            <small>主 Key 失效时自动切换到备用 Key</small>
+          </div>
+          <el-form-item label="主 API Key">
+            <el-input
+              v-model="form.apiKey"
+              type="password"
+              show-password
+              autocomplete="new-password"
+              :placeholder="editingId ? '留空表示不修改现有 Key' : 'sk-...'"
+            />
+            <div class="field-hint">AES-GCM 加密后落库，不会回传到前端。</div>
+          </el-form-item>
+          <el-form-item label="备用 API Key">
+            <el-input
+              v-model="form.backupApiKey"
+              type="password"
+              show-password
+              autocomplete="new-password"
+              :disabled="clearBackupKey"
+              :placeholder="clearBackupKey ? '将清除现有备用 Key' : editingId ? '留空表示保持现有备用 Key' : '可选，sk-...'"
+            />
+            <div class="key-status">
+              <span v-if="editingProvider?.hasBackupApiKey" class="key-status__text">
+                当前备用 Key：<span class="mono">{{ editingProvider.backupApiKeyHint }}</span>
+              </span>
+              <span v-else class="key-status__text muted">当前未配置备用 Key</span>
+              <el-button
+                v-if="editingProvider?.hasBackupApiKey && !clearBackupKey"
+                text
+                type="danger"
+                size="small"
+                @click="clearBackupKey = true; form.backupApiKey = ''"
+              >
+                清除备用 Key
+              </el-button>
+              <el-button
+                v-else-if="clearBackupKey"
+                text
+                size="small"
+                @click="clearBackupKey = false"
+              >
+                撤销
+              </el-button>
+            </div>
+            <div class="field-hint">401/402/403 立即切换；429/5xx 先重试一次再切换。</div>
           </el-form-item>
         </div>
-        <el-form-item label="Base URL" prop="baseUrl">
-          <el-input v-model="form.baseUrl" placeholder="https://api.deepseek.com/v1" />
-        </el-form-item>
-        <el-form-item label="API Key">
-          <el-input
-            v-model="form.apiKey"
-            type="password"
-            show-password
-            :placeholder="editingId ? '留空表示不修改现有 Key' : 'sk-...'"
-          />
-          <div class="field-hint">Key 使用 AES-GCM 加密后落库，不会返回前端。</div>
-        </el-form-item>
-        <el-form-item label="备用 API Key（主 Key 失效时自动切换）">
-          <el-input
-            v-model="form.backupApiKey"
-            type="password"
-            show-password
-            :placeholder="editingId ? '留空表示保持现有备用 Key' : '可选，sk-...'"
-          />
-          <div class="field-hint">
-            主 Key 返回 401/402/403 立即切换；429/5xx 先重试一次再切换。留空表示不配置备用通道。
+
+        <div class="form-section">
+          <div class="form-section__title">
+            联网搜索
+            <small>按关键词触发 DeepSeek 官方搜索</small>
           </div>
-        </el-form-item>
-        <el-form-item label="联网搜索">
-          <el-switch v-model="form.webSearchEnabled" />
-          <div class="field-hint">
-            开启后按关键词触发 DeepSeek 官方搜索（/v1/tools/search），需要官方 Key 才能生效。
+          <div class="setting-row">
+            <div>
+              <strong>启用官方搜索</strong>
+              <small>使用 /v1/tools/search，需要 DeepSeek 官方 Key 才能生效</small>
+            </div>
+            <div class="setting-row__control">
+              <el-switch v-model="form.webSearchEnabled" />
+            </div>
           </div>
-        </el-form-item>
-        <div class="form-grid three">
-          <el-form-item label="启用">
-            <el-switch v-model="form.enabled" />
-          </el-form-item>
-          <el-form-item label="优先级">
-            <el-input-number v-model="form.priority" :min="0" :max="10000" controls-position="right" />
-          </el-form-item>
-          <el-form-item label="超时（秒）">
-            <el-input-number v-model="form.timeoutSeconds" :min="5" :max="300" controls-position="right" />
-          </el-form-item>
         </div>
       </el-form>
       <template #footer>
@@ -317,22 +367,6 @@ onMounted(load)
 </template>
 
 <style scoped>
-.head-actions {
-  display: flex;
-  gap: 9px;
-}
-
-.notice-bar {
-  display: flex;
-  align-items: center;
-  gap: 13px;
-  margin-bottom: 18px;
-  padding: 14px 16px;
-  border: 1px solid #dbeafe;
-  border-radius: 13px;
-  background: #eff6ff;
-}
-
 .notice-icon {
   display: grid;
   width: 34px;
@@ -344,132 +378,130 @@ onMounted(load)
   background: #dbeafe;
 }
 
-.notice-bar strong,
-.notice-bar span {
-  display: block;
-}
-
-.notice-bar strong {
-  color: #1e3a8a;
-  font-size: 12px;
-}
-
-.notice-bar span {
-  margin-top: 3px;
-  color: #64748b;
-  font-size: 11px;
-}
-
-.notice-bar code {
-  color: #1d4ed8;
-}
-
-.head-desc {
-  margin: 4px 0 0;
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.count-badge {
-  padding: 5px 9px;
-  border-radius: 7px;
-  color: #64748b;
-  background: #f1f5f9;
-  font-size: 9px;
-  font-weight: 650;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
 .table-wrap {
-  min-height: 150px;
-  padding: 0 20px 20px;
+  min-height: 140px;
 }
 
 .provider-cell {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  align-items: flex-start;
+  gap: 12px;
 }
 
 .provider-logo {
   display: grid;
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
   flex: 0 0 auto;
   place-items: center;
   border-radius: 10px;
   color: #1d4ed8;
   background: linear-gradient(145deg, #eff6ff, #dbeafe);
-  font-size: 12px;
-  font-weight: 800;
+  font-size: 13px;
+  font-weight: 700;
 }
 
-.provider-cell strong,
-.provider-cell small {
+.provider-meta {
+  min-width: 0;
+}
+
+.provider-meta strong {
   display: block;
+  color: var(--ink);
+  font-size: var(--fs-md);
+  font-weight: 600;
 }
 
-.provider-cell strong {
-  color: #1e293b;
-  font-size: 12px;
+.provider-meta small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted-soft);
+  font-size: 11px;
 }
 
-.provider-cell small {
-  margin-top: 3px;
-  color: #94a3b8;
-  font-size: 9px;
+.key-tags {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.model-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .model-chip {
-  padding: 4px 7px;
+  align-self: flex-start;
+  padding: 3px 8px;
   border-radius: 6px;
   color: #475569;
   background: #f1f5f9;
-  font-size: 10px;
+  font-size: var(--fs-xs);
+  font-weight: 550;
 }
 
 .url-text {
-  color: #64748b;
-  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted-soft);
+  font-size: 11px;
+}
+
+.state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--success);
+  font-size: var(--fs-xs);
+  font-weight: 550;
+}
+
+.state.off {
+  color: var(--muted-soft);
+}
+
+.state-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
 }
 
 .preset-row {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 7px;
-  margin-bottom: 20px;
+  gap: 8px;
+  margin-bottom: 4px;
   padding-bottom: 16px;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid var(--line-soft);
 }
 
 .preset-row > span {
-  margin-right: 3px;
-  color: #94a3b8;
-  font-size: 11px;
+  margin-right: 2px;
+  color: var(--muted-soft);
+  font-size: var(--fs-xs);
 }
 
-.form-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 14px;
+.key-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
 }
 
-.form-grid.three {
-  grid-template-columns: 0.8fr 1fr 1fr;
-}
-
-.field-hint {
-  margin-top: 5px;
-  color: #94a3b8;
-  font-size: 10px;
+.key-status__text {
+  color: var(--muted);
+  font-size: var(--fs-xs);
 }
 
 .test-result {
   padding: 18px;
   border: 1px solid #bbf7d0;
-  border-radius: 13px;
+  border-radius: var(--radius);
   background: #f0fdf4;
 }
 
@@ -483,7 +515,8 @@ onMounted(load)
   align-items: center;
   gap: 8px;
   color: #166534;
-  font-size: 12px;
+  font-size: var(--fs-sm);
+  font-weight: 600;
 }
 
 .failed .test-head {
@@ -492,8 +525,9 @@ onMounted(load)
 
 .test-head span:last-child {
   margin-left: auto;
-  color: #64748b;
-  font-size: 10px;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-weight: 400;
 }
 
 .test-dot {
@@ -510,21 +544,21 @@ onMounted(load)
 .test-result p {
   overflow-wrap: anywhere;
   margin: 14px 0;
-  color: #334155;
-  font-size: 12px;
-  line-height: 1.8;
+  color: var(--ink-soft);
+  font-size: var(--fs-sm);
+  line-height: 1.75;
   white-space: pre-wrap;
 }
 
 .test-result small {
-  color: #94a3b8;
-  font-size: 10px;
+  color: var(--muted-soft);
+  font-size: var(--fs-xs);
 }
 
 @media (max-width: 680px) {
-  .form-grid,
-  .form-grid.three {
-    grid-template-columns: 1fr;
+  .key-status {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 </style>

@@ -240,7 +240,7 @@ onMounted(load)
   align-items: center;
   gap: 9px;
   color: #93c5fd;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 750;
   letter-spacing: 0.16em;
 }
@@ -331,7 +331,7 @@ onMounted(load)
   border-radius: 8px;
   color: #cbd5e1;
   background: rgba(15, 23, 42, 0.64);
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: 0.03em;
   backdrop-filter: blur(10px);
 }
@@ -378,7 +378,7 @@ onMounted(load)
 
 .stat-label {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .stat-value {
@@ -406,7 +406,7 @@ onMounted(load)
 .surface-card__head p {
   margin: 4px 0 0;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .message-preview {
@@ -419,7 +419,7 @@ onMounted(load)
 .message-meta {
   margin-top: 3px;
   color: #94a3b8;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .direction-pill {
@@ -428,7 +428,7 @@ onMounted(load)
   height: 24px;
   place-items: center;
   border-radius: 7px;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .direction-pill.inbound { color: #2563eb; background: #eff6ff; }
@@ -455,7 +455,7 @@ onMounted(load)
   padding: 13px 0;
   border-bottom: 1px solid #f1f5f9;
   color: #475569;
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .check-row:last-child {
@@ -477,7 +477,7 @@ onMounted(load)
 
 .quick-card span {
   color: #60a5fa;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 750;
   letter-spacing: 0.14em;
 }
@@ -490,7 +490,7 @@ onMounted(load)
 .quick-card p {
   margin: 0;
   color: #8192ad;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.7;
 }
 

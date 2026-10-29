@@ -138,7 +138,7 @@ async function submit() {
 .eyebrow,
 .panel-eyebrow {
   color: #60a5fa;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.17em;
 }
@@ -193,7 +193,7 @@ async function submit() {
 
 .feature span {
   color: #8497b3;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
 }
 
@@ -253,7 +253,7 @@ async function submit() {
   border-radius: 5px;
   background: #eff6ff;
   color: #1d4ed8;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .login-button {
@@ -265,14 +265,14 @@ async function submit() {
 .login-note {
   margin-top: 22px;
   color: #94a3b8;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.6;
 }
 
 .copyright {
   margin: 28px 0 0;
   color: #94a3b8;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 @media (max-width: 980px) {
