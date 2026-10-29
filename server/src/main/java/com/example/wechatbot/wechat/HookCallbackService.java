@@ -1,0 +1,195 @@
+package com.example.wechatbot.wechat;
+
+import com.example.wechatbot.config.WeChatHookProperties;
+import com.example.wechatbot.domain.ChatType;
+import com.example.wechatbot.service.InboxService;
+import com.example.wechatbot.service.RuntimeSettingsService;
+import com.example.wechatbot.web.dto.AgentDtos;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+
+/**
+ * Consumes the JSON events that the WeChat hook pushes to
+ * {@code CallBackURL=...} (see {@code WeChatHookInboxPoller} for the polling
+ * alternative). The callback path keeps working when the hook cannot report
+ * {@code IsLogin}, because it does not depend on the SQLite database handles.
+ */
+@Service
+public class HookCallbackService {
+    private static final Logger log = LoggerFactory.getLogger(HookCallbackService.class);
+
+    static final int EVENT_MESSAGE = 1001;
+    static final int TYPE_TEXT = 1;
+
+    private final WeChatHookProperties properties;
+    private final RuntimeSettingsService settings;
+    private final InboxService inboxService;
+
+    public HookCallbackService(WeChatHookProperties properties, RuntimeSettingsService settings,
+                               InboxService inboxService) {
+        this.properties = properties;
+        this.settings = settings;
+        this.inboxService = inboxService;
+    }
+
+    public Result handle(Map<String, Object> payload) {
+        if (payload == null || payload.isEmpty()) {
+            return Result.ignored("空回调报文", null, null);
+        }
+        if (!properties.isCallbackEnabled()) {
+            return Result.ignored("回调接收未启用", null, null);
+        }
+        int eventType = intValue(payload.get("event_type"));
+        if (eventType != EVENT_MESSAGE) {
+            return Result.ignored("忽略事件类型 " + eventType, null, null);
+        }
+        int type = intValue(payload.get("type"));
+        if (type != TYPE_TEXT) {
+            return Result.ignored("忽略消息类型 " + type, null, null);
+        }
+        String content = text(payload.get("content"));
+        if (content.isBlank()) {
+            return Result.ignored("空消息内容", null, null);
+        }
+
+        String roomId = text(payload.get("roomid"));
+        String wxid = text(payload.get("wxid"));
+        String chatId = roomId.isBlank() ? wxid : roomId;
+        if (chatId.isBlank()) {
+            return Result.ignored("缺少会话 ID", null, null);
+        }
+        String sender = text(payload.get("sender"));
+        if (sender.isBlank()) {
+            sender = chatId;
+        }
+
+        String selfWxid = properties.getSelfWxid();
+        if (!selfWxid.isBlank() && sender.equalsIgnoreCase(selfWxid)) {
+            return Result.ignored("忽略账号自身消息", chatId, null);
+        }
+
+        boolean group = chatId.endsWith("@chatroom");
+        if (group && !settings.groupsEnabled()) {
+            return Result.ignored("群聊回调未启用", chatId, null);
+        }
+        List<String> allowed = settings.allowedChats();
+        if (!allowed.isEmpty() && !allowed.contains(chatId)) {
+            return Result.ignored("会话不在白名单", chatId, null);
+        }
+        if (allowed.isEmpty() && !settings.acceptAll()) {
+            return Result.ignored("未配置会话白名单且未开启全量接收", chatId, null);
+        }
+
+        String eventId = eventId(payload, chatId);
+        AgentDtos.AgentEventRequest event = new AgentDtos.AgentEventRequest(
+                eventId,
+                null,
+                "message",
+                truncate(chatId, 180),
+                truncate(chatId, 180),
+                group ? ChatType.GROUP : ChatType.PRIVATE,
+                truncate(sender, 180),
+                truncate(sender, 180),
+                truncate(content.trim(), 10_000),
+                timestamp(payload.get("timestamp")),
+                false
+        );
+
+        AgentDtos.EventAccepted accepted = inboxService.accept(event);
+        if (!"ACCEPTED".equalsIgnoreCase(accepted.status())) {
+            log.debug("Hook 回调事件未进入回复流程: chat={} status={} reason={}",
+                    chatId, accepted.status(), accepted.reason());
+        } else {
+            log.info("Hook 回调收到消息，chat={} sender={} eventId={}", chatId, sender, eventId);
+        }
+        return new Result(accepted.status(), accepted.reason(), chatId, eventId);
+    }
+
+    private String eventId(Map<String, Object> payload, String chatId) {
+        long msgId = longValue(payload.get("msgid"));
+        if (msgId > 0) {
+            return "hook_" + msgId;
+        }
+        String raw = chatId + ":" + text(payload.get("sender")) + ":" + text(payload.get("timestamp"))
+                + ":" + text(payload.get("content"));
+        return "hook_" + sha256Short(raw);
+    }
+
+    private static String sha256Short(String value) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
+            StringBuilder builder = new StringBuilder(40);
+            for (int i = 0; i < 20; i++) {
+                builder.append(String.format(Locale.ROOT, "%02x", digest[i]));
+            }
+            return builder.toString();
+        } catch (Exception ex) {
+            throw new IllegalStateException(ex);
+        }
+    }
+
+    private static OffsetDateTime timestamp(Object value) {
+        long timestamp = longValue(value);
+        if (timestamp > 10_000_000_000L) {
+            timestamp /= 1000;
+        }
+        if (timestamp <= 0) {
+            return OffsetDateTime.now(ZoneOffset.UTC);
+        }
+        return OffsetDateTime.ofInstant(Instant.ofEpochSecond(timestamp), ZoneOffset.UTC);
+    }
+
+    private static String text(Object value) {
+        return value == null ? "" : String.valueOf(value).trim();
+    }
+
+    private static long longValue(Object value) {
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        try {
+            return Long.parseLong(text(value));
+        } catch (NumberFormatException ex) {
+            return 0L;
+        }
+    }
+
+    private static int intValue(Object value) {
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        try {
+            return Integer.parseInt(text(value));
+        } catch (NumberFormatException ex) {
+            return 0;
+        }
+    }
+
+    private static String truncate(String value, int maxUnits) {
+        String safe = value == null ? "" : value;
+        if (safe.length() <= maxUnits) {
+            return safe;
+        }
+        int end = maxUnits;
+        if (Character.isHighSurrogate(safe.charAt(end - 1)) && end < safe.length()) {
+            end--;
+        }
+        return safe.substring(0, end);
+    }
+
+    public record Result(String status, String reason, String chatId, String eventId) {
+        static Result ignored(String reason, String chatId, String eventId) {
+            return new Result("IGNORED", reason, chatId, eventId);
+        }
+    }
+}

@@ -27,5 +27,12 @@ public interface OutboxMessageRepository extends JpaRepository<OutboxMessage, UU
             @Param("now") OffsetDateTime now,
             Pageable pageable);
 
+    @Query("""
+            select distinct o.chatId from OutboxMessage o
+            where o.status = :status and o.leaseUntil >= :now
+            """)
+    List<String> findActiveLeaseChatIds(@Param("status") OutboxStatus status,
+                                        @Param("now") OffsetDateTime now);
+
     long countByStatus(OutboxStatus status);
 }

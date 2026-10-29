@@ -74,6 +74,10 @@ public class WeChatHookInboxPoller {
             return;
         }
         try {
+            if (properties.isCallbackEnabled()) {
+                // 回调模式由 HookCallbackController 接收消息，避免与数据库轮询重复投递
+                return;
+            }
             List<String> allowedChats = properties.allowedChatIds();
             if (allowedChats.isEmpty()) {
                 logErrorThrottled("WECHAT_ALLOWED_CHATS 未配置，Hook 收消息轮询未启动");

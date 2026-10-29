@@ -23,6 +23,24 @@ Copy-Item .env.example .env
 
 访问 `http://localhost:8080`。Java 进程会直接轮询微信 Hook 并消费发件箱。
 
+## 低存在感启动（伪装层配套）
+
+```powershell
+# 先打包
+mvn -f server/pom.xml -DskipTests package
+
+# 后台启动：无控制台窗口、随机延迟 0~90 秒、日志写到 %LOCALAPPDATA%\WXSync\logs
+.\scripts\start-stealth.ps1
+
+# 停止 / 前台排错 / 注册登录自启（带 2 分钟随机延迟）
+.\scripts\start-stealth.ps1 -Stop
+.\scripts\start-stealth.ps1 -Foreground -JitterSeconds 0
+.\scripts\start-stealth.ps1 -InstallTask
+```
+
+脚本会把 JAR 复制成中性文件名 `wxsync.jar` 放到用户目录再启动，
+避免命令行里直接出现项目名。伪装策略与参数说明见 [docs/disguise.md](../docs/disguise.md)。
+
 ## 前端开发
 
 仅在修改 Vue 源码时使用：

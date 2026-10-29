@@ -19,6 +19,12 @@ public class WeChatHookProperties {
     private String token = "";
     private String tokenFile = "";
     private List<String> allowedChats = new ArrayList<>();
+    private String selfWxid = "";
+    private boolean callbackEnabled = false;
+    private boolean callbackAcceptAll = true;
+    private boolean callbackRequireLoopback = true;
+    private boolean callbackGroupsEnabled = false;
+    private String guardStatusFile = "logs/guard-status.json";
     private boolean skipHistory = true;
     private long pollIntervalMs = 2000;
     private long initialDelayMs = 5000;
@@ -41,6 +47,18 @@ public class WeChatHookProperties {
     public void setTokenFile(String tokenFile) { this.tokenFile = tokenFile; }
     public List<String> getAllowedChats() { return allowedChats; }
     public void setAllowedChats(List<String> allowedChats) { this.allowedChats = allowedChats; }
+    public String getSelfWxid() { return selfWxid; }
+    public void setSelfWxid(String selfWxid) { this.selfWxid = selfWxid; }
+    public boolean isCallbackEnabled() { return callbackEnabled; }
+    public void setCallbackEnabled(boolean callbackEnabled) { this.callbackEnabled = callbackEnabled; }
+    public boolean isCallbackAcceptAll() { return callbackAcceptAll; }
+    public void setCallbackAcceptAll(boolean callbackAcceptAll) { this.callbackAcceptAll = callbackAcceptAll; }
+    public boolean isCallbackRequireLoopback() { return callbackRequireLoopback; }
+    public void setCallbackRequireLoopback(boolean callbackRequireLoopback) { this.callbackRequireLoopback = callbackRequireLoopback; }
+    public boolean isCallbackGroupsEnabled() { return callbackGroupsEnabled; }
+    public void setCallbackGroupsEnabled(boolean callbackGroupsEnabled) { this.callbackGroupsEnabled = callbackGroupsEnabled; }
+    public String getGuardStatusFile() { return guardStatusFile; }
+    public void setGuardStatusFile(String guardStatusFile) { this.guardStatusFile = guardStatusFile; }
     public boolean isSkipHistory() { return skipHistory; }
     public void setSkipHistory(boolean skipHistory) { this.skipHistory = skipHistory; }
     public long getPollIntervalMs() { return pollIntervalMs; }

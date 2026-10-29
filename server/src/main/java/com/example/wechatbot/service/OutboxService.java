@@ -10,7 +10,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -22,19 +25,55 @@ public class OutboxService {
         this.repository = repository;
     }
 
+    /**
+     * 租约领取。
+     *
+     * <p>同一会话在同一时刻只允许一条消息在途：分条回复必须一条一条发，
+     * 不能因为调度批量领取而变成"两条同时弹出"，那是最明显的机器特征。
+     * 同会话的其他消息保持 PENDING，下一轮再取。</p>
+     */
     @Transactional
     public List<AgentDtos.OutboxView> lease(int limit) {
         int safeLimit = Math.max(1, Math.min(limit, 50));
         OffsetDateTime now = OffsetDateTime.now();
-        List<OutboxMessage> messages = repository.findReadyForDelivery(
-                OutboxStatus.PENDING, OutboxStatus.PROCESSING, now, PageRequest.of(0, safeLimit));
-        for (OutboxMessage message : messages) {
+        int fetch = Math.min(200, Math.max(safeLimit * 4, safeLimit));
+        List<OutboxMessage> candidates = repository.findReadyForDelivery(
+                OutboxStatus.PENDING, OutboxStatus.PROCESSING, now, PageRequest.of(0, fetch));
+
+        Set<String> busyChats = new HashSet<>();
+        Set<String> inFlightChats = new HashSet<>(repository.findActiveLeaseChatIds(OutboxStatus.PROCESSING, now));
+        List<OutboxMessage> leased = new ArrayList<>(safeLimit);
+        List<OutboxMessage> postponed = new ArrayList<>();
+
+        for (OutboxMessage message : candidates) {
+            if (leased.size() >= safeLimit) {
+                break;
+            }
+            if (!busyChats.add(message.getChatId())) {
+                postponed.add(message);
+                continue;
+            }
+            if (inFlightChats.contains(message.getChatId())) {
+                postponed.add(message);
+                continue;
+            }
             message.setStatus(OutboxStatus.PROCESSING);
             message.setLeaseUntil(now.plusSeconds(30));
             message.setAttempts(message.getAttempts() + 1);
+            leased.add(message);
+            inFlightChats.add(message.getChatId());
         }
-        repository.saveAll(messages);
-        return messages.stream().map(message -> new AgentDtos.OutboxView(
+
+        for (OutboxMessage message : postponed) {
+            if (message.getStatus() == OutboxStatus.PENDING) {
+                message.setNextAttemptAt(now.plusSeconds(2 + (long) (Math.random() * 2)));
+            }
+        }
+        if (!postponed.isEmpty()) {
+            repository.saveAll(postponed);
+        }
+        repository.saveAll(leased);
+        return leased.stream().map(message -> new AgentDtos.OutboxView(
                 message.getId(),
                 message.getConversationId(),
                 message.getChatId(),

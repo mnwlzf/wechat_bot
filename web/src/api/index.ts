@@ -6,11 +6,14 @@ import type {
   Dashboard,
   HookStatus,
   DebugResult,
+  LlmPolicyInput,
   Message,
   PageResult,
   Provider,
   ProviderInput,
   ProviderTestResult,
+  SettingsSnapshot,
+  WeChatPolicyInput,
 } from './types'
 
 export const adminApi = {
@@ -43,6 +46,18 @@ export const adminApi = {
   },
   async testProvider(id: string) {
     const { data } = await http.post<ProviderTestResult>(`/api/admin/providers/${id}/test`)
+    return data
+  },
+  async settings() {
+    const { data } = await http.get<SettingsSnapshot>('/api/admin/settings')
+    return data
+  },
+  async updateWeChatPolicy(payload: WeChatPolicyInput) {
+    const { data } = await http.put<SettingsSnapshot>('/api/admin/settings/wechat', payload)
+    return data
+  },
+  async updateLlmPolicy(payload: LlmPolicyInput) {
+    const { data } = await http.put<SettingsSnapshot>('/api/admin/settings/llm', payload)
     return data
   },
   async bots() {

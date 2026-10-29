@@ -34,6 +34,12 @@ const router = createRouter({
           meta: { title: '机器人配置' },
         },
         {
+          path: 'settings',
+          name: 'settings',
+          component: () => import('@/views/SettingsView.vue'),
+          meta: { title: '运行策略' },
+        },
+        {
           path: 'conversations',
           name: 'conversations',
           component: () => import('@/views/ConversationsView.vue'),

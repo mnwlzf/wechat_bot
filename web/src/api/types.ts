@@ -9,6 +9,30 @@ export interface PageResult<T> {
   size: number
 }
 
+export interface RuntimeSetting<T> {
+  value: T
+  source: 'db' | 'env'
+}
+
+export interface SettingsSnapshot {
+  allowedChats: RuntimeSetting<string[]>
+  acceptAll: RuntimeSetting<boolean>
+  groupsEnabled: RuntimeSetting<boolean>
+  fallbackEnabled: RuntimeSetting<boolean>
+  searchEnabled: RuntimeSetting<boolean>
+}
+
+export interface WeChatPolicyInput {
+  groupsEnabled: boolean
+  acceptAll: boolean
+  allowedChats: string[]
+}
+
+export interface LlmPolicyInput {
+  fallbackEnabled: boolean
+  searchEnabled: boolean
+}
+
 export interface Provider {
   id: string
   name: string
@@ -20,6 +44,9 @@ export interface Provider {
   hasApiKey: boolean
   apiKeyHint?: string
   updatedAt: string
+  hasBackupApiKey: boolean
+  backupApiKeyHint?: string
+  webSearchEnabled: boolean
 }
 
 export interface ProviderInput {
@@ -30,6 +57,8 @@ export interface ProviderInput {
   enabled: boolean
   priority: number
   timeoutSeconds: number
+  backupApiKey?: string
+  webSearchEnabled: boolean
 }
 
 export interface Bot {

@@ -31,5 +31,12 @@ windows-agent/state/
 vendor/WeChat-Hook/
 vendor/wechat-hook.zip
 
+# 大体积安装包与本地调试工具（不进仓库，避免超过 GitHub 单文件 100MB 限制）
+windows-agent/prebuilt/*.exe
+windows-agent/prebuilt/version-*-old.dll
+
+# 前端只保留 package-lock.json
+web/pnpm-lock.yaml
+
 
 

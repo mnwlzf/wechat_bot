@@ -10,6 +10,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 @Component
@@ -40,6 +41,7 @@ public class WeChatHookOutboxDispatcher {
             List<AgentDtos.OutboxView> messages = outboxService.lease(batch);
             for (AgentDtos.OutboxView message : messages) {
                 try {
+                    pause(ThreadLocalRandom.current().nextLong(0, 350));
                     client.sendText(message.chatId(), message.content());
                     outboxService.ack(message.id(), true, null);
                     log.info("微信回复已发送，outbox={}", message.id());
@@ -54,5 +56,15 @@ public class WeChatHookOutboxDispatcher {
             running.set(false);
         }
     }
-}
 
+    private void pause(long millis) {
+        if (millis <= 0) {
+            return;
+        }
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+        }
+    }
+}

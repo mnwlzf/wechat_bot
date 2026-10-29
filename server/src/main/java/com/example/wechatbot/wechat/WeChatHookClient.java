@@ -1,6 +1,8 @@
 package com.example.wechatbot.wechat;
 
 import com.example.wechatbot.config.WeChatHookProperties;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -24,6 +26,7 @@ import java.util.Objects;
 
 @Component
 public class WeChatHookClient {
+    private static final Logger log = LoggerFactory.getLogger(WeChatHookClient.class);
     private static final String TARGET_VERSION = "4.1.10.27";
     private static final String INTEGRATION = "WeChatBot-1";
     private static final long VERIFY_CACHE_MILLIS = 10_000;
@@ -132,7 +135,15 @@ public class WeChatHookClient {
         if (content == null || content.isBlank()) {
             throw new WeChatHookException("拒绝发送空消息");
         }
-        verify(false);
+        try {
+            verify(false);
+        } catch (WeChatHookException ex) {
+            // 预编译 Hook 的 IsLogin 常为 0，但 /SendTextMsg 仍可用；只要端口可达就继续发送
+            if (!reachable()) {
+                throw new WeChatHookException("无法连接微信 Hook: " + properties.getBaseUrl(), ex);
+            }
+            log.debug("Hook 未报告登录状态，仍尝试发送: {}", ex.getMessage());
+        }
         String text = truncateUtf8(content.trim(), MAX_MESSAGE_BYTES);
         Map<String, Object> response = postMap("/SendTextMsg", Map.of("wxidorgid", chatId, "msg", text));
         int ret = intValue(response.get("ret"), -1);
@@ -148,6 +159,11 @@ public class WeChatHookClient {
 
     public Protocol protocol() {
         return protocol;
+    }
+
+    /** Raw {@code /QueryDB/status} payload; used for diagnostics and instance fingerprinting. */
+    public Map<String, Object> status() {
+        return getMap("/QueryDB/status");
     }
 
     private HookHealth verifyOverlayOrFallback() {
@@ -231,6 +247,15 @@ public class WeChatHookClient {
     private void ensureProtocol() {
         if (protocol == Protocol.AUTO) {
             verify(false);
+        }
+    }
+
+    private boolean reachable() {
+        try {
+            getMap("/QueryDB/status");
+            return true;
+        } catch (RuntimeException ex) {
+            return false;
         }
     }
 
