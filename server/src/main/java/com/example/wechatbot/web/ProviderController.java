@@ -1,5 +1,6 @@
 package com.example.wechatbot.web;
 
+import com.example.wechatbot.ai.LlmProviderBootstrap;
 import com.example.wechatbot.service.ProviderAdminService;
 import com.example.wechatbot.web.dto.AdminDtos;
 import jakarta.validation.Valid;
@@ -13,14 +14,21 @@ import java.util.UUID;
 @RequestMapping("/api/admin/providers")
 public class ProviderController {
     private final ProviderAdminService service;
+    private final LlmProviderBootstrap bootstrap;
 
-    public ProviderController(ProviderAdminService service) {
+    public ProviderController(ProviderAdminService service, LlmProviderBootstrap bootstrap) {
         this.service = service;
+        this.bootstrap = bootstrap;
     }
 
     @GetMapping
     public List<AdminDtos.ProviderView> list() {
         return service.list();
+    }
+
+    @GetMapping("/bootstrap")
+    public LlmProviderBootstrap.Status bootstrapStatus() {
+        return bootstrap.status();
     }
 
     @PostMapping
@@ -44,5 +52,10 @@ public class ProviderController {
     @PostMapping("/{id}/test")
     public AdminDtos.ProviderTestResponse test(@PathVariable UUID id) {
         return service.test(id);
+    }
+
+    @PostMapping("/{id}/search")
+    public AdminDtos.SearchTestResponse search(@PathVariable UUID id, @RequestParam("q") String query) {
+        return service.search(id, query);
     }
 }

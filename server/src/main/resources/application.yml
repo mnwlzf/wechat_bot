@@ -3,6 +3,10 @@ server:
   shutdown: graceful
 
 spring:
+  # 让 IDEA / java -jar 直接读仓库根目录的 .env（工作目录必须是仓库根目录）
+  # 已存在的环境变量优先级更高，因此 scripts/run-backend.ps1 注入的值仍然生效
+  config:
+    import: optional:file:./.env[.properties]
   application:
     name: wechat-bot-server
   datasource:
@@ -61,7 +65,76 @@ app:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}
   llm:
     max-context-messages: 30
-    fallback-enabled: true
+    fallback-enabled: ${LLM_FALLBACK_ENABLED:true}   # 运行时可被管理端“运行策略”覆盖
+    # DeepSeek 官方联网搜索（POST {base-url}/v1/tools/search）
+    search:
+      enabled: ${LLM_SEARCH_ENABLED:true}
+      mode: ${LLM_SEARCH_MODE:HEURISTIC}      # OFF | HEURISTIC | ALWAYS
+      base-url: ${LLM_SEARCH_BASE_URL:https://api.deepseek.com}
+      api-key: ${LLM_SEARCH_API_KEY:}
+      backup-api-key: ${LLM_SEARCH_BACKUP_API_KEY:}
+      count: ${LLM_SEARCH_COUNT:5}
+      need-content: ${LLM_SEARCH_NEED_CONTENT:false}
+      max-results: ${LLM_SEARCH_MAX_RESULTS:4}
+      max-content-chars: ${LLM_SEARCH_MAX_CONTENT_CHARS:1200}
+      timeout-seconds: ${LLM_SEARCH_TIMEOUT_SECONDS:20}
+    # 用环境变量把模型 provider 写入数据库；两项都留空时自动跳过
+    bootstrap:
+      enabled: ${LLM_BOOTSTRAP_ENABLED:true}
+      overwrite: ${LLM_BOOTSTRAP_OVERWRITE:true}
+      assign-to-bot: ${LLM_BOOTSTRAP_ASSIGN_TO_BOT:true}
+      primary:
+        name: ${LLM_NAME:}
+        base-url: ${LLM_BASE_URL:}
+        api-key: ${LLM_API_KEY:}
+        backup-api-key: ${LLM_BACKUP_API_KEY:}
+        model: ${LLM_MODEL:}
+        priority: ${LLM_PRIORITY:10}
+        timeout-seconds: ${LLM_TIMEOUT_SECONDS:60}
+      fallback:
+        name: ${LLM_FALLBACK_NAME:}
+        base-url: ${LLM_FALLBACK_BASE_URL:}
+        api-key: ${LLM_FALLBACK_API_KEY:}
+        backup-api-key: ${LLM_FALLBACK_BACKUP_API_KEY:}
+        model: ${LLM_FALLBACK_MODEL:}
+        priority: ${LLM_FALLBACK_PRIORITY:20}
+        timeout-seconds: ${LLM_FALLBACK_TIMEOUT_SECONDS:60}
+  # 拟人化伪装层：延迟、分条、作息、配额、去重、文风清洗
+  disguise:
+    enabled: ${DISGUISE_ENABLED:true}
+    zone: ${DISGUISE_ZONE:Asia/Shanghai}
+    quiet-start: "${DISGUISE_QUIET_START:00:30}"
+    quiet-end: "${DISGUISE_QUIET_END:07:30}"
+    max-defer-minutes: ${DISGUISE_MAX_DEFER_MINUTES:480}
+    away-blocks-per-day: ${DISGUISE_AWAY_BLOCKS:2}
+    schedule-enabled: ${DISGUISE_SCHEDULE_ENABLED:true}
+    read-delay-min-ms: ${DISGUISE_READ_DELAY_MIN_MS:1200}
+    read-delay-max-ms: ${DISGUISE_READ_DELAY_MAX_MS:7000}
+    chars-per-second: ${DISGUISE_CHARS_PER_SECOND:3.4}
+    typing-jitter: ${DISGUISE_TYPING_JITTER:0.30}
+    max-delay-ms: ${DISGUISE_MAX_DELAY_MS:90000}
+    group-delay-factor: ${DISGUISE_GROUP_DELAY_FACTOR:1.35}
+    split-enabled: ${DISGUISE_SPLIT_ENABLED:true}
+    max-parts: ${DISGUISE_MAX_PARTS:3}
+    max-part-chars: ${DISGUISE_MAX_PART_CHARS:90}
+    max-reply-chars: ${DISGUISE_MAX_REPLY_CHARS:420}
+    part-gap-min-ms: ${DISGUISE_PART_GAP_MIN_MS:600}
+    part-gap-max-ms: ${DISGUISE_PART_GAP_MAX_MS:2600}
+    per-minute: ${DISGUISE_PER_MINUTE:3}
+    per10-minutes: ${DISGUISE_PER_10MIN:8}
+    per-hour: ${DISGUISE_PER_HOUR:20}
+    per-day: ${DISGUISE_PER_DAY:120}
+    global-per-hour: ${DISGUISE_GLOBAL_PER_HOUR:40}
+    global-per-day: ${DISGUISE_GLOBAL_PER_DAY:220}
+    min-gap-ms: ${DISGUISE_MIN_GAP_MS:1200}
+    burst-size: ${DISGUISE_BURST_SIZE:5}
+    similarity-threshold: ${DISGUISE_SIMILARITY_THRESHOLD:0.62}
+    cross-chat-similarity-threshold: ${DISGUISE_CROSS_SIMILARITY_THRESHOLD:0.92}
+    regenerate-on-repeat: ${DISGUISE_REGENERATE_ON_REPEAT:true}
+    style-enabled: ${DISGUISE_STYLE_ENABLED:true}
+    emoji-limit: ${DISGUISE_EMOJI_LIMIT:1}
+    drop-rate: ${DISGUISE_DROP_RATE:0.0}
+    prompt-enabled: ${DISGUISE_PROMPT_ENABLED:true}
   wechat:
     hook:
       enabled: ${WECHAT_HOOK_ENABLED:true}
@@ -71,6 +144,12 @@ app:
       token: ${WECHAT_HOOK_TOKEN:}
       token-file: ${WECHAT_HOOK_TOKEN_FILE:}
       allowed-chats: ${WECHAT_ALLOWED_CHATS:}
+      self-wxid: ${WECHAT_SELF_WXID:}
+      callback-enabled: ${WECHAT_HOOK_CALLBACK_ENABLED:false}
+      callback-accept-all: ${WECHAT_CALLBACK_ACCEPT_ALL:true}
+      callback-require-loopback: ${WECHAT_CALLBACK_REQUIRE_LOOPBACK:true}
+      callback-groups-enabled: ${WECHAT_CALLBACK_GROUPS_ENABLED:false}
+      guard-status-file: ${WECHAT_GUARD_STATUS_FILE:logs/guard-status.json}
       skip-history: ${WECHAT_HOOK_SKIP_HISTORY:true}
       poll-interval-ms: ${WECHAT_HOOK_POLL_INTERVAL_MS:2000}
       initial-delay-ms: ${WECHAT_HOOK_INITIAL_DELAY_MS:5000}

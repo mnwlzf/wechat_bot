@@ -26,6 +26,9 @@ app:
     secret-key: test-only-secret-key
   cors:
     allowed-origins: http://localhost:5173
+  llm:
+    bootstrap:
+      enabled: false
   wechat:
     hook:
       enabled: false

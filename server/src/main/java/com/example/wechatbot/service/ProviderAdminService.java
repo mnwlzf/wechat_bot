@@ -40,6 +40,8 @@ public class ProviderAdminService {
         apply(provider, request.name(), request.baseUrl(), request.model(), request.enabled(),
                 request.priority(), request.timeoutSeconds());
         provider.setApiKeyEncrypted(secretCipher.encrypt(request.apiKey()));
+        provider.setApiKeyBackupEncrypted(secretCipher.encrypt(nullToEmpty(request.backupApiKey())));
+        provider.setWebSearchEnabled(request.webSearchEnabled());
         return toView(providerRepository.save(provider));
     }
 
@@ -50,6 +52,11 @@ public class ProviderAdminService {
         if (request.apiKey() != null && !request.apiKey().isBlank()) {
             provider.setApiKeyEncrypted(secretCipher.encrypt(request.apiKey()));
         }
+        if (request.backupApiKey() != null) {
+            String backup = request.backupApiKey().trim();
+            provider.setApiKeyBackupEncrypted(backup.isEmpty() ? "" : secretCipher.encrypt(backup));
+        }
+        provider.setWebSearchEnabled(request.webSearchEnabled());
         return toView(providerRepository.save(provider));
     }
 
@@ -72,6 +79,20 @@ public class ProviderAdminService {
         }
     }
 
+    public AdminDtos.SearchTestResponse search(UUID id, String query) {
+        ModelProvider provider = find(id);
+        try {
+            var outcome = llmGateway.search(provider, query, null);
+            List<AdminDtos.SearchHit> hits = outcome.results().stream()
+                    .map(item -> new AdminDtos.SearchHit(item.title(), item.url(), item.siteName(),
+                            item.publishedAt(), item.bestExcerpt(), item.authority(), item.rerankScore()))
+                    .toList();
+            return new AdminDtos.SearchTestResponse(true, "OK", hits, outcome.usedKeyIndex(), outcome.latencyMs());
+        } catch (Exception ex) {
+            return new AdminDtos.SearchTestResponse(false, rootMessage(ex), List.of(), -1, 0);
+        }
+    }
+
     private ModelProvider find(UUID id) {
         return providerRepository.findById(id)
                 .orElseThrow(() -> ApiException.notFound("模型提供方不存在"));
@@ -90,6 +111,12 @@ public class ProviderAdminService {
     private AdminDtos.ProviderView toView(ModelProvider provider) {
         String apiKey = secretCipher.decrypt(provider.getApiKeyEncrypted());
         String hint = apiKey.isBlank() ? null : "****" + apiKey.substring(Math.max(0, apiKey.length() - 4));
+        String backupKey = provider.getApiKeyBackupEncrypted() == null
+                ? ""
+                : secretCipher.decrypt(provider.getApiKeyBackupEncrypted());
+        String backupHint = backupKey == null || backupKey.isBlank()
+                ? null
+                : "****" + backupKey.substring(Math.max(0, backupKey.length() - 4));
         return new AdminDtos.ProviderView(
                 provider.getId(),
                 provider.getName(),
@@ -100,8 +127,15 @@ public class ProviderAdminService {
                 provider.getTimeoutSeconds(),
                 !apiKey.isBlank(),
                 hint,
-                provider.getUpdatedAt()
+                provider.getUpdatedAt(),
+                backupKey != null && !backupKey.isBlank(),
+                backupHint,
+                provider.isWebSearchEnabled()
         );
+    }
+
+    private static String nullToEmpty(String value) {
+        return value == null ? "" : value.trim();
     }
 
     private String rootMessage(Throwable error) {

@@ -25,6 +25,8 @@ const emptyForm = (): ProviderInput => ({
   enabled: true,
   priority: 100,
   timeoutSeconds: 60,
+  backupApiKey: '',
+  webSearchEnabled: true,
 })
 const form = reactive<ProviderInput>(emptyForm())
 
@@ -71,6 +73,8 @@ function openEdit(provider: Provider) {
     enabled: provider.enabled,
     priority: provider.priority,
     timeoutSeconds: provider.timeoutSeconds,
+    backupApiKey: '',
+    webSearchEnabled: provider.webSearchEnabled,
   })
   dialogVisible.value = true
 }
@@ -95,6 +99,7 @@ async function submit() {
     const payload: ProviderInput = {
       ...form,
       apiKey: form.apiKey?.trim() || undefined,
+      backupApiKey: form.backupApiKey?.trim() || undefined,
     }
     if (editingId.value) {
       await adminApi.updateProvider(editingId.value, payload)
@@ -185,7 +190,12 @@ onMounted(load)
                 <span class="provider-logo">{{ row.name.slice(0, 1).toUpperCase() }}</span>
                 <div>
                   <strong>{{ row.name }}</strong>
-                  <small>{{ row.apiKeyHint || '未设置 Key' }}</small>
+                  <small>
+                    {{ row.apiKeyHint || '未设置 Key' }}
+                    <span v-if="row.hasBackupApiKey"> · 备用 {{ row.backupApiKeyHint }}</span>
+                    <span v-else> · 无备用 Key</span>
+                    <span v-if="row.webSearchEnabled"> · 联网</span>
+                  </small>
                 </div>
               </div>
             </template>
@@ -256,6 +266,23 @@ onMounted(load)
             :placeholder="editingId ? '留空表示不修改现有 Key' : 'sk-...'"
           />
           <div class="field-hint">Key 使用 AES-GCM 加密后落库，不会返回前端。</div>
+        </el-form-item>
+        <el-form-item label="备用 API Key（主 Key 失效时自动切换）">
+          <el-input
+            v-model="form.backupApiKey"
+            type="password"
+            show-password
+            :placeholder="editingId ? '留空表示保持现有备用 Key' : '可选，sk-...'"
+          />
+          <div class="field-hint">
+            主 Key 返回 401/402/403 立即切换；429/5xx 先重试一次再切换。留空表示不配置备用通道。
+          </div>
+        </el-form-item>
+        <el-form-item label="联网搜索">
+          <el-switch v-model="form.webSearchEnabled" />
+          <div class="field-hint">
+            开启后按关键词触发 DeepSeek 官方搜索（/v1/tools/search），需要官方 Key 才能生效。
+          </div>
         </el-form-item>
         <div class="form-grid three">
           <el-form-item label="启用">

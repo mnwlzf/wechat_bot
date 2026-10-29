@@ -27,6 +27,12 @@ public class ModelProvider {
     @Column(name = "api_key_encrypted", nullable = false, columnDefinition = "text")
     private String apiKeyEncrypted = "";
 
+    @Column(name = "api_key_backup_encrypted", nullable = false, columnDefinition = "text")
+    private String apiKeyBackupEncrypted = "";
+
+    @Column(name = "web_search_enabled", nullable = false)
+    private boolean webSearchEnabled = true;
+
     @Column(nullable = false, length = 120)
     private String model;
 

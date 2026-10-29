@@ -17,7 +17,9 @@ public final class AdminDtos {
             @NotBlank @Size(max = 120) String model,
             boolean enabled,
             @Min(0) @Max(10000) int priority,
-            @Min(5) @Max(300) int timeoutSeconds
+            @Min(5) @Max(300) int timeoutSeconds,
+            @Size(max = 5000) String backupApiKey,
+            boolean webSearchEnabled
     ) {}
 
     public record ProviderUpdate(
@@ -27,7 +29,9 @@ public final class AdminDtos {
             @NotBlank @Size(max = 120) String model,
             boolean enabled,
             @Min(0) @Max(10000) int priority,
-            @Min(5) @Max(300) int timeoutSeconds
+            @Min(5) @Max(300) int timeoutSeconds,
+            @Size(max = 5000) String backupApiKey,
+            boolean webSearchEnabled
     ) {}
 
     public record ProviderView(
@@ -40,7 +44,10 @@ public final class AdminDtos {
             int timeoutSeconds,
             boolean hasApiKey,
             String apiKeyHint,
-            OffsetDateTime updatedAt
+            OffsetDateTime updatedAt,
+            boolean hasBackupApiKey,
+            String backupApiKeyHint,
+            boolean webSearchEnabled
     ) {}
 
     public record BotUpdate(
@@ -112,4 +119,14 @@ public final class AdminDtos {
     public record DebugResponse(String reply, String provider, String model, long latencyMs) {}
 
     public record ProviderTestResponse(boolean success, String reply, String model, long latencyMs) {}
+
+    public record SearchHit(String title, String url, String siteName, String publishedAt,
+                            String excerpt, int authority, double rerankScore) {}
+
+    public record SearchTestResponse(boolean success, String message, List<SearchHit> results,
+                                     int usedKeyIndex, long latencyMs) {}
+
+    public record WeChatPolicyUpdate(boolean groupsEnabled, boolean acceptAll, List<String> allowedChats) {}
+
+    public record LlmPolicyUpdate(boolean fallbackEnabled, boolean searchEnabled) {}
 }

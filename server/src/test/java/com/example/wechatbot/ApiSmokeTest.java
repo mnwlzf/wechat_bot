@@ -66,4 +66,14 @@ class ApiSmokeTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.code").value(404));
     }
+
+    @Test
+    void exposesProviderBootstrapStatus() throws Exception {
+        mockMvc.perform(get("/api/admin/providers/bootstrap")
+                        .header("Authorization", "Bearer test-admin"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.enabled").value(false))
+                .andExpect(jsonPath("$.providers").isArray())
+                .andExpect(jsonPath("$.warnings").isArray());
+    }
 }

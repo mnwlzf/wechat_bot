@@ -4,6 +4,7 @@ import com.example.wechatbot.config.AppProperties;
 import com.example.wechatbot.domain.BotConfig;
 import com.example.wechatbot.domain.ModelProvider;
 import com.example.wechatbot.repository.ModelProviderRepository;
+import com.example.wechatbot.service.RuntimeSettingsService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -19,14 +20,19 @@ public class LlmGateway {
     private final ModelProviderRepository providerRepository;
     private final SecretCipher secretCipher;
     private final OpenAiCompatibleClient client;
+    private final DeepSeekSearchClient searchClient;
     private final AppProperties properties;
+    private final RuntimeSettingsService settings;
 
     public LlmGateway(ModelProviderRepository providerRepository, SecretCipher secretCipher,
-                      OpenAiCompatibleClient client, AppProperties properties) {
+                      OpenAiCompatibleClient client, DeepSeekSearchClient searchClient,
+                      AppProperties properties, RuntimeSettingsService settings) {
         this.providerRepository = providerRepository;
         this.secretCipher = secretCipher;
         this.client = client;
+        this.searchClient = searchClient;
         this.properties = properties;
+        this.settings = settings;
     }
 
     public LlmReply chat(BotConfig bot, List<ChatMessage> messages) {
@@ -38,14 +44,14 @@ public class LlmGateway {
         List<String> errors = new ArrayList<>();
         for (ModelProvider provider : candidates) {
             try {
-                String apiKey = secretCipher.decrypt(provider.getApiKeyEncrypted());
-                log.info("Calling LLM provider={} model={}", provider.getName(), provider.getModel());
-                return client.complete(provider, apiKey, messages, bot.getTemperature(), bot.getMaxTokens());
+                List<String> apiKeys = apiKeys(provider);
+                log.info("Calling LLM provider={} model={} keys={}", provider.getName(), provider.getModel(), apiKeys.size());
+                return client.complete(provider, apiKeys, messages, bot.getTemperature(), bot.getMaxTokens());
             } catch (Exception ex) {
                 String error = provider.getName() + ": " + rootMessage(ex);
                 errors.add(error);
                 log.warn("LLM provider failed: {}", error);
-                if (!properties.getLlm().isFallbackEnabled()) {
+                if (!settings.llmFallbackEnabled()) {
                     break;
                 }
             }
@@ -53,12 +59,83 @@ public class LlmGateway {
         throw new LlmException("全部模型调用失败: " + String.join(" | ", errors));
     }
 
+    /**
+     * 用 DeepSeek 官方搜索接口查一次网页。搜索固定走官方域名，
+     * 与对话的 Base URL 解耦（中转站通常不代理搜索）。
+     */
+    public DeepSeekSearchClient.SearchOutcome search(BotConfig bot, String query, String originalQuestion) {
+        AppProperties.Search config = properties.getLlm().getSearch();
+        List<ModelProvider> candidates = candidates(bot.getModelProviderId()).stream()
+                .filter(ModelProvider::isWebSearchEnabled)
+                .toList();
+        if (candidates.isEmpty()) {
+            throw new LlmException("没有启用联网搜索的模型提供方");
+        }
+        List<String> errors = new ArrayList<>();
+        for (ModelProvider provider : candidates) {
+            try {
+                return search(provider, query, originalQuestion);
+            } catch (Exception ex) {
+                String error = provider.getName() + ": " + rootMessage(ex);
+                errors.add(error);
+                log.warn("联网搜索失败: {}", error);
+            }
+        }
+        throw new LlmException("联网搜索失败: " + String.join(" | ", errors));
+    }
+
+    /** 用指定 Provider 的 Key 搜索（管理端自测用）。 */
+    public DeepSeekSearchClient.SearchOutcome search(ModelProvider provider, String query, String originalQuestion) {
+        AppProperties.Search config = properties.getLlm().getSearch();
+        List<String> keys = searchKeys(config, provider);
+        if (keys.isEmpty()) {
+            throw new LlmException("未配置可用于搜索的 API Key");
+        }
+        return searchClient.search(config.getBaseUrl(), keys, query, originalQuestion,
+                config.getCount(), config.isNeedContent(), config.getTimeoutSeconds());
+    }
+
     public LlmReply test(ModelProvider provider) {
-        String apiKey = secretCipher.decrypt(provider.getApiKeyEncrypted());
-        return client.complete(provider, apiKey, List.of(
+        return client.complete(provider, apiKeys(provider), List.of(
                 ChatMessage.system("You are a connectivity test. Reply with exactly: OK"),
                 ChatMessage.user("ping")
         ), 0, 8);
+    }
+
+    /** 主 Key 在前、备用 Key 在后；空值与重复值会被过滤。 */
+    List<String> apiKeys(ModelProvider provider) {
+        List<String> keys = new ArrayList<>();
+        String primary = decrypt(provider.getApiKeyEncrypted());
+        if (!primary.isBlank()) {
+            keys.add(primary);
+        }
+        String backup = decrypt(provider.getApiKeyBackupEncrypted());
+        if (!backup.isBlank() && !keys.contains(backup)) {
+            keys.add(backup);
+        }
+        return keys;
+    }
+
+    /** 搜索优先用搜索专用 Key（官方域名），没配才退回模型 Provider 的 Key。 */
+    List<String> searchKeys(AppProperties.Search config, ModelProvider provider) {
+        List<String> keys = new ArrayList<>();
+        String primary = config.getApiKey() == null ? "" : config.getApiKey().trim();
+        String backup = config.getBackupApiKey() == null ? "" : config.getBackupApiKey().trim();
+        if (!primary.isBlank()) {
+            keys.add(primary);
+        }
+        if (!backup.isBlank() && !keys.contains(backup)) {
+            keys.add(backup);
+        }
+        return keys.isEmpty() ? apiKeys(provider) : keys;
+    }
+
+    private String decrypt(String encrypted) {
+        if (encrypted == null || encrypted.isBlank()) {
+            return "";
+        }
+        String value = secretCipher.decrypt(encrypted);
+        return value == null ? "" : value.trim();
     }
 
     private List<ModelProvider> candidates(UUID preferredId) {
