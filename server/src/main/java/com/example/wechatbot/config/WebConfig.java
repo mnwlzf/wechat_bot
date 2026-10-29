@@ -40,7 +40,8 @@ public class WebConfig implements WebMvcConfigurer {
                         // 空路径 = 目录本身，不能当静态资源返回，否则读取目录会抛异常（表现为 500）
                         if (!resourcePath.isBlank()) {
                             Resource requested = location.createRelative(resourcePath);
-                            if (requested.exists() && requested.isReadable() && requested.isFile()) {
+                            // 注意：打包成 JAR 后 isFile() 恒为 false，只能用「不是目录」来判断
+                            if (requested.exists() && requested.isReadable() && !isDirectory(requested)) {
                                 return requested;
                             }
                         }
@@ -50,6 +51,15 @@ public class WebConfig implements WebMvcConfigurer {
                         }
                         Resource index = new ClassPathResource("static/index.html");
                         return index.exists() ? index : null;
+                    }
+
+                    private boolean isDirectory(Resource resource) {
+                        try {
+                            return resource.getFile().isDirectory();
+                        } catch (IOException | RuntimeException ex) {
+                            // JAR 内的资源没有 File 形态，直接视为文件
+                            return false;
+                        }
                     }
                 });
     }
