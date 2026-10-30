@@ -360,7 +360,7 @@ LLM_SEARCH_TIMEOUT_SECONDS=20
 ### 7.4 引用消息与图片识别
 
 - **引用消息**：`type=49` 且带 `<refermsg>` 时按文本处理，`content` 是本次说的话，`quote_author`/`quote_text` 记录被引用的发送者与内容；被引用的对象可能是文本、图片、语音、表情、文件或链接，统一渲染成占位文本（`[图片]`、`[语音 4″]`、`[文件] 报价单.pdf` …）。送给模型时当前消息会拼成 `[引用 张三：原文]` + 本次说的话。
-- **图片识别**：`type=3` 的图片会真的交给模型看——按 `md5(会话 id)` 定位微信数据目录里的本地 `.dat`（文件名用的是报文里某个 md5，原图/缩略图两套都试，都对不上再按消息时间窗兜底），用**本机 kvcomm 派生的密钥**做 V2 解密（报文里的 `aeskey` 只用于 CDN 下载，解不了本地文件），缩放到长边 1024 内、转 JPEG 后以多段 content（`text` + `image_url`）发送。高清副本常是微信自有的 `wxgf`(HEVC) 容器，JDK 解不了时自动回退到 `_t.dat` 缩略图，并明确告诉模型「只有缩略图」。任一步失败都退化为 `[图片]` 占位文本，不影响回复；上游拒绝带图请求时自动改纯文本重试。
+- **图片识别**：`type=3` 的图片会真的交给模型看——按 `md5(会话 id)` 定位微信数据目录里的本地 `.dat`（文件名用的是报文里某个 md5，原图/缩略图两套都试，都对不上再按消息时间窗兜底），用**本机 kvcomm 派生的密钥**做 V2 解密（报文里的 `aeskey` 只用于 CDN 下载，解不了本地文件），所有能解出来的副本都试一遍、取像素最多的那份（含 `cache/**/Bubble/*_b.dat`，实测比缩略图大得多），缩放到长边 1024 内、转 JPEG 后以多段 content（`text` + `image_url`）发送。高清副本常是微信自有的 `wxgf`(HEVC) 容器，JDK 解不了，此时落到气泡副本或 `_t.dat` 缩略图；只有缩略图时会明确告诉模型「画面受限」。任一步失败都退化为 `[图片]` 占位文本，不影响回复；上游拒绝带图请求时自动改纯文本重试。
 - 相关环境变量：`LLM_VISION_ENABLED`、`LLM_VISION_MAX_EDGE`、`LLM_VISION_MAX_BYTES`、`LLM_VISION_CACHE_DIR`、`LLM_VISION_KVCOMM_DIR`、`LLM_VISION_MATCH_WINDOW_SECONDS`、`WECHAT_IMAGE_ROOT`，详见 [docs/api.md](docs/api.md#图片识别)。
 
 ```powershell

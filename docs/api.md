@@ -278,9 +278,9 @@ Hook 推来的非文本消息（`type` 不是 `1`）不再丢弃，而是归类�
 
 1. 从报文里取图片属性：`md5`、`aeskey`（原图）与 `cdnthumbmd5`、`cdnthumbaeskey`（缩略图），分别落库到 `media_md5`、`media_aeskey`、`media_thumb_md5`、`media_thumb_aeskey`；
 2. 按 `md5(会话 id)` 直接算出本地目录 `%USERPROFILE%\Documents\xwechat_files\<wxid>\msg\attach\<md5(会话)>\<yyyy-MM>\Img\`（跨月时也看上一个月份）；
-3. 依次尝试 `<md5>.dat`、`<md5>_h.dat`、`<md5>_t.dat`、`<cdnthumbmd5>.dat`、`<cdnthumbmd5>_h.dat`、`<cdnthumbmd5>_t.dat`——本地文件名用的是报文里某个 md5（原图或缩略图），并不固定；都对不上时退回「同会话目录里消息时间前后 `LLM_VISION_MATCH_WINDOW_SECONDS` 秒内写盘的 `.dat`」，按时间接近度排序、同样接近时高清副本优先；
-4. 解密用**本机密钥**，不是报文里的 `aeskey`（后者只用于从腾讯 CDN 下载原图）：微信 4.x 的 V2 容器是「15 字节头 + 前 `aes_size` 字节 AES-128-ECB + 尾部单字节 XOR」，密钥由 `%APPDATA%\Tencent\xwechat\net\kvcomm` 下 `key_<code>_*.statistic` 的 code 与账号 wxid 派生（`md5(code + wxid)` 的前 16 位）；
-5. 高清副本常是微信自有的 `wxgf`（HEVC）容器，JDK 无法解码，此时自动回退到 `_t.dat` 缩略图（分辨率较小，模型看到的是缩略图；想让它看清原图，先在电脑微信里打开该图片下载原图再重发）；
+3. 依次尝试 `<md5>.dat`、`<md5>_h.dat`、`<md5>_b.dat`、`<md5>_t.dat`，以及同样一套 `cdnthumbmd5` 变体——本地文件名用的是报文里某个 md5（原图或缩略图），并不固定；都对不上时退回「同会话目录里消息时间前后 `LLM_VISION_MATCH_WINDOW_SECONDS` 秒内写盘的 `.dat`」。除了 `msg/attach/<hash>/<yyyy-MM>/Img/`，还会看 `cache/<yyyy-MM>/Message/<hash>/Bubble/`（气泡缓存里那份实测比 `_t.dat` 大得多）；
+4. 解密用**本机密钥**，不是报文里的 `aeskey`（后者只用于从腾讯 CDN 下载原图）：微信 4.x 的 V2 容器是「15 字节头 + 前 `aes_size` 字节 AES-128-ECB + 尾部单字节 XOR」，密钥由 `%APPDATA%\Tencent\xwechat\net\kvcomm` 下的 code 与账号 wxid 派生（`md5(code + wxid)` 的前 16 位）；
+5. 所有能解出来的副本都试一遍，**取像素最多的那份**：高清 `.dat` 常是微信自有的 `wxgf`(HEVC) 容器，JDK 解不了，此时自动落到气泡副本或 `_t.dat` 缩略图；只有缩略图时会在提示里告诉模型「画面受限」，避免它假装看清小字（想让它看清原图，先在电脑微信里打开该图片下载原图再重发）；
 6. 长边缩放到 `LLM_VISION_MAX_EDGE` 内并统一转 JPEG，按文件指纹缓存到 `data/media`；
 7. 以 `data:image/jpeg;base64,...` 作为 OpenAI 兼容的多段 content（`{type:text}` + `{type:image_url}`）随请求发出。
 

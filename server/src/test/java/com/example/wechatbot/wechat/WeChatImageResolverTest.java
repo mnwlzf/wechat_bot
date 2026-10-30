@@ -186,6 +186,37 @@ class WeChatImageResolverTest {
         }
     }
 
+    @Test
+    void prefersBubbleCopyOverThumbnail() throws Exception {
+        // Img 下是 wxgf 高清 + _t 缩略图；cache 的气泡副本是更大的 JPEG
+        writeEncrypted(MD5 + ".dat", "wxgf\u0013\u0000\u0002\u0005payload".getBytes(StandardCharsets.ISO_8859_1));
+        writeEncrypted(MD5 + "_t.dat", jpegBytes(120, 80));
+        Path bubbleDir = root.resolve(ACCOUNT_DIR).resolve("cache").resolve("2026-10").resolve("Message")
+                .resolve(md5Hex(CHAT_ID)).resolve("Bubble");
+        Files.createDirectories(bubbleDir);
+        writeEncrypted(bubbleDir.resolve(MD5 + "_b.dat"), jpegBytes(500, 469));
+
+        var dataUrl = resolver.toDataUrl(CHAT_ID, SENT_AT, List.of(MD5));
+
+        assertThat(dataUrl).isPresent();
+        assertThat(dataUrl.get().thumbnail()).isFalse();
+        byte[] decoded = Base64.getDecoder().decode(dataUrl.get().dataUrl()
+                .substring(dataUrl.get().dataUrl().indexOf(',') + 1));
+        BufferedImage image = ImageIO.read(new ByteArrayInputStream(decoded));
+        assertThat(image).isNotNull();
+        assertThat(image.getWidth()).isEqualTo(500);
+    }
+
+    @Test
+    void thumbnailOnlyIsFlagged() throws Exception {
+        writeEncrypted(MD5 + "_t.dat", jpegBytes(120, 80));
+
+        var dataUrl = resolver.toDataUrl(CHAT_ID, SENT_AT, List.of(MD5));
+
+        assertThat(dataUrl).isPresent();
+        assertThat(dataUrl.get().thumbnail()).isTrue();
+    }
+
     private Path touch(String name, OffsetDateTime at) throws Exception {
         Path file = imgDir.resolve(name);
         Files.write(file, new byte[]{0x07, 0x08, 0x56, 0x32, 0x08, 0x07, 0, 0});
@@ -195,9 +226,13 @@ class WeChatImageResolverTest {
 
     /** 用「测试 kvcomm 里那把密钥」按真实 V2 容器格式写一个加密文件。 */
     private void writeEncrypted(String name, byte[] plain) throws Exception {
+        writeEncrypted(imgDir.resolve(name), plain);
+    }
+
+    private void writeEncrypted(Path target, byte[] plain) throws Exception {
         String keyHex = md5Hex(KV_CODE + ACCOUNT_DIR).substring(0, 16);
         byte[] aesKey = keyHex.getBytes(StandardCharsets.US_ASCII);
-        Files.write(imgDir.resolve(name), WeChatDatDecoder.encodeForTest(plain, aesKey, (int) (KV_CODE & 0xFF)));
+        Files.write(target, WeChatDatDecoder.encodeForTest(plain, aesKey, (int) (KV_CODE & 0xFF)));
     }
 
     private static byte[] jpegBytes(int width, int height) throws Exception {
