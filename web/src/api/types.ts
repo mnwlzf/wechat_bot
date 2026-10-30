@@ -347,9 +347,8 @@ export interface DisguiseConfig {
   quietStart: string
   quietEnd: string
   maxDeferMinutes: number
-  awayBlocksPerDay: number
-  awayBlockMinMinutes: number
-  awayBlockMaxMinutes: number
+  awayBlocksEnabled: boolean
+  awayBlocks: string[]
   readDelayMinMs: number
   readDelayMaxMs: number
   thinkBaseMs: number
@@ -378,6 +377,11 @@ export interface DisguiseConfig {
   burstSize: number
   burstCooldownMinMs: number
   burstCooldownMaxMs: number
+}
+
+export interface AwayBlocksInput {
+  enabled: boolean
+  blocks: string[]
 }
 
 export interface DisguiseDecision {

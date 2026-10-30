@@ -1,6 +1,7 @@
 package com.example.wechatbot.web;
 
 import com.example.wechatbot.disguise.DisguiseProperties;
+import com.example.wechatbot.disguise.DisguiseScheduleService;
 import com.example.wechatbot.disguise.DisguiseService;
 import com.example.wechatbot.disguise.StyleNormalizer;
 import com.example.wechatbot.domain.ChatType;
@@ -16,11 +17,14 @@ public class DisguiseController {
     private final DisguiseService disguise;
     private final StyleNormalizer normalizer;
     private final DisguiseProperties properties;
+    private final DisguiseScheduleService schedule;
 
-    public DisguiseController(DisguiseService disguise, StyleNormalizer normalizer, DisguiseProperties properties) {
+    public DisguiseController(DisguiseService disguise, StyleNormalizer normalizer,
+                              DisguiseProperties properties, DisguiseScheduleService schedule) {
         this.disguise = disguise;
         this.normalizer = normalizer;
         this.properties = properties;
+        this.schedule = schedule;
     }
 
     @GetMapping
@@ -37,9 +41,8 @@ public class DisguiseController {
                 properties.getQuietStart(),
                 properties.getQuietEnd(),
                 properties.getMaxDeferMinutes(),
-                properties.getAwayBlocksPerDay(),
-                properties.getAwayBlockMinMinutes(),
-                properties.getAwayBlockMaxMinutes(),
+                schedule.awayBlocksEnabled(),
+                schedule.awayBlocks(),
                 properties.getReadDelayMinMs(),
                 properties.getReadDelayMaxMs(),
                 properties.getThinkBaseMs(),
@@ -70,6 +73,13 @@ public class DisguiseController {
                 properties.getBurstCooldownMaxMs()
         );
     }
+
+    @PutMapping("/away-blocks")
+    public PacingConfig updateAwayBlocks(@RequestBody AwayBlocksUpdate request) {
+        schedule.updateAwayBlocks(request.enabled(), request.blocks());
+        return config();
+    }
+
     @PostMapping("/preview")
     public Preview preview(@RequestBody PreviewRequest request) {
         String text = request.text() == null ? "" : request.text();
@@ -90,9 +100,8 @@ public class DisguiseController {
             String quietStart,
             String quietEnd,
             int maxDeferMinutes,
-            int awayBlocksPerDay,
-            int awayBlockMinMinutes,
-            int awayBlockMaxMinutes,
+            boolean awayBlocksEnabled,
+            List<String> awayBlocks,
             int readDelayMinMs,
             int readDelayMaxMs,
             int thinkBaseMs,
@@ -122,6 +131,9 @@ public class DisguiseController {
             int burstCooldownMinMs,
             int burstCooldownMaxMs
     ) {}
+
+    public record AwayBlocksUpdate(boolean enabled, List<String> blocks) {}
+
     public record PreviewRequest(String chatId, String chatType, String text) {}
 
     public record PreviewPart(String text, long delaySeconds) {}

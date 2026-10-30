@@ -405,7 +405,7 @@ mvn -f server/pom.xml test
 ```text
 模型回复 → StyleNormalizer（去 Markdown / 结构词 / AI 自称）
         → ReplyComposer（按句切成 1~3 条）
-        → DisguiseClock（睡眠 / 随机离线块）
+        → DisguiseClock（睡眠 / 手动离线块）
         → QuotaGuard（分钟 / 10 分钟 / 小时 / 天 / 全局）
         → PacingModel（读 + 想 + 打字 + 昼夜节律）
         → outbox_message（每条独立 nextAttemptAt，同会话串行发送）
@@ -416,6 +416,7 @@ mvn -f server/pom.xml test
 | 项 | 默认值 |
 |---|---|
 | 睡眠窗口 | 00:30–07:30，期间消息推迟到醒来 |
+| 离开手机 | 手动配置每日离线块，独立开关，默认 10:00–10:40、15:00–15:40 |
 | 每次分条 | 最多 3 条，单条约 90 字 |
 | 单会话配额 | 3/分钟、8/10 分钟、20/小时、120/天 |
 | 账号级配额 | 40/小时、220/天 |

@@ -2,6 +2,7 @@ import { http } from './client'
 import type {
   AutoReplyRule,
   AutoReplyRuleInput,
+  AwayBlocksInput,
   Bot,
   BotInput,
   Conversation,
@@ -132,6 +133,10 @@ export const adminApi = {
   },
   async disguiseStatus() {
     const { data } = await http.get<DisguiseStatus>('/api/admin/disguise')
+    return data
+  },
+  async updateDisguiseAwayBlocks(payload: AwayBlocksInput) {
+    const { data } = await http.put<DisguiseConfig>('/api/admin/disguise/away-blocks', payload)
     return data
   },
   async disguisePreview(payload: { chatId?: string; chatType: 'PRIVATE' | 'GROUP'; text: string }) {

@@ -22,7 +22,7 @@ class DisguiseServiceTest {
         DisguiseProperties properties = new DisguiseProperties();
         properties.setQuietStart("00:00");
         properties.setQuietEnd("00:01");
-        properties.setAwayBlocksPerDay(0);
+        properties.setAwayBlocksEnabled(false);
         properties.setDropRate(0);
         properties.setScheduleEnabled(true);
         return properties;

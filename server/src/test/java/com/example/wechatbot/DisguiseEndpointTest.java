@@ -11,6 +11,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -50,6 +51,35 @@ class DisguiseEndpointTest {
                 .andExpect(jsonPath("$.aiScore").isNumber())
                 .andExpect(jsonPath("$.parts[0].text", containsString("好的")))
                 .andExpect(jsonPath("$.parts[0].text", containsString("code")));
+    }
+
+    @Test
+    void updatesManualAwayBlocks() throws Exception {
+        String body = """
+                {"enabled":true,"blocks":["15:00-16:00","09:00-09:30"]}
+                """;
+
+        mockMvc.perform(put("/api/admin/disguise/away-blocks")
+                        .header("Authorization", "Bearer test-admin")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.awayBlocksEnabled").value(true))
+                .andExpect(jsonPath("$.awayBlocks[0]").value("09:00-09:30"))
+                .andExpect(jsonPath("$.awayBlocks[1]").value("15:00-16:00"));
+    }
+
+    @Test
+    void rejectsInvalidAwayBlocks() throws Exception {
+        String body = """
+                {"enabled":true,"blocks":["10:00-10:00"]}
+                """;
+
+        mockMvc.perform(put("/api/admin/disguise/away-blocks")
+                        .header("Authorization", "Bearer test-admin")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isBadRequest());
     }
 
     @Test

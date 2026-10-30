@@ -132,10 +132,9 @@ app:
     quiet-start: "${DISGUISE_QUIET_START:00:30}"
     quiet-end: "${DISGUISE_QUIET_END:07:30}"
     max-defer-minutes: ${DISGUISE_MAX_DEFER_MINUTES:480}
-    away-blocks-per-day: ${DISGUISE_AWAY_BLOCKS:2}
-    away-block-min-minutes: ${DISGUISE_AWAY_BLOCK_MIN_MINUTES:20}
-    away-block-max-minutes: ${DISGUISE_AWAY_BLOCK_MAX_MINUTES:75}
     schedule-enabled: ${DISGUISE_SCHEDULE_ENABLED:true}
+    away-blocks-enabled: ${DISGUISE_AWAY_BLOCKS_ENABLED:true}
+    away-blocks: "${DISGUISE_AWAY_BLOCKS:10:00-10:40,15:00-15:40}"
     read-delay-min-ms: ${DISGUISE_READ_DELAY_MIN_MS:1200}
     read-delay-max-ms: ${DISGUISE_READ_DELAY_MAX_MS:7000}
     think-base-ms: ${DISGUISE_THINK_BASE_MS:500}

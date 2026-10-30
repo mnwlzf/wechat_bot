@@ -2,6 +2,9 @@ package com.example.wechatbot.disguise;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * 拟人化伪装（anti-detection）参数。
  *
@@ -26,15 +29,14 @@ public class DisguiseProperties {
     /** 单条回复最多顺延多少分钟；超过则丢弃而不是排到很久以后。 */
     private int maxDeferMinutes = 480;
 
-    /** 每天随机“不在手机边”的时段数量。 */
-    private int awayBlocksPerDay = 2;
-
-    private int awayBlockMinMinutes = 20;
-
-    private int awayBlockMaxMinutes = 75;
-
-    /** 是否启用作息与离线块调度。 */
+    /** 是否启用作息调度（睡眠窗口与离线段都受此总开关控制）。 */
     private boolean scheduleEnabled = true;
+
+    /** 是否启用“离开手机”的手动离线块。 */
+    private boolean awayBlocksEnabled = true;
+
+    /** 每日手动离线块，格式 HH:mm-HH:mm；结束时间不晚于开始时间时视为跨零点。 */
+    private List<String> awayBlocks = new ArrayList<>(List.of("10:00-10:40", "15:00-15:40"));
 
     // ---------------- 延迟模型 ----------------
 
@@ -145,14 +147,14 @@ public class DisguiseProperties {
     public void setQuietEnd(String quietEnd) { this.quietEnd = quietEnd; }
     public int getMaxDeferMinutes() { return maxDeferMinutes; }
     public void setMaxDeferMinutes(int maxDeferMinutes) { this.maxDeferMinutes = maxDeferMinutes; }
-    public int getAwayBlocksPerDay() { return awayBlocksPerDay; }
-    public void setAwayBlocksPerDay(int awayBlocksPerDay) { this.awayBlocksPerDay = awayBlocksPerDay; }
-    public int getAwayBlockMinMinutes() { return awayBlockMinMinutes; }
-    public void setAwayBlockMinMinutes(int awayBlockMinMinutes) { this.awayBlockMinMinutes = awayBlockMinMinutes; }
-    public int getAwayBlockMaxMinutes() { return awayBlockMaxMinutes; }
-    public void setAwayBlockMaxMinutes(int awayBlockMaxMinutes) { this.awayBlockMaxMinutes = awayBlockMaxMinutes; }
     public boolean isScheduleEnabled() { return scheduleEnabled; }
     public void setScheduleEnabled(boolean scheduleEnabled) { this.scheduleEnabled = scheduleEnabled; }
+    public boolean isAwayBlocksEnabled() { return awayBlocksEnabled; }
+    public void setAwayBlocksEnabled(boolean awayBlocksEnabled) { this.awayBlocksEnabled = awayBlocksEnabled; }
+    public List<String> getAwayBlocks() { return awayBlocks; }
+    public void setAwayBlocks(List<String> awayBlocks) {
+        this.awayBlocks = awayBlocks == null ? new ArrayList<>() : new ArrayList<>(awayBlocks);
+    }
     public int getReadDelayMinMs() { return readDelayMinMs; }
     public void setReadDelayMinMs(int readDelayMinMs) { this.readDelayMinMs = readDelayMinMs; }
     public int getReadDelayMaxMs() { return readDelayMaxMs; }

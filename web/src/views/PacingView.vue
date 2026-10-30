@@ -16,15 +16,18 @@ interface PacingItem {
 
 const loading = ref(false)
 const previewLoading = ref(false)
+const savingAway = ref(false)
 const config = ref<DisguiseConfig | null>(null)
 const status = ref<DisguiseStatus | null>(null)
+const awayBlocksEnabled = ref(true)
+const awayBlocks = ref<Array<{ start: string; end: string }>>([])
 const previewText = ref('好的，我整理一下，稍后发你。')
 const previewType = ref<'PRIVATE' | 'GROUP'>('PRIVATE')
 const previewResult = ref<DisguisePreview | null>(null)
 
 const stateLabels: Record<string, string> = {
   ACTIVE: '活跃在线',
-  AWAY: '随机离开',
+  AWAY: '离开手机',
   ASLEEP: '睡眠窗口',
 }
 
@@ -33,6 +36,14 @@ const enabled = computed(() => Boolean(config.value?.enabled))
 const nextActive = computed(() => {
   if (!status.value?.nextActiveAt) return '—'
   return dayjs(status.value.nextActiveAt).format('MM-DD HH:mm:ss')
+})
+
+const awayBlocksDirty = computed(() => {
+  const c = config.value
+  if (!c) return false
+  const current = awayBlocks.value.map((block) => `${block.start}-${block.end}`).sort().join(',')
+  const saved = [...c.awayBlocks].sort().join(',')
+  return c.awayBlocksEnabled !== awayBlocksEnabled.value || current !== saved
 })
 
 const summary = computed(() => {
@@ -116,10 +127,12 @@ const delayItems = computed<PacingItem[]>(() => {
       env: 'DISGUISE_QUIET_START / DISGUISE_QUIET_END / DISGUISE_MAX_DEFER_MINUTES',
     },
     {
-      label: '随机离线段',
-      value: `${c.awayBlocksPerDay} 段/天，每段 ${c.awayBlockMinMinutes} – ${c.awayBlockMaxMinutes} 分钟`,
-      description: '每天生成若干随机离线时段，避免账号全天在线。关闭日程后此规则不生效。',
-      env: 'DISGUISE_AWAY_BLOCKS / DISGUISE_AWAY_BLOCK_MIN_MINUTES / DISGUISE_AWAY_BLOCK_MAX_MINUTES',
+      label: '手动离线段',
+      value: c.awayBlocksEnabled
+        ? (c.awayBlocks.length ? c.awayBlocks.join('、') : '已开启，未配置时间段')
+        : '已关闭',
+      description: '由你手动维护每日离线时间段。独立开关关闭后，此规则不生效，但睡眠窗口仍按原日程执行。',
+      env: 'DISGUISE_AWAY_BLOCKS_ENABLED / DISGUISE_AWAY_BLOCKS',
     },
     {
       label: '回复分条',
@@ -197,6 +210,65 @@ const frequencyItems = computed<PacingItem[]>(() => {
   ]
 })
 
+function applyAwayConfig(value: DisguiseConfig) {
+  awayBlocksEnabled.value = value.awayBlocksEnabled
+  awayBlocks.value = value.awayBlocks.flatMap((block) => {
+    const separator = block.indexOf('-')
+    if (separator <= 0) return []
+    return [{ start: block.slice(0, separator), end: block.slice(separator + 1) }]
+  })
+}
+
+function addAwayBlock() {
+  if (awayBlocks.value.length >= 6) return
+  const defaults = [
+    { start: '09:00', end: '09:40' },
+    { start: '12:00', end: '12:40' },
+    { start: '15:00', end: '15:40' },
+    { start: '18:00', end: '18:40' },
+    { start: '21:00', end: '21:40' },
+    { start: '23:00', end: '23:40' },
+  ]
+  awayBlocks.value.push({ ...defaults[awayBlocks.value.length] })
+}
+
+function removeAwayBlock(index: number) {
+  awayBlocks.value.splice(index, 1)
+}
+
+async function saveAwayBlocks() {
+  if (!config.value) return
+  if (awayBlocks.value.some((block) => !block.start || !block.end)) {
+    ElMessage.warning('请补全每个离线块的开始和结束时间')
+    return
+  }
+  const blocks = awayBlocks.value.map((block) => `${block.start}-${block.end}`)
+  if (awayBlocksEnabled.value && blocks.length === 0) {
+    ElMessage.warning('开启离开手机后至少需要配置一个时间段')
+    return
+  }
+
+  savingAway.value = true
+  try {
+    const updated = await adminApi.updateDisguiseAwayBlocks({
+      enabled: awayBlocksEnabled.value,
+      blocks,
+    })
+    config.value = updated
+    applyAwayConfig(updated)
+    try {
+      status.value = await adminApi.disguiseStatus()
+    } catch {
+      // 配置已保存；状态刷新失败不覆盖成功提示。
+    }
+    ElMessage.success('离线块已保存并立即生效')
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    savingAway.value = false
+  }
+}
+
 async function load() {
   loading.value = true
   const [configResult, statusResult] = await Promise.allSettled([
@@ -205,6 +277,7 @@ async function load() {
   ])
   if (configResult.status === 'fulfilled') {
     config.value = configResult.value
+    applyAwayConfig(configResult.value)
   } else {
     ElMessage.error(getErrorMessage(configResult.reason))
   }
@@ -266,7 +339,7 @@ onMounted(load)
     <div class="page-head">
       <div>
         <h1>发信节奏</h1>
-        <p>集中查看发信延迟、发送频率、配额、睡眠窗口和分条规则。所有限制同时生效，最终发送时间取最晚值。</p>
+        <p>集中查看发信延迟、发送频率、配额、睡眠窗口和分条规则；离开手机的离线块可在这里手动配置。</p>
       </div>
       <el-button :icon="Refresh" @click="load">刷新</el-button>
     </div>
@@ -290,6 +363,75 @@ onMounted(load)
         <small>{{ item.note }}</small>
       </article>
     </div>
+
+    <section class="surface-card away-card">
+      <div class="surface-card__head">
+        <div>
+          <h2>离开手机（手动离线块）</h2>
+          <p class="head-desc">按每日固定时间段暂停回复。关闭此开关只会停用离线块，不会影响睡眠窗口。</p>
+        </div>
+        <span class="count-badge">{{ awayBlocks.length }} / 6 段</span>
+      </div>
+      <div class="surface-card__body">
+        <div class="away-toolbar">
+          <div class="away-toolbar__copy">
+            <strong>启用离线块</strong>
+            <span>开启后，命中时间段的消息会顺延到离线结束；关闭后账号在白天不再因离线块暂停。</span>
+          </div>
+          <el-switch
+            v-model="awayBlocksEnabled"
+            :disabled="savingAway"
+            active-text="开启"
+            inactive-text="关闭"
+          />
+        </div>
+
+        <div v-if="awayBlocks.length" class="away-list">
+          <div v-for="(block, index) in awayBlocks" :key="index" class="away-row">
+            <span class="away-row__index">{{ index + 1 }}</span>
+            <el-time-picker
+              v-model="block.start"
+              format="HH:mm"
+              value-format="HH:mm"
+              :clearable="false"
+              :disabled="savingAway"
+              placeholder="开始"
+            />
+            <span class="away-row__sep">至</span>
+            <el-time-picker
+              v-model="block.end"
+              format="HH:mm"
+              value-format="HH:mm"
+              :clearable="false"
+              :disabled="savingAway"
+              placeholder="结束"
+            />
+            <el-button text type="danger" :disabled="savingAway" @click="removeAwayBlock(index)">
+              删除
+            </el-button>
+          </div>
+        </div>
+        <div v-else class="away-empty">尚未配置离线时间段。添加后保存即可生效。</div>
+
+        <div class="away-actions">
+          <span>每日重复 · 最多 6 段 · 支持跨零点（例如 23:30-00:30）</span>
+          <div class="away-actions__buttons">
+            <el-button size="small" :disabled="awayBlocks.length >= 6 || savingAway" @click="addAwayBlock">
+              添加时间段
+            </el-button>
+            <el-button
+              type="primary"
+              size="small"
+              :disabled="!awayBlocksDirty || savingAway"
+              :loading="savingAway"
+              @click="saveAwayBlocks"
+            >
+              保存并生效
+            </el-button>
+          </div>
+        </div>
+      </div>
+    </section>
 
     <div class="pacing-grid">
       <section class="surface-card">
@@ -348,12 +490,12 @@ onMounted(load)
           <li><b>清洗与分条</b><span>先做文风清洗、复读检查和按句分条。</span></li>
           <li><b>计算基础延迟</b><span>读消息 + 思考 + 按字数打字，再叠加昼夜节律和群聊系数。</span></li>
           <li><b>叠加随机停顿</b><span>按概率增加长停顿或离开手机时间，并受单条最大延迟限制。</span></li>
-          <li><b>检查作息</b><span>命中睡眠窗口或随机离线段时，顺延到下一次活跃时间。</span></li>
+          <li><b>检查作息</b><span>命中睡眠窗口或已开启的手动离线段时，顺延到下一次活跃时间。</span></li>
           <li><b>检查配额</b><span>单会话分钟/10分钟/小时/天和账号小时/天同时检查，取最晚释放时间。</span></li>
           <li><b>记录并发送</b><span>分条消息按间隔依次发出，每条都占用对应窗口的配额。</span></li>
         </ol>
         <div class="note-line">
-          修改方式：当前值来自后端环境变量。调整后重启后端生效；页面中的环境变量名就是对应配置项。
+          修改方式：离线块可在上方直接编辑并立即生效；其余值来自后端环境变量，调整后重启后端生效。
         </div>
       </div>
     </section>
@@ -528,6 +670,110 @@ onMounted(load)
   font-size: 18px;
   font-weight: 680;
   letter-spacing: -0.02em;
+}
+
+.away-card {
+  margin-bottom: 12px;
+}
+
+.away-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 10px 12px;
+  border: 1px solid #dbeafe;
+  border-radius: var(--radius-sm);
+  background: #f5f9ff;
+}
+
+.away-toolbar__copy {
+  min-width: 0;
+}
+
+.away-toolbar__copy strong,
+.away-toolbar__copy span {
+  display: block;
+}
+
+.away-toolbar__copy strong {
+  color: var(--ink);
+  font-size: var(--fs-sm);
+  font-weight: 650;
+}
+
+.away-toolbar__copy span {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.away-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.away-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  background: #fbfcfe;
+}
+
+.away-row__index {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  color: #1d4ed8;
+  background: #eff6ff;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.away-row :deep(.el-date-editor.el-input) {
+  width: 122px;
+}
+
+.away-row__sep {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.away-empty {
+  margin-top: 10px;
+  padding: 14px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--muted);
+  font-size: 10px;
+  text-align: center;
+}
+
+.away-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+}
+
+.away-actions > span {
+  color: var(--muted-soft);
+  font-size: 10px;
+}
+
+.away-actions__buttons {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
 }
 
 .pacing-grid {
@@ -764,6 +1010,24 @@ onMounted(load)
 
   .pacing-item__head code {
     white-space: normal;
+  }
+
+  .away-toolbar,
+  .away-actions {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .away-row {
+    flex-wrap: wrap;
+  }
+
+  .away-actions__buttons {
+    width: 100%;
+  }
+
+  .away-actions__buttons .el-button {
+    flex: 1;
   }
 }
 </style>
