@@ -40,6 +40,11 @@ const router = createRouter({
           meta: { title: '运行策略' },
         },
         {
+          path: 'pacing',
+          name: 'pacing',
+          component: () => import('@/views/PacingView.vue'),
+          meta: { title: '发信节奏' },
+        },        {
           path: 'conversations',
           name: 'conversations',
           component: () => import('@/views/ConversationsView.vue'),
@@ -101,3 +106,4 @@ router.afterEach((to) => {
 })
 
 export default router
+

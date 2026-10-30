@@ -61,6 +61,9 @@ function logout() {
         <el-menu-item index="/settings">
           <el-icon><Operation /></el-icon><span>运行策略</span>
         </el-menu-item>
+        <el-menu-item index="/pacing">
+          <el-icon><Timer /></el-icon><span>发信节奏</span>
+        </el-menu-item>
         <el-menu-item index="/conversations">
           <el-icon><ChatDotRound /></el-icon><span>会话记录</span>
         </el-menu-item>
@@ -348,3 +351,5 @@ function logout() {
   }
 }
 </style>
+
+

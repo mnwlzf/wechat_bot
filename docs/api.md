@@ -133,6 +133,7 @@ $headers = @{ Authorization = "Bearer dev-admin-token" }
 }
 ```
 
+`GET /api/admin/disguise/config` 返回当前生效的发信延迟、频率、配额、睡眠窗口和分条参数。管理端“发信节奏”页面使用该接口逐项展示参数与说明。
 `POST /api/admin/disguise/preview` 走完整条伪装链路但不写库、不占配额：
 
 ```json
@@ -271,4 +272,5 @@ $headers = @{ Authorization = "Bearer dev-admin-token" }
 - `404`：资源不存在
 - `503`：Hook 不可连接、未登录或版本不匹配
 - `500`：未预期服务器错误
+
 

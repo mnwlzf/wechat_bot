@@ -7,6 +7,9 @@ import type {
   Conversation,
   Dashboard,
   DiagnosticsPayload,
+  DisguiseConfig,
+  DisguisePreview,
+  DisguiseStatus,
   FailedOutbox,
   FilterPolicyInput,
   HookStatus,
@@ -117,6 +120,18 @@ export const adminApi = {
   async deleteAutoReply(id: string) {
     await http.delete(`/api/admin/auto-replies/${id}`)
   },
+  async disguiseConfig() {
+    const { data } = await http.get<DisguiseConfig>('/api/admin/disguise/config')
+    return data
+  },
+  async disguiseStatus() {
+    const { data } = await http.get<DisguiseStatus>('/api/admin/disguise')
+    return data
+  },
+  async disguisePreview(payload: { chatId?: string; chatType: 'PRIVATE' | 'GROUP'; text: string }) {
+    const { data } = await http.post<DisguisePreview>('/api/admin/disguise/preview', payload)
+    return data
+  },
   async diagnostics() {
     const { data } = await http.get<DiagnosticsPayload>('/api/admin/diagnostics')
     return data
@@ -174,5 +189,9 @@ export const adminApi = {
     return data
   },
 }
+
+
+
+
 
 

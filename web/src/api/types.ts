@@ -276,3 +276,85 @@ export interface HookStatus {
   message?: string
   checkedAt: string
 }
+
+export interface DisguiseConfig {
+  enabled: boolean
+  scheduleEnabled: boolean
+  zone: string
+  quietStart: string
+  quietEnd: string
+  maxDeferMinutes: number
+  awayBlocksPerDay: number
+  awayBlockMinMinutes: number
+  awayBlockMaxMinutes: number
+  readDelayMinMs: number
+  readDelayMaxMs: number
+  thinkBaseMs: number
+  charsPerSecond: number
+  typingJitter: number
+  maxDelayMs: number
+  longPauseProbability: number
+  longPauseMaxMs: number
+  awayProbability: number
+  awayMinMs: number
+  awayMaxMs: number
+  groupDelayFactor: number
+  splitEnabled: boolean
+  maxParts: number
+  maxPartChars: number
+  maxReplyChars: number
+  partGapMinMs: number
+  partGapMaxMs: number
+  perMinute: number
+  per10Minutes: number
+  perHour: number
+  perDay: number
+  globalPerHour: number
+  globalPerDay: number
+  minGapMs: number
+  burstSize: number
+  burstCooldownMinMs: number
+  burstCooldownMaxMs: number
+}
+
+export interface DisguiseDecision {
+  at: string
+  chatId: string
+  state: string
+  decision: string
+  parts: number
+  delaySeconds: number
+  preview: string
+}
+
+export interface DisguiseStatus {
+  enabled: boolean
+  state: string
+  zone: string
+  quietHours: string
+  nextActiveAt: string
+  partsLimit: number
+  perMinute: number
+  per10Minutes: number
+  perHour: number
+  perDay: number
+  planned: number
+  dropped: number
+  deferred: number
+  repetitive: number
+  globalSentToday: number
+  recent: DisguiseDecision[]
+}
+
+export interface DisguisePreviewPart {
+  text: string
+  delaySeconds: number
+}
+
+export interface DisguisePreview {
+  decision: string
+  note: string
+  dropped: boolean
+  aiScore: number
+  parts: DisguisePreviewPart[]
+}
