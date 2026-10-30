@@ -19,7 +19,7 @@ WeChat 4.1.10.27
                  └─ Vue 3 静态资源         由 Spring Boot 托管
 ```
 
-运行期只有 Java 进程和 PostgreSQL/Redis。Node.js 仅在修改前端时需要，用于 `npm run build`。
+运行期只有 Java 进程和 PostgreSQL/Redis。Node.js 仅在开发前端时需要（`npm run dev` / `npm run build`）。
 
 ## 2. 已实现能力
 
@@ -119,7 +119,39 @@ Copy-Item .env.example .env
 http://localhost:8080
 ```
 
-### 5.3 构建单体 JAR
+### 5.3 前端独立开发（热更新）
+
+前端可以完全脱离后端进程独立启动，改 Vue 代码浏览器立即热更新：
+
+```powershell
+# 仓库根目录，一条命令即可（= npm --prefix web run dev）
+npm run dev
+```
+
+首次拉取仓库后先装前端依赖（`web/node_modules` 不存在时）：
+
+```powershell
+npm run web:install     # = npm --prefix web ci
+```
+
+打开 `http://127.0.0.1:5173/` 即可，接口请求会被 Vite 代理到后端：
+
+| 前端路径 | 转发到 |
+|---|---|
+| `/api/**` | `VITE_PROXY_TARGET`，留空则 `http://127.0.0.1:${SERVER_PORT}`（当前 18080） |
+| `/actuator/**` | 同上 |
+
+所以后端只要在本机跑着（IDEA 或脚本都行），前端 `npm run dev` 单独起也能登录、调接口。相关环境变量见根目录 `.env`：
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `VITE_DEV_PORT` | `5173` | 开发服务器端口 |
+| `VITE_DEV_HOST` | `127.0.0.1` | 监听地址；`0.0.0.0` 才对外暴露（手机真机调试用） |
+| `VITE_PROXY_TARGET` | `http://127.0.0.1:${SERVER_PORT}` | 代理目标，后端换端口时改这里 |
+
+> 默认只绑 `127.0.0.1`：Vite 默认的 `localhost` 在 Windows 上只会监听 `::1`，会让 `http://127.0.0.1:5173` 连不上。
+
+### 5.4 构建单体 JAR
 
 首次修改前端后：
 
@@ -134,7 +166,7 @@ java -jar server/target/wechat-bot-server-0.1.0.jar
 
 Maven 会把 `web/dist` 复制进 JAR 的 `static/` 目录。只修改后端时可以跳过前端构建，直接执行 Maven 打包。
 
-### 5.4 在 IntelliJ IDEA 里运行
+### 5.5 在 IntelliJ IDEA 里运行
 
 可以，仓库已带运行配置 `.run/WeChatBot Backend.run.xml`，IDEA 打开项目后直接出现在右上角下拉框里。
 
@@ -154,7 +186,7 @@ Maven 会把 `web/dist` 复制进 JAR 的 `static/` 目录。只修改后端时�
 
 端口说明：`.env` 里的 `SERVER_PORT` 也改成了 `18080`，与 `scripts/run-backend.ps1`、`wechat-guard.ps1`、`write-wx-ini.ps1` 里的回调地址保持一致。**IDEA 与脚本二选一运行**，同一个端口不能同时被两个实例占用。
 
-前端不需要额外构建步骤：`web/dist` 已存在时，后端会直接从 `file:web/dist/` 提供页面（`WebConfig` 里配置了 classpath 与文件目录两级回退），访问 `http://127.0.0.1:18080/` 即可。如果改过前端代码，跑一次 `pnpm --dir web build` 刷新 `web/dist`。
+前端不需要额外构建步骤：`web/dist` 已存在时，后端会直接从 `file:web/dist/` 提供页面（`WebConfig` 里配置了 classpath 与文件目录两级回退），访问 `http://127.0.0.1:18080/` 即可。如果改过前端代码，跑一次 `npm run build`（= `npm --prefix web run build`）刷新 `web/dist`；开发阶段更推荐 `npm run dev` 边改边看（见 5.3）。
 
 ## 6. 配置允许的聊天
 
@@ -261,6 +293,7 @@ recv_url=http://127.0.0.1:8080/api/wechat/hook/callback
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:5173,http://127.0.0.1:5173` | 跨域白名单 |
 | `VITE_API_BASE_URL` | 空 | 前端接口基地址，空 = 走 Vite 代理 |
 | `VITE_DEV_PORT` | `5173` | Vite 开发服务器端口 |
+| `VITE_DEV_HOST` | `127.0.0.1` | 开发服务器监听地址，`0.0.0.0` 才对外暴露 |
 | `VITE_PROXY_TARGET` | `http://127.0.0.1:${SERVER_PORT}` | Vite 代理转发的后端地址 |
 
 微信 Hook：
