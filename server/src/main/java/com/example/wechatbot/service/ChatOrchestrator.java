@@ -38,6 +38,8 @@ public class ChatOrchestrator {
     private final SearchAugmenter searchAugmenter;
     private final DisguiseService disguise;
     private final DisguiseProperties disguiseProperties;
+    private final AutoReplyService autoReply;
+    private final ContentFilterService contentFilter;
 
     public ChatOrchestrator(BotConfigRepository botRepository,
                             ConversationRepository conversationRepository,
@@ -46,7 +48,9 @@ public class ChatOrchestrator {
                             LlmGateway llmGateway,
                             SearchAugmenter searchAugmenter,
                             DisguiseService disguise,
-                            DisguiseProperties disguiseProperties) {
+                            DisguiseProperties disguiseProperties,
+                            AutoReplyService autoReply,
+                            ContentFilterService contentFilter) {
         this.botRepository = botRepository;
         this.conversationRepository = conversationRepository;
         this.messageRepository = messageRepository;
@@ -55,6 +59,8 @@ public class ChatOrchestrator {
         this.searchAugmenter = searchAugmenter;
         this.disguise = disguise;
         this.disguiseProperties = disguiseProperties;
+        this.autoReply = autoReply;
+        this.contentFilter = contentFilter;
     }
 
     @Async("chatExecutor")
@@ -79,11 +85,41 @@ public class ChatOrchestrator {
                 .orElseThrow(() -> new IllegalStateException("入站消息不存在"));
 
         try {
-            List<ChatMessage> context = buildContext(bot, conversation, inbound);
-            LlmReply reply = llmGateway.chat(bot, context);
-            if (enqueueOutbox && disguiseProperties.isRegenerateOnRepeat()
-                    && disguise.isRepetitive(conversation.getChatId(), reply.content())) {
-                reply = regenerateWithVariation(bot, context, reply);
+            LlmReply reply = autoReply.match(conversation.getChatType(), inbound.getContent())
+                    .map(rule -> {
+                        log.info("关键词规则命中，跳过模型: conversation={} rule={}", conversationId, rule.getName());
+                        return LlmReply.rule(rule.getReply());
+                    })
+                    .orElse(null);
+
+            if (reply == null) {
+                List<ChatMessage> context = buildContext(bot, conversation, inbound);
+                reply = llmGateway.chat(bot, context);
+                if (enqueueOutbox && disguiseProperties.isRegenerateOnRepeat()
+                        && disguise.isRepetitive(conversation.getChatId(), reply.content())) {
+                    reply = regenerateWithVariation(bot, context, reply);
+                }
+            }
+
+            ContentFilterService.Result filtered = contentFilter.apply(reply.content());
+            if (filtered.blocked()) {
+                inbound.setStatus(MessageStatus.SUCCESS);
+                inbound.setErrorMessage(null);
+                messageRepository.save(inbound);
+
+                MessageLog blocked = outboundLog(conversationId, bot, reply, reply.content());
+                blocked.setStatus(MessageStatus.IGNORED);
+                blocked.setErrorMessage(abbreviate(filtered.note(), 1000));
+                messageRepository.save(blocked);
+                conversation.setLastMessage(abbreviate(reply.content(), 500));
+                conversation.setLastMessageAt(OffsetDateTime.now());
+                conversationRepository.save(conversation);
+                log.info("敏感词拦截，未发送: conversation={} note={}", conversationId, filtered.note());
+                return reply;
+            }
+            if (filtered.content() != null && !filtered.content().equals(reply.content())) {
+                log.info("敏感词改写: conversation={} note={}", conversationId, filtered.note());
+                reply = reply.withContent(filtered.content());
             }
 
             inbound.setStatus(MessageStatus.SUCCESS);

@@ -39,6 +39,10 @@ public class Conversation {
     @Column(name = "last_message_at", nullable = false)
     private OffsetDateTime lastMessageAt;
 
+    /** 人工接管：接管期间收到的消息只记录不自动回复。 */
+    @Column(name = "bot_paused", nullable = false)
+    private boolean botPaused = false;
+
     @Column(name = "created_at", nullable = false)
     private OffsetDateTime createdAt;
 

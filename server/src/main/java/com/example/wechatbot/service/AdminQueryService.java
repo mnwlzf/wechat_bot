@@ -14,6 +14,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
@@ -75,8 +76,18 @@ public class AdminQueryService {
                 conversation.getChatName(),
                 conversation.getChatType(),
                 conversation.getLastMessage(),
-                conversation.getLastMessageAt()
+                conversation.getLastMessageAt(),
+                conversation.isBotPaused()
         );
+    }
+
+    /** 人工接管开关：接管后该会话不再自动回复，只记录消息。 */
+    @Transactional
+    public AdminDtos.ConversationView setTakeover(UUID conversationId, boolean paused) {
+        Conversation conversation = conversationRepository.findById(conversationId)
+                .orElseThrow(() -> ApiException.notFound("会话不存在"));
+        conversation.setBotPaused(paused);
+        return toConversationView(conversationRepository.save(conversation));
     }
 
     private AdminDtos.MessageView toMessageView(MessageLog message) {

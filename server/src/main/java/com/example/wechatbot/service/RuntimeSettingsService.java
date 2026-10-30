@@ -31,6 +31,8 @@ public class RuntimeSettingsService {
     public static final String KEY_GROUPS_ENABLED = "wechat.groupsEnabled";
     public static final String KEY_LLM_FALLBACK = "llm.fallbackEnabled";
     public static final String KEY_SEARCH_ENABLED = "llm.searchEnabled";
+    public static final String KEY_FILTER_WORDS = "filter.bannedWords";
+    public static final String KEY_FILTER_MODE = "filter.mode";
 
     private final AppSettingRepository repository;
     private final WeChatHookProperties hookProperties;
@@ -95,6 +97,28 @@ public class RuntimeSettingsService {
         log.info("模型策略已更新: fallbackEnabled={} searchEnabled={}", fallbackEnabled, searchEnabled);
     }
 
+    // ---------- 内容过滤 ----------
+
+    /** 敏感词模式：off 关闭；rewrite 用 * 遮蔽；block 直接不发送。 */
+    public String filterMode() {
+        String raw = value(KEY_FILTER_MODE, "off");
+        String mode = raw == null ? "off" : raw.trim().toLowerCase(java.util.Locale.ROOT);
+        return switch (mode) {
+            case "rewrite", "block" -> mode;
+            default -> "off";
+        };
+    }
+
+    public List<String> bannedWords() {
+        return parseList(value(KEY_FILTER_WORDS, ""));
+    }
+
+    public void updateFilterPolicy(List<String> words, String mode) {
+        save(KEY_FILTER_WORDS, String.join(",", sanitize(words)));
+        save(KEY_FILTER_MODE, mode == null ? "off" : mode.trim().toLowerCase(java.util.Locale.ROOT));
+        log.info("内容过滤已更新: mode={} words={}", filterMode(), bannedWords().size());
+    }
+
     // ---------- 管理端视图 ----------
 
     public Map<String, Object> snapshot() {
@@ -104,6 +128,8 @@ public class RuntimeSettingsService {
         result.put("groupsEnabled", view(KEY_GROUPS_ENABLED, groupsEnabled()));
         result.put("fallbackEnabled", view(KEY_LLM_FALLBACK, llmFallbackEnabled()));
         result.put("searchEnabled", view(KEY_SEARCH_ENABLED, searchEnabled()));
+        result.put("bannedWords", view(KEY_FILTER_WORDS, bannedWords()));
+        result.put("filterMode", view(KEY_FILTER_MODE, filterMode()));
         return result;
     }
 

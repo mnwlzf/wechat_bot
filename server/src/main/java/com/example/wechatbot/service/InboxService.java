@@ -100,6 +100,13 @@ public class InboxService {
         inbound.setStatus(MessageStatus.RECEIVED);
         inbound = messageRepository.save(inbound);
 
+        if (conversation.isBotPaused()) {
+            inbound.setStatus(MessageStatus.IGNORED);
+            inbound.setErrorMessage("人工接管中，未自动回复");
+            messageRepository.save(inbound);
+            return new AgentDtos.EventAccepted("PAUSED", "人工接管中，未自动回复", conversation.getId());
+        }
+
         final var botId = bot.getId();
         final var conversationId = conversation.getId();
         final var inboundId = inbound.getId();

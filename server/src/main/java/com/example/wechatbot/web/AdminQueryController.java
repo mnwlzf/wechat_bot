@@ -42,5 +42,12 @@ public class AdminQueryController {
         return service.messages(id, page, size);
     }
 
+    /** 人工接管开关：开启后该会话只记录消息、不再自动回复。 */
+    @PostMapping("/conversations/{id}/takeover")
+    public AdminDtos.ConversationView takeover(@PathVariable UUID id,
+                                               @RequestBody AdminDtos.TakeoverRequest request) {
+        return service.setTakeover(id, request.paused());
+    }
+
     public record PingResponse(boolean ok) {}
 }

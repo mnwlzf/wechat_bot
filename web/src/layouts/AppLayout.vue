@@ -6,7 +6,9 @@ import {
   Cpu,
   DataBoard,
   MagicStick,
+  Monitor,
   Operation,
+  Promotion,
   Setting,
   SwitchButton,
 } from '@element-plus/icons-vue'
@@ -60,8 +62,14 @@ function logout() {
         <el-menu-item index="/conversations">
           <el-icon><ChatDotRound /></el-icon><span>会话记录</span>
         </el-menu-item>
+        <el-menu-item index="/rules">
+          <el-icon><Promotion /></el-icon><span>自动回复</span>
+        </el-menu-item>
         <el-menu-item index="/debug">
           <el-icon><MagicStick /></el-icon><span>在线调试</span>
+        </el-menu-item>
+        <el-menu-item index="/diagnostics">
+          <el-icon><Monitor /></el-icon><span>诊断中心</span>
         </el-menu-item>
       </el-menu>
 

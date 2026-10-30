@@ -38,4 +38,10 @@ public class SettingsController {
         settings.updateLlmPolicy(request.fallbackEnabled(), request.searchEnabled());
         return settings.snapshot();
     }
+
+    @PutMapping("/filter")
+    public Map<String, Object> updateFilter(@RequestBody AdminDtos.FilterPolicyUpdate request) {
+        settings.updateFilterPolicy(request.bannedWords(), request.mode());
+        return settings.snapshot();
+    }
 }

@@ -1,9 +1,14 @@
 import { http } from './client'
 import type {
+  AutoReplyRule,
+  AutoReplyRuleInput,
   Bot,
   BotInput,
   Conversation,
   Dashboard,
+  DiagnosticsPayload,
+  FailedOutbox,
+  FilterPolicyInput,
   HookStatus,
   HookSession,
   HookContact,
@@ -91,6 +96,39 @@ export const adminApi = {
   },
   async debugChat(botId: string, content: string) {
     const { data } = await http.post<DebugResult>('/api/admin/debug/chat', { botId, content })
+    return data
+  },
+  async autoReplies() {
+    const { data } = await http.get<AutoReplyRule[]>('/api/admin/auto-replies')
+    return data
+  },
+  async createAutoReply(payload: AutoReplyRuleInput) {
+    const { data } = await http.post<AutoReplyRule>('/api/admin/auto-replies', payload)
+    return data
+  },
+  async updateAutoReply(id: string, payload: AutoReplyRuleInput) {
+    const { data } = await http.put<AutoReplyRule>(`/api/admin/auto-replies/${id}`, payload)
+    return data
+  },
+  async deleteAutoReply(id: string) {
+    await http.delete(`/api/admin/auto-replies/${id}`)
+  },
+  async diagnostics() {
+    const { data } = await http.get<DiagnosticsPayload>('/api/admin/diagnostics')
+    return data
+  },
+  async retryOutbox(id: string) {
+    const { data } = await http.post<FailedOutbox>(`/api/admin/diagnostics/outbox/${id}/retry`)
+    return data
+  },
+  async setTakeover(conversationId: string, paused: boolean) {
+    const { data } = await http.post<Conversation>(`/api/admin/conversations/${conversationId}/takeover`, {
+      paused,
+    })
+    return data
+  },
+  async updateFilterPolicy(payload: FilterPolicyInput) {
+    const { data } = await http.put<SettingsSnapshot>('/api/admin/settings/filter', payload)
     return data
   },
 }

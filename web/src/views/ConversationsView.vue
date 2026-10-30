@@ -75,6 +75,21 @@ function avatarText(name?: string) {
   return name?.trim().slice(0, 1).toUpperCase() || '?'
 }
 
+async function toggleTakeover(row: Conversation) {
+  const next = row.botPaused
+  try {
+    const updated = await adminApi.setTakeover(row.id, next)
+    row.botPaused = updated.botPaused
+    if (activeConversation.value?.id === row.id) {
+      activeConversation.value.botPaused = updated.botPaused
+    }
+    ElMessage.success(updated.botPaused ? '已接管，该会话不再自动回复' : '已交还机器人自动回复')
+  } catch (error) {
+    row.botPaused = !next
+    ElMessage.error(getErrorMessage(error))
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -111,6 +126,7 @@ onMounted(load)
                 <span class="chat-avatar" :class="row.chatType.toLowerCase()">{{ avatarText(row.chatName) }}</span>
                 <div>
                   <strong>{{ row.chatName }}</strong>
+                  <span v-if="row.botPaused" class="paused-tag">已接管</span>
                   <small class="mono">{{ row.chatId }}</small>
                 </div>
               </div>
@@ -130,6 +146,16 @@ onMounted(load)
           </el-table-column>
           <el-table-column label="最后活跃" width="150">
             <template #default="{ row }">{{ formatTime(row.lastMessageAt) }}</template>
+          </el-table-column>
+          <el-table-column label="接管" width="76">
+            <template #default="{ row }">
+              <el-switch
+                v-model="row.botPaused"
+                size="small"
+                @click.stop
+                @change="toggleTakeover(row)"
+              />
+            </template>
           </el-table-column>
           <el-table-column label="" width="70" align="right">
             <template #default><span class="open-link">查看</span></template>
@@ -160,7 +186,10 @@ onMounted(load)
             {{ avatarText(activeConversation.chatName) }}
           </div>
           <div class="chat-title">
-            <h2>{{ activeConversation.chatName }}</h2>
+            <h2>
+              {{ activeConversation.chatName }}
+              <span v-if="activeConversation.botPaused" class="paused-tag">已接管</span>
+            </h2>
             <p>
               <span class="mono">{{ activeConversation.chatId }}</span> ·
               {{ activeConversation.chatType === 'GROUP' ? '群聊' : '私聊' }}
@@ -266,6 +295,19 @@ onMounted(load)
 }
 
 .open-link { color: #3b82f6; font-size: 12px; }
+
+.paused-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  color: #b45309;
+  background: #fff7ed;
+  font-size: 11px;
+  font-weight: 550;
+  vertical-align: middle;
+}
+
 :deep(.el-table__row) { cursor: pointer; }
 .pagination { display: flex; justify-content: flex-end; padding: 18px 20px; border-top: 1px solid #f1f5f9; }
 .chat-drawer { display: flex; height: 100vh; flex-direction: column; background: #f8fafc; }

@@ -112,4 +112,30 @@ public class OutboxService {
     private String abbreviate(String text, int max) {
         return text.length() <= max ? text : text.substring(0, max);
     }
+
+    /** 诊断页用：最近失败的投递任务。 */
+    public List<OutboxMessage> failed(int limit) {
+        return repository.findByStatusOrderByCreatedAtDesc(
+                OutboxStatus.FAILED, PageRequest.of(0, Math.max(1, Math.min(limit, 100))));
+    }
+
+    public long failedCount() {
+        return repository.countByStatus(OutboxStatus.FAILED);
+    }
+
+    /** 手动重试：清空重试次数与租约，让它重新进入投递队列。 */
+    @Transactional
+    public OutboxMessage retry(UUID id) {
+        OutboxMessage message = repository.findById(id)
+                .orElseThrow(() -> ApiException.notFound("回复消息不存在"));
+        if (message.getStatus() == OutboxStatus.SENT) {
+            throw ApiException.badRequest("该消息已发送成功，无需重试");
+        }
+        message.setStatus(OutboxStatus.PENDING);
+        message.setAttempts(0);
+        message.setLeaseUntil(null);
+        message.setLastError(null);
+        message.setNextAttemptAt(OffsetDateTime.now());
+        return repository.save(message);
+    }
 }

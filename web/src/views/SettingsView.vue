@@ -25,6 +25,21 @@ const llmForm = reactive({
   searchEnabled: true,
 })
 
+const filterForm = reactive({
+  bannedWords: [] as string[],
+  mode: 'off' as 'off' | 'rewrite' | 'block',
+})
+
+const savingFilter = ref(false)
+
+const filterDirty = computed(() => {
+  const saved = snapshot.value
+  if (!saved) return false
+  const savedWords = [...(saved.bannedWords?.value ?? [])].sort().join(',')
+  const currentWords = [...filterForm.bannedWords].sort().join(',')
+  return savedWords !== currentWords || (saved.filterMode?.value ?? 'off') !== filterForm.mode
+})
+
 const chatDirty = computed(() => {
   const saved = snapshot.value
   if (!saved) return false
@@ -71,6 +86,8 @@ async function load() {
     chatForm.groupsEnabled = data.groupsEnabled.value
     llmForm.fallbackEnabled = data.fallbackEnabled.value
     llmForm.searchEnabled = data.searchEnabled.value
+    filterForm.bannedWords = [...(data.bannedWords?.value ?? [])]
+    filterForm.mode = data.filterMode?.value ?? 'off'
   } catch (error) {
     ElMessage.error(getErrorMessage(error))
   } finally {
@@ -165,6 +182,21 @@ async function saveLlm() {
     ElMessage.error(getErrorMessage(error))
   } finally {
     savingLlm.value = false
+  }
+}
+
+async function saveFilter() {
+  savingFilter.value = true
+  try {
+    snapshot.value = await adminApi.updateFilterPolicy({
+      bannedWords: filterForm.bannedWords,
+      mode: filterForm.mode,
+    })
+    ElMessage.success('内容过滤已生效')
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    savingFilter.value = false
   }
 }
 
@@ -336,6 +368,52 @@ onMounted(async () => {
         <div class="card-actions">
           <span v-if="llmDirty" class="dirty-dot">有未保存的改动</span>
           <el-button type="primary" :disabled="!llmDirty" :loading="savingLlm" @click="saveLlm">
+            保存并生效
+          </el-button>
+        </div>
+      </div>
+    </section>
+
+    <section class="surface-card">
+      <div class="surface-card__head">
+        <div>
+          <h2>内容过滤</h2>
+          <p class="head-desc">命中敏感词时改写或直接拦截，避免机器人说出不该说的话。</p>
+        </div>
+        <span class="count-badge">{{ snapshot ? sourceLabel(snapshot.filterMode?.source) : '—' }}</span>
+      </div>
+
+      <div class="surface-card__body">
+        <div class="setting-row">
+          <div>
+            <strong>过滤方式</strong>
+            <small>关闭：不改动；改写：用 * 遮蔽；拦截：该条回复不发送</small>
+          </div>
+          <div class="setting-row__control">
+            <el-radio-group v-model="filterForm.mode" size="small">
+              <el-radio-button label="off">关闭</el-radio-button>
+              <el-radio-button label="rewrite">改写</el-radio-button>
+              <el-radio-button label="block">拦截</el-radio-button>
+            </el-radio-group>
+          </div>
+        </div>
+
+        <el-select
+          v-model="filterForm.bannedWords"
+          class="picker"
+          multiple
+          filterable
+          allow-create
+          default-first-option
+          collapse-tags
+          collapse-tags-tooltip
+          :reserve-keyword="false"
+          placeholder="输入敏感词后回车添加"
+        />
+
+        <div class="card-actions">
+          <span v-if="filterDirty" class="dirty-dot">有未保存的改动</span>
+          <el-button type="primary" :disabled="!filterDirty" :loading="savingFilter" @click="saveFilter">
             保存并生效
           </el-button>
         </div>

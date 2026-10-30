@@ -46,6 +46,18 @@ const router = createRouter({
           meta: { title: '会话记录' },
         },
         {
+          path: 'rules',
+          name: 'rules',
+          component: () => import('@/views/RulesView.vue'),
+          meta: { title: '自动回复' },
+        },
+        {
+          path: 'diagnostics',
+          name: 'diagnostics',
+          component: () => import('@/views/DiagnosticsView.vue'),
+          meta: { title: '诊断中心' },
+        },
+        {
           path: 'debug',
           name: 'debug',
           component: () => import('@/views/DebugView.vue'),

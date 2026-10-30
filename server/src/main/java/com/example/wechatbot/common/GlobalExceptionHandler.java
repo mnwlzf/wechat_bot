@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
@@ -40,6 +41,13 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ErrorResponse> handleWeChatHook(WeChatHookException ex) {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .body(new ErrorResponse(503, ex.getMessage(), OffsetDateTime.now()));
+    }
+
+    /** 请求体缺少 application/json 时返回 415，避免被兜底成 500。 */
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<ErrorResponse> handleMediaType(HttpMediaTypeNotSupportedException ex) {
+        return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE)
+                .body(new ErrorResponse(415, "请求需要 application/json", OffsetDateTime.now()));
     }
 
     /** 静态资源缺失（例如 IDEA 里没执行前端构建）应返回 404，而不是 500。 */

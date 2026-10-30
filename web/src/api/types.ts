@@ -20,6 +20,67 @@ export interface SettingsSnapshot {
   groupsEnabled: RuntimeSetting<boolean>
   fallbackEnabled: RuntimeSetting<boolean>
   searchEnabled: RuntimeSetting<boolean>
+  bannedWords: RuntimeSetting<string[]>
+  filterMode: RuntimeSetting<'off' | 'rewrite' | 'block'>
+}
+
+export interface FilterPolicyInput {
+  bannedWords: string[]
+  mode: 'off' | 'rewrite' | 'block'
+}
+
+export interface AutoReplyRule {
+  id: string
+  name: string
+  matchType: 'EXACT' | 'CONTAINS' | 'REGEX'
+  pattern: string
+  reply: string
+  scope: 'ALL' | 'PRIVATE' | 'GROUP'
+  priority: number
+  enabled: boolean
+  updatedAt: string
+}
+
+export interface AutoReplyRuleInput {
+  name: string
+  matchType: 'EXACT' | 'CONTAINS' | 'REGEX'
+  pattern: string
+  reply: string
+  scope: 'ALL' | 'PRIVATE' | 'GROUP'
+  priority: number
+  enabled: boolean
+}
+
+export interface FailedOutbox {
+  id: string
+  chatId: string
+  content: string
+  status: string
+  attempts: number
+  lastError?: string
+  createdAt: string
+  nextAttemptAt?: string
+}
+
+export interface DiagnosticsPayload {
+  generatedAt: string
+  wechat: {
+    hook: {
+      baseUrl: string
+      reachable: boolean
+      isLogin: unknown
+      moduleBase: string
+      instance: string
+      error: string
+      latencyMs: number
+      checkedAt: string
+    }
+    callback: Record<string, unknown>
+    guard: Record<string, any>
+    allowedChats: string[]
+  }
+  recentCallbacks: Array<Record<string, any>>
+  outbox: { failedCount: number; failed: FailedOutbox[] }
 }
 
 export interface WeChatPolicyInput {
@@ -122,6 +183,7 @@ export interface Conversation {
   chatType: ChatType
   lastMessage: string
   lastMessageAt: string
+  botPaused: boolean
 }
 
 export interface Message {

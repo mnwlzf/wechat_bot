@@ -35,4 +35,6 @@ public interface OutboxMessageRepository extends JpaRepository<OutboxMessage, UU
                                         @Param("now") OffsetDateTime now);
 
     long countByStatus(OutboxStatus status);
+
+    List<OutboxMessage> findByStatusOrderByCreatedAtDesc(OutboxStatus status, Pageable pageable);
 }

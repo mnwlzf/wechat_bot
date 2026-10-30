@@ -87,8 +87,35 @@ public final class AdminDtos {
             String chatName,
             ChatType chatType,
             String lastMessage,
-            OffsetDateTime lastMessageAt
+            OffsetDateTime lastMessageAt,
+            boolean botPaused
     ) {}
+
+    public record TakeoverRequest(boolean paused) {}
+
+    public record AutoReplyRuleInput(
+            @NotBlank @Size(max = 120) String name,
+            @NotBlank @Size(max = 20) String matchType,
+            @NotBlank @Size(max = 500) String pattern,
+            @NotBlank @Size(max = 5000) String reply,
+            @NotBlank @Size(max = 20) String scope,
+            @Min(0) @Max(10000) int priority,
+            boolean enabled
+    ) {}
+
+    public record AutoReplyRuleView(
+            UUID id,
+            String name,
+            String matchType,
+            String pattern,
+            String reply,
+            String scope,
+            int priority,
+            boolean enabled,
+            OffsetDateTime updatedAt
+    ) {}
+
+    public record FilterPolicyUpdate(List<String> bannedWords, String mode) {}
 
     public record MessageView(
             UUID id,
