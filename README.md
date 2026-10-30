@@ -151,6 +151,12 @@ npm run web:install     # = npm --prefix web ci
 
 > 默认只绑 `127.0.0.1`：Vite 默认的 `localhost` 在 Windows 上只会监听 `::1`，会让 `http://127.0.0.1:5173` 连不上。
 
+**在 IntelliJ IDEA 里启动前端**：仓库带了运行配置 `Frontend Dev`（`.run/Frontend Dev.run.xml`），在下拉框里选它点绿色三角即可。
+
+如果报 `Error: Cannot find module '...\web\run'`，是 IDEA 的包管理器被指到了 `node.exe`（于是执行成 `node.exe run dev`）：
+
+`Settings → Languages & Frameworks → Node.js → Package manager` 改成你 Node 目录里的 **`npm.cmd`**（本机是 `C:\Users\zf\AppData\Local\nvm\v22.22.0\npm.cmd`），改完直接重新运行，不用重启。
+
 ### 5.4 构建单体 JAR
 
 首次修改前端后：
