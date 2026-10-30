@@ -220,7 +220,7 @@ onMounted(load)
                 <el-input
                   v-model="form.systemPrompt"
                   type="textarea"
-                  :rows="7"
+                  :rows="5"
                   maxlength="20000"
                   show-word-limit
                   placeholder="你是一个友好、简洁、可靠的微信助手……"
@@ -243,26 +243,26 @@ onMounted(load)
 .status-bar {
   display: flex;
   align-items: center;
-  gap: 14px;
-  margin-bottom: 18px;
-  padding: 14px 20px;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 10px 14px;
   border: 1px solid #d7e7ff;
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   background: #f5f9ff;
 }
 
 .status-bar__dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   flex: 0 0 auto;
   border-radius: 50%;
   background: #22c55e;
-  box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.14);
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.12);
 }
 
 .status-bar.off .status-bar__dot {
   background: var(--muted-soft);
-  box-shadow: 0 0 0 4px rgba(148, 163, 184, 0.16);
+  box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.14);
 }
 
 .status-bar__copy {
@@ -273,13 +273,13 @@ onMounted(load)
 .status-bar__copy strong {
   display: block;
   color: var(--ink);
-  font-size: var(--fs-md);
-  font-weight: 600;
+  font-size: var(--fs-sm);
+  font-weight: 650;
 }
 
 .status-bar__copy span {
   display: block;
-  margin-top: 3px;
+  margin-top: 1px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -289,9 +289,9 @@ onMounted(load)
 
 .status-bar__tag {
   flex: 0 0 auto;
-  padding: 4px 10px;
+  padding: 2px 7px;
   border-radius: 999px;
-  font-size: var(--fs-xs);
+  font-size: 10px;
   font-weight: 600;
 }
 
@@ -306,11 +306,11 @@ onMounted(load)
 }
 
 .form-section:first-child {
-  margin-top: 6px;
+  margin-top: 2px;
 }
 
 .field-block {
-  margin-top: 16px;
+  margin-top: 10px;
 }
 
 .form-footer {
@@ -318,7 +318,7 @@ onMounted(load)
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 16px 22px;
+  padding: 10px 16px;
   border-top: 1px solid var(--line-soft);
   background: #fbfcfe;
 }
@@ -343,3 +343,4 @@ onMounted(load)
   }
 }
 </style>
+

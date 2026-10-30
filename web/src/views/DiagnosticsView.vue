@@ -196,11 +196,11 @@ onMounted(load)
 .status-bar {
   display: flex;
   align-items: center;
-  gap: 14px;
-  margin-bottom: 18px;
-  padding: 16px 20px;
+  gap: 10px;
+  margin-bottom: 12px;
+  padding: 10px 14px;
   border: 1px solid #d7e7ff;
-  border-radius: var(--radius);
+  border-radius: var(--radius-sm);
   background: #f5f9ff;
 }
 
@@ -210,17 +210,17 @@ onMounted(load)
 }
 
 .status-bar__dot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   flex: 0 0 auto;
   border-radius: 50%;
   background: #22c55e;
-  box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.14);
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.12);
 }
 
 .status-bar.offline .status-bar__dot {
   background: #f59e0b;
-  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.16);
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.14);
 }
 
 .status-bar__copy {
@@ -231,13 +231,13 @@ onMounted(load)
 .status-bar__copy strong {
   display: block;
   color: var(--ink);
-  font-size: var(--fs-md);
-  font-weight: 600;
+  font-size: var(--fs-sm);
+  font-weight: 650;
 }
 
 .status-bar__copy span {
   display: block;
-  margin-top: 3px;
+  margin-top: 1px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -247,9 +247,9 @@ onMounted(load)
 
 .status-bar__tag {
   flex: 0 0 auto;
-  padding: 4px 10px;
+  padding: 2px 7px;
   border-radius: 999px;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 650;
   letter-spacing: 0.06em;
 }
@@ -267,14 +267,14 @@ onMounted(load)
 .diag-grid {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
-  gap: 18px;
+  gap: 12px;
   align-items: start;
 }
 
 .side-stack {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 12px;
 }
 
 .side-stack .surface-card + .surface-card {
@@ -284,14 +284,14 @@ onMounted(load)
 .metrics {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-  margin: 0 0 16px;
+  gap: 8px;
+  margin: 0 0 12px;
   padding: 0;
   list-style: none;
 }
 
 .metrics li {
-  padding: 12px 14px;
+  padding: 9px 11px;
   border: 1px solid var(--line-soft);
   border-radius: var(--radius-sm);
   background: #fbfcfe;
@@ -305,9 +305,9 @@ onMounted(load)
 
 .metrics b {
   display: block;
-  margin-top: 4px;
+  margin-top: 2px;
   color: var(--ink);
-  font-size: var(--fs-md);
+  font-size: var(--fs-sm);
   font-weight: 620;
 }
 
@@ -327,7 +327,7 @@ onMounted(load)
 }
 
 .failed-list li {
-  padding: 12px 0;
+  padding: 8px 0;
   border-bottom: 1px solid var(--line-soft);
 }
 
@@ -343,7 +343,7 @@ onMounted(load)
 }
 
 .failed-text {
-  margin: 6px 0 4px;
+  margin: 3px 0 2px;
   color: var(--ink-soft);
   font-size: var(--fs-sm);
   line-height: 1.6;
@@ -370,7 +370,7 @@ onMounted(load)
 }
 
 .small-state {
-  padding: 20px 0;
+  padding: 8px 0;
 }
 
 @media (max-width: 1080px) {
@@ -385,3 +385,4 @@ onMounted(load)
   }
 }
 </style>
+

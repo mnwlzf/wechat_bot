@@ -179,7 +179,7 @@ onMounted(load)
       </div>
     </section>
 
-    <el-drawer v-model="drawerVisible" size="min(680px, 94vw)" :with-header="false" destroy-on-close>
+    <el-drawer v-model="drawerVisible" size="min(620px, 94vw)" :with-header="false" destroy-on-close>
       <div v-if="activeConversation" class="chat-drawer">
         <header class="chat-header">
           <div class="chat-avatar large" :class="activeConversation.chatType.toLowerCase()">
@@ -246,40 +246,40 @@ onMounted(load)
 .toolbar {
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 18px 20px;
-  border-bottom: 1px solid #eef2f7;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line-soft);
 }
 
-.search-input { width: min(360px, 48vw); }
-.total-label { margin-left: auto; color: #94a3b8; font-size: 12px; }
-.conversation-table { min-height: 180px; padding: 0 20px; }
-.conversation-cell { display: flex; align-items: center; gap: 11px; cursor: pointer; }
+.search-input { width: min(320px, 48vw); }
+.total-label { margin-left: auto; color: var(--muted-soft); font-size: 10px; }
+.conversation-table { min-height: 140px; padding: 0 12px; }
+.conversation-cell { display: flex; align-items: center; gap: 8px; cursor: pointer; }
 
 .chat-avatar {
   display: grid;
-  width: 38px;
-  height: 38px;
+  width: 30px;
+  height: 30px;
   flex: 0 0 auto;
   place-items: center;
-  border-radius: 11px;
+  border-radius: 7px;
   color: #1d4ed8;
   background: #eff6ff;
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 750;
 }
 
 .chat-avatar.group { color: #b45309; background: #fffbeb; }
-.chat-avatar.large { width: 44px; height: 44px; border-radius: 13px; }
+.chat-avatar.large { width: 36px; height: 36px; border-radius: 8px; }
 .conversation-cell strong, .conversation-cell small { display: block; }
-.conversation-cell strong { color: #1e293b; font-size: 13px; }
+.conversation-cell strong { color: var(--ink); font-size: var(--fs-sm); }
 
 .conversation-cell small {
   max-width: 200px;
   overflow: hidden;
-  margin-top: 3px;
-  color: #94a3b8;
-  font-size: 11px;
+  margin-top: 1px;
+  color: var(--muted-soft);
+  font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -288,101 +288,100 @@ onMounted(load)
   display: block;
   max-width: 430px;
   overflow: hidden;
-  color: #64748b;
-  font-size: 12px;
+  color: var(--muted);
+  font-size: var(--fs-sm);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.open-link { color: #3b82f6; font-size: 12px; }
+.open-link { color: #3b82f6; font-size: 11px; }
 
 .paused-tag {
   display: inline-block;
-  margin-left: 6px;
-  padding: 1px 7px;
+  margin-left: 5px;
+  padding: 1px 6px;
   border-radius: 999px;
   color: #b45309;
   background: #fff7ed;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 550;
   vertical-align: middle;
 }
-
 :deep(.el-table__row) { cursor: pointer; }
-.pagination { display: flex; justify-content: flex-end; padding: 18px 20px; border-top: 1px solid #f1f5f9; }
-.chat-drawer { display: flex; height: 100vh; flex-direction: column; background: #f8fafc; }
+.pagination { display: flex; justify-content: flex-end; padding: 8px 12px; border-top: 1px solid var(--line-soft); }
+.chat-drawer { display: flex; height: 100vh; flex-direction: column; background: #f7f9fc; }
 
 .chat-header {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 18px 22px;
-  border-bottom: 1px solid #e8eef6;
+  gap: 9px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
   background: #fff;
 }
 
 .chat-title { min-width: 0; flex: 1; }
-.chat-title h2 { margin: 0; font-size: 15px; }
+.chat-title h2 { margin: 0; font-size: var(--fs-md); }
 
 .chat-title p {
   overflow: hidden;
-  margin: 4px 0 0;
-  color: #94a3b8;
-  font-size: 11px;
+  margin: 2px 0 0;
+  color: var(--muted-soft);
+  font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.chat-body { flex: 1; overflow-y: auto; padding: 24px 22px 40px; }
-.message-row { display: flex; align-items: flex-start; gap: 9px; margin-bottom: 20px; }
+.chat-body { flex: 1; overflow-y: auto; padding: 16px 14px 28px; }
+.message-row { display: flex; align-items: flex-start; gap: 7px; margin-bottom: 12px; }
 .message-row.outbound { justify-content: flex-end; }
 
 .message-avatar {
   display: grid;
-  width: 30px;
-  height: 30px;
+  width: 24px;
+  height: 24px;
   flex: 0 0 auto;
   place-items: center;
-  border-radius: 9px;
+  border-radius: 6px;
   color: #475569;
   background: #e2e8f0;
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 700;
 }
 
 .message-avatar.bot { color: #1d4ed8; background: #dbeafe; }
-.message-stack { max-width: min(78%, 480px); }
+.message-stack { max-width: min(80%, 460px); }
 .outbound .message-stack { text-align: right; }
 
 .message-info {
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 5px;
-  color: #94a3b8;
-  font-size: 11px;
+  gap: 6px;
+  margin-bottom: 3px;
+  color: var(--muted-soft);
+  font-size: 10px;
 }
 
 .outbound .message-info { justify-content: flex-end; }
 
 .bubble {
   display: inline-block;
-  padding: 11px 13px;
-  border-radius: 4px 13px 13px 13px;
-  color: #334155;
+  padding: 8px 10px;
+  border-radius: 3px 9px 9px 9px;
+  color: var(--ink-soft);
   background: #fff;
-  box-shadow: 0 2px 9px rgba(15, 23, 42, 0.04);
-  font-size: 13px;
-  line-height: 1.75;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
   text-align: left;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
 .outbound .bubble {
-  border-radius: 13px 4px 13px 13px;
+  border-radius: 9px 3px 9px 9px;
   color: #eff6ff;
-  background: linear-gradient(145deg, #2563eb, #1d4ed8);
+  background: #2563eb;
 }
 
 .bubble.failed { border: 1px solid #fecaca; }
@@ -391,18 +390,19 @@ onMounted(load)
   display: flex;
   justify-content: flex-end;
   flex-wrap: wrap;
-  gap: 7px;
-  margin-top: 6px;
-  color: #94a3b8;
-  font-size: 8px;
+  gap: 5px;
+  margin-top: 3px;
+  color: var(--muted-soft);
+  font-size: 9px;
 }
 
-.error-text { margin-top: 5px; color: #dc2626; font-size: 11px; text-align: left; }
+.error-text { margin-top: 3px; color: var(--danger); font-size: 10px; text-align: left; }
 
 @media (max-width: 660px) {
   .toolbar { flex-wrap: wrap; }
   .search-input { width: 100%; }
   .total-label { display: none; }
-  .conversation-table { padding: 0 12px; }
+  .conversation-table { padding: 0 8px; }
 }
 </style>
+

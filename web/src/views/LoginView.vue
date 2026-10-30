@@ -46,7 +46,6 @@ async function submit() {
 
       <el-input
         v-model="token"
-        size="large"
         type="password"
         show-password
         placeholder="Admin Token"
@@ -54,7 +53,7 @@ async function submit() {
         @keyup.enter="submit"
       />
 
-      <el-button class="login-button" type="primary" size="large" :loading="loading" @click="submit">
+      <el-button class="login-button" type="primary" :loading="loading" @click="submit">
         进入控制台
       </el-button>
 
@@ -68,42 +67,40 @@ async function submit() {
   display: grid;
   min-height: 100vh;
   place-items: center;
-  padding: 24px;
-  background:
-    radial-gradient(circle at 50% -10%, rgba(59, 130, 246, 0.1), transparent 45%),
-    #f4f6fb;
+  padding: 20px;
+  background: #f5f7fa;
 }
 
 .login-card {
-  width: min(380px, 100%);
-  padding: 32px 30px 26px;
+  width: min(350px, 100%);
+  padding: 26px 24px 22px;
   border: 1px solid var(--line);
   border-radius: var(--radius-lg);
   background: var(--surface);
-  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.08);
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06);
 }
 
 .brand {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 26px;
+  gap: 9px;
+  margin-bottom: 20px;
 }
 
 .brand-mark {
   display: grid;
-  width: 36px;
-  height: 36px;
+  width: 30px;
+  height: 30px;
   place-items: center;
-  border-radius: 10px;
+  border-radius: 7px;
   color: #eff6ff;
-  background: linear-gradient(145deg, #2563eb, #0ea5e9);
+  background: #2563eb;
 }
 
 .brand strong {
   display: block;
   color: var(--ink);
-  font-size: var(--fs-md);
+  font-size: var(--fs-sm);
   font-weight: 650;
   letter-spacing: -0.01em;
 }
@@ -112,42 +109,44 @@ async function submit() {
   display: block;
   margin-top: 1px;
   color: var(--muted-soft);
-  font-size: 11px;
-  letter-spacing: 0.04em;
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 
 h1 {
   margin: 0;
   color: var(--ink);
-  font-size: 22px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
+  font-size: 20px;
+  font-weight: 680;
+  letter-spacing: -0.025em;
 }
 
 .login-desc {
-  margin: 8px 0 20px;
+  margin: 6px 0 16px;
   color: var(--muted);
-  font-size: var(--fs-sm);
-  line-height: 1.7;
+  font-size: var(--fs-xs);
+  line-height: 1.55;
 }
 
 .login-desc code {
-  padding: 1px 5px;
-  border-radius: 4px;
+  padding: 1px 4px;
+  border-radius: 3px;
   background: #f1f5f9;
   color: var(--ink-soft);
-  font-size: 12px;
+  font-size: 10px;
 }
 
 .login-button {
   width: 100%;
-  margin-top: 14px;
+  margin-top: 10px;
 }
 
 .login-note {
-  margin: 16px 0 0;
+  margin: 12px 0 0;
   color: var(--muted-soft);
-  font-size: var(--fs-xs);
+  font-size: 10px;
   text-align: center;
 }
 </style>
+

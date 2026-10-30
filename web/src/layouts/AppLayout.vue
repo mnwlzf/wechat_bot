@@ -83,7 +83,6 @@ function logout() {
       <header class="topbar">
         <h2>{{ title }}</h2>
         <div class="topbar-actions">
-          <span class="env-badge">LOCAL</span>
           <button class="user-chip" type="button" @click="logout">
             <span class="avatar">A</span>
             <span class="user-copy"><strong>Administrator</strong><small>Admin Token</small></span>
@@ -113,32 +112,29 @@ function logout() {
   inset: 0 auto 0 0;
   z-index: 20;
   display: flex;
-  width: 238px;
+  width: 204px;
   flex-direction: column;
-  padding: 26px 16px 18px;
-  border-right: 1px solid rgba(148, 163, 184, 0.09);
-  background:
-    radial-gradient(circle at 20% 0%, rgba(59, 130, 246, 0.18), transparent 25%),
-    #0b1220;
+  padding: 18px 10px 12px;
+  border-right: 1px solid rgba(148, 163, 184, 0.12);
+  background: #101827;
 }
 
 .sidebar-brand {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 0 10px 26px;
+  gap: 9px;
+  padding: 0 8px 20px;
 }
 
 .brand-icon {
   display: grid;
-  width: 38px;
-  height: 38px;
+  width: 32px;
+  height: 32px;
   flex: 0 0 auto;
   place-items: center;
-  border-radius: 12px;
-  color: #bfdbfe;
-  background: linear-gradient(145deg, #1d4ed8, #0ea5e9);
-  box-shadow: 0 8px 24px rgba(37, 99, 235, 0.34);
+  border-radius: 8px;
+  color: #dbeafe;
+  background: #2563eb;
 }
 
 .brand-copy strong,
@@ -148,14 +144,15 @@ function logout() {
 
 .brand-copy strong {
   color: #f8fafc;
-  font-size: 14px;
+  font-size: 13px;
+  font-weight: 650;
   letter-spacing: -0.01em;
 }
 
 .brand-copy span {
-  margin-top: 3px;
+  margin-top: 1px;
   color: #64748b;
-  font-size: 11px;
+  font-size: 9px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -166,19 +163,20 @@ function logout() {
 }
 
 .side-menu :deep(.el-menu-item) {
-  height: 44px;
-  margin: 4px 0;
-  border-radius: 10px;
-  font-size: 13px;
+  height: 38px;
+  margin: 2px 0;
+  border-radius: 7px;
+  font-size: 12px;
 }
 
 .side-menu :deep(.el-menu-item:hover) {
   background: rgba(148, 163, 184, 0.08);
-  color: #dbeafe;
+  color: #e2e8f0;
 }
 
 .side-menu :deep(.el-menu-item.is-active) {
-  background: linear-gradient(90deg, rgba(37, 99, 235, 0.25), rgba(37, 99, 235, 0.08));
+  color: #fff;
+  background: rgba(59, 130, 246, 0.18);
   box-shadow: inset 2px 0 #60a5fa;
 }
 
@@ -186,19 +184,22 @@ function logout() {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 12px 14px;
+  padding: 9px 10px 4px;
   color: #64748b;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .sidebar-foot .status-dot {
-  margin-right: 6px;
+  width: 6px;
+  height: 6px;
+  margin-right: 5px;
+  box-shadow: none;
 }
 
 .workspace {
-  width: calc(100% - 238px);
+  width: calc(100% - 204px);
   min-height: 100vh;
-  margin-left: 238px;
+  margin-left: 204px;
 }
 
 .topbar {
@@ -206,19 +207,18 @@ function logout() {
   top: 0;
   z-index: 15;
   display: flex;
-  min-height: 68px;
+  min-height: 54px;
   align-items: center;
   justify-content: space-between;
-  gap: 24px;
-  padding: 0 32px;
-  border-bottom: 1px solid rgba(226, 232, 240, 0.8);
-  background: rgba(244, 246, 251, 0.88);
-  backdrop-filter: blur(16px);
+  gap: 16px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.96);
 }
 
 .topbar h2 {
   margin: 0;
-  font-size: 17px;
+  font-size: 14px;
   font-weight: 650;
   letter-spacing: -0.01em;
   color: var(--ink);
@@ -227,46 +227,35 @@ function logout() {
 .topbar-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
-}
-
-.env-badge {
-  padding: 5px 8px;
-  border: 1px solid #bfdbfe;
-  border-radius: 6px;
-  color: #2563eb;
-  background: #eff6ff;
-  font-size: 11px;
-  font-weight: 750;
-  letter-spacing: 0.1em;
+  gap: 8px;
 }
 
 .user-chip {
   display: flex;
   align-items: center;
-  gap: 9px;
-  padding: 5px 8px 5px 5px;
+  gap: 7px;
+  padding: 3px 6px 3px 3px;
   border: 1px solid transparent;
-  border-radius: 12px;
+  border-radius: 7px;
   background: transparent;
   cursor: pointer;
-  transition: 0.18s ease;
+  transition: 0.15s ease;
 }
 
 .user-chip:hover {
-  border-color: #dbe4f0;
+  border-color: var(--line);
   background: #fff;
 }
 
 .avatar {
   display: grid;
-  width: 34px;
-  height: 34px;
+  width: 28px;
+  height: 28px;
   place-items: center;
-  border-radius: 10px;
+  border-radius: 7px;
   color: #fff;
-  background: linear-gradient(145deg, #0f172a, #334155);
-  font-size: 13px;
+  background: #334155;
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -281,29 +270,29 @@ function logout() {
 
 .user-copy strong {
   color: #334155;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .user-copy small {
-  margin-top: 2px;
+  margin-top: 1px;
   color: #94a3b8;
-  font-size: 11px;
+  font-size: 9px;
 }
 
 .user-chip > .el-icon {
   color: #94a3b8;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .content {
-  padding: 28px 32px 48px;
+  padding: 16px 24px 32px;
 }
 
 @media (max-width: 900px) {
   .sidebar {
-    width: 78px;
-    padding-right: 10px;
-    padding-left: 10px;
+    width: 64px;
+    padding-right: 7px;
+    padding-left: 7px;
   }
 
   .brand-copy,
@@ -324,16 +313,16 @@ function logout() {
   }
 
   .workspace {
-    width: calc(100% - 78px);
-    margin-left: 78px;
+    width: calc(100% - 64px);
+    margin-left: 64px;
   }
 
   .topbar {
-    padding: 0 22px;
+    padding: 0 16px;
   }
 
   .content {
-    padding: 24px 22px 40px;
+    padding: 14px 16px 24px;
   }
 
   .user-copy {
@@ -343,16 +332,11 @@ function logout() {
 
 @media (max-width: 560px) {
   .topbar {
-    min-height: 60px;
-  }
-
-  .env-badge {
-    display: none;
+    min-height: 50px;
   }
 
   .content {
-    padding: 18px 14px 32px;
+    padding: 12px 12px 22px;
   }
 }
 </style>
-

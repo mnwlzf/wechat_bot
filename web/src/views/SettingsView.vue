@@ -226,6 +226,7 @@ onMounted(async () => {
       </div>
     </div>
 
+    <div class="settings-grid">
     <section class="surface-card">
       <div class="surface-card__head">
         <div>
@@ -374,7 +375,7 @@ onMounted(async () => {
       </div>
     </section>
 
-    <section class="surface-card">
+    <section class="surface-card settings-wide">
       <div class="surface-card__head">
         <div>
           <h2>内容过滤</h2>
@@ -419,16 +420,31 @@ onMounted(async () => {
         </div>
       </div>
     </section>
+    </div>
   </div>
 </template>
 
 <style scoped>
+.settings-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.75fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.settings-wide {
+  grid-column: 1 / -1;
+}
+
+.settings-grid .surface-card + .surface-card {
+  margin-top: 0;
+}
 .picker-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 10px;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 
 .picker {
@@ -450,23 +466,23 @@ onMounted(async () => {
 
 .option-id {
   color: var(--muted-soft);
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .chat-list {
-  margin: 14px 0 0;
+  margin: 10px 0 0;
   padding: 0;
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
 }
 
 .chat-item {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
+  gap: 8px;
+  padding: 7px 10px;
   border: 1px solid var(--line-soft);
   border-radius: var(--radius-sm);
   background: #fbfcfe;
@@ -474,11 +490,11 @@ onMounted(async () => {
 
 .chat-icon {
   display: grid;
-  width: 30px;
-  height: 30px;
+  width: 24px;
+  height: 24px;
   flex: 0 0 auto;
   place-items: center;
-  border-radius: 9px;
+  border-radius: 5px;
   color: var(--brand-deep);
   background: #eff6ff;
 }
@@ -495,7 +511,7 @@ onMounted(async () => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: var(--fs-md);
+  font-size: var(--fs-sm);
   font-weight: 600;
   color: var(--ink);
 }
@@ -505,32 +521,38 @@ onMounted(async () => {
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--muted-soft);
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .chat-empty {
-  margin-top: 14px;
-  padding: 18px;
+  margin-top: 10px;
+  padding: 12px;
   border: 1px dashed var(--line);
   border-radius: var(--radius-sm);
   text-align: center;
 }
 
 .settings-block {
-  margin-top: 22px;
+  margin-top: 14px;
 }
 
 .card-actions {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 12px;
-  margin-top: 18px;
+  gap: 8px;
+  margin-top: 12px;
 }
 
 .dirty-dot {
   color: var(--warning);
   font-size: var(--fs-xs);
+}
+
+@media (max-width: 1100px) {
+  .settings-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 680px) {
@@ -553,3 +575,7 @@ onMounted(async () => {
   }
 }
 </style>
+
+
+
+
