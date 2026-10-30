@@ -49,5 +49,12 @@ public class AdminQueryController {
         return service.setTakeover(id, request.paused());
     }
 
+    /** 会话级人格：绑定/解绑提示词模板。 */
+    @PostMapping("/conversations/{id}/persona")
+    public AdminDtos.ConversationView persona(@PathVariable UUID id,
+                                              @RequestBody AdminDtos.PersonaRequest request) {
+        return service.setPersona(id, request.promptTemplateId());
+    }
+
     public record PingResponse(boolean ok) {}
 }

@@ -184,6 +184,46 @@ export interface Conversation {
   lastMessage: string
   lastMessageAt: string
   botPaused: boolean
+  promptTemplateId?: string | null
+  promptTemplateName?: string | null
+}
+
+export interface PromptTemplate {
+  id: string
+  name: string
+  description: string
+  content: string
+  updatedAt: string
+}
+
+export interface PromptTemplateInput {
+  name: string
+  description: string
+  content: string
+}
+
+export type ScheduledStatus = 'PENDING' | 'SENT' | 'CANCELLED' | 'FAILED'
+
+export interface ScheduledMessage {
+  id: string
+  botId: string
+  chatId: string
+  chatName: string
+  content: string
+  scheduledAt: string
+  status: ScheduledStatus
+  attempts: number
+  lastError?: string
+  createdAt: string
+  sentAt?: string
+}
+
+export interface ScheduledMessageInput {
+  botId?: string
+  chatId: string
+  chatName?: string
+  content: string
+  scheduledAt: string
 }
 
 export interface Message {

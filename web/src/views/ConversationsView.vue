@@ -4,7 +4,7 @@ import dayjs from 'dayjs'
 import { ElMessage } from 'element-plus'
 import { ChatDotRound, Refresh, Search } from '@element-plus/icons-vue'
 import { adminApi } from '@/api'
-import type { Conversation, Message, PageResult } from '@/api/types'
+import type { Conversation, Message, PageResult, PromptTemplate } from '@/api/types'
 import { getErrorMessage } from '@/api/client'
 
 const loading = ref(false)
@@ -22,6 +22,7 @@ const result = ref<PageResult<Conversation>>({
 const drawerVisible = ref(false)
 const activeConversation = ref<Conversation | null>(null)
 const messages = ref<Message[]>([])
+const templates = ref<PromptTemplate[]>([])
 
 async function load() {
   loading.value = true
@@ -90,7 +91,31 @@ async function toggleTakeover(row: Conversation) {
   }
 }
 
-onMounted(load)
+async function changePersona(templateId: string) {
+  if (!activeConversation.value) return
+  try {
+    const updated = await adminApi.setPersona(activeConversation.value.id, templateId || null)
+    activeConversation.value.promptTemplateId = updated.promptTemplateId
+    activeConversation.value.promptTemplateName = updated.promptTemplateName
+    const row = result.value.content.find((item) => item.id === updated.id)
+    if (row) {
+      row.promptTemplateId = updated.promptTemplateId
+      row.promptTemplateName = updated.promptTemplateName
+    }
+    ElMessage.success(updated.promptTemplateName ? `已切换到「${updated.promptTemplateName}」` : '已回退到默认提示词')
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  }
+}
+
+onMounted(async () => {
+  await load()
+  try {
+    templates.value = await adminApi.promptTemplates()
+  } catch {
+    /* 没有模板时下拉只显示“默认提示词” */
+  }
+})
 </script>
 
 <template>
@@ -195,6 +220,16 @@ onMounted(load)
               {{ activeConversation.chatType === 'GROUP' ? '群聊' : '私聊' }}
             </p>
           </div>
+          <el-select
+            :model-value="activeConversation.promptTemplateId || ''"
+            size="small"
+            class="persona-select"
+            placeholder="默认提示词"
+            @change="changePersona"
+          >
+            <el-option label="默认提示词" value="" />
+            <el-option v-for="item in templates" :key="item.id" :label="item.name" :value="item.id" />
+          </el-select>
           <el-button text :icon="Refresh" :loading="messageLoading" @click="openConversation(activeConversation)">
             刷新
           </el-button>
@@ -306,6 +341,11 @@ onMounted(load)
   font-size: 10px;
   font-weight: 550;
   vertical-align: middle;
+}
+
+.persona-select {
+  width: 128px;
+  flex: 0 0 auto;
 }
 :deep(.el-table__row) { cursor: pointer; }
 .pagination { display: flex; justify-content: flex-end; padding: 8px 12px; border-top: 1px solid var(--line-soft); }

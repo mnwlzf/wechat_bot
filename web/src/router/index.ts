@@ -52,6 +52,18 @@ const router = createRouter({
           meta: { title: '自动回复' },
         },
         {
+          path: 'prompts',
+          name: 'prompts',
+          component: () => import('@/views/PromptTemplatesView.vue'),
+          meta: { title: '提示词模板' },
+        },
+        {
+          path: 'scheduled',
+          name: 'scheduled',
+          component: () => import('@/views/ScheduledView.vue'),
+          meta: { title: '定时消息' },
+        },
+        {
           path: 'diagnostics',
           name: 'diagnostics',
           component: () => import('@/views/DiagnosticsView.vue'),

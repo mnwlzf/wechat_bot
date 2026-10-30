@@ -16,9 +16,13 @@ import type {
   LlmPolicyInput,
   Message,
   PageResult,
+  PromptTemplate,
+  PromptTemplateInput,
   Provider,
   ProviderInput,
   ProviderTestResult,
+  ScheduledMessage,
+  ScheduledMessageInput,
   SettingsSnapshot,
   WeChatPolicyInput,
 } from './types'
@@ -126,6 +130,44 @@ export const adminApi = {
       paused,
     })
     return data
+  },
+  async setPersona(conversationId: string, promptTemplateId: string | null) {
+    const { data } = await http.post<Conversation>(`/api/admin/conversations/${conversationId}/persona`, {
+      promptTemplateId,
+    })
+    return data
+  },
+  async promptTemplates() {
+    const { data } = await http.get<PromptTemplate[]>('/api/admin/prompt-templates')
+    return data
+  },
+  async createPromptTemplate(payload: PromptTemplateInput) {
+    const { data } = await http.post<PromptTemplate>('/api/admin/prompt-templates', payload)
+    return data
+  },
+  async updatePromptTemplate(id: string, payload: PromptTemplateInput) {
+    const { data } = await http.put<PromptTemplate>(`/api/admin/prompt-templates/${id}`, payload)
+    return data
+  },
+  async deletePromptTemplate(id: string) {
+    await http.delete(`/api/admin/prompt-templates/${id}`)
+  },
+  async scheduledMessages(page = 0, size = 20) {
+    const { data } = await http.get<PageResult<ScheduledMessage>>('/api/admin/scheduled-messages', {
+      params: { page, size },
+    })
+    return data
+  },
+  async createScheduledMessage(payload: ScheduledMessageInput) {
+    const { data } = await http.post<ScheduledMessage>('/api/admin/scheduled-messages', payload)
+    return data
+  },
+  async cancelScheduledMessage(id: string) {
+    const { data } = await http.post<ScheduledMessage>(`/api/admin/scheduled-messages/${id}/cancel`)
+    return data
+  },
+  async deleteScheduledMessage(id: string) {
+    await http.delete(`/api/admin/scheduled-messages/${id}`)
   },
   async updateFilterPolicy(payload: FilterPolicyInput) {
     const { data } = await http.put<SettingsSnapshot>('/api/admin/settings/filter', payload)

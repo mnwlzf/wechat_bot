@@ -4,6 +4,7 @@ import com.example.wechatbot.repository.ConversationRepository;
 import com.example.wechatbot.repository.MessageLogRepository;
 import com.example.wechatbot.repository.ModelProviderRepository;
 import com.example.wechatbot.repository.OutboxMessageRepository;
+import com.example.wechatbot.repository.PromptTemplateRepository;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.data.domain.Page;
@@ -30,7 +31,8 @@ class AdminQueryServiceTest {
             conversationRepository,
             mock(MessageLogRepository.class),
             mock(OutboxMessageRepository.class),
-            mock(ModelProviderRepository.class));
+            mock(ModelProviderRepository.class),
+            mock(PromptTemplateRepository.class));
 
     @Test
     void blankQueryUsesPlainListingInsteadOfNullableSearch() {

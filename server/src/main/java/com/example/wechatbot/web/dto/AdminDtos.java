@@ -88,10 +88,50 @@ public final class AdminDtos {
             ChatType chatType,
             String lastMessage,
             OffsetDateTime lastMessageAt,
-            boolean botPaused
+            boolean botPaused,
+            UUID promptTemplateId,
+            String promptTemplateName
     ) {}
 
     public record TakeoverRequest(boolean paused) {}
+
+    public record PersonaRequest(UUID promptTemplateId) {}
+
+    public record PromptTemplateInput(
+            @NotBlank @Size(max = 120) String name,
+            @Size(max = 300) String description,
+            @NotBlank @Size(max = 20000) String content
+    ) {}
+
+    public record PromptTemplateView(
+            UUID id,
+            String name,
+            String description,
+            String content,
+            OffsetDateTime updatedAt
+    ) {}
+
+    public record ScheduledMessageInput(
+            UUID botId,
+            @NotBlank @Size(max = 180) String chatId,
+            @Size(max = 180) String chatName,
+            @NotBlank @Size(max = 5000) String content,
+            @NotNull OffsetDateTime scheduledAt
+    ) {}
+
+    public record ScheduledMessageView(
+            UUID id,
+            UUID botId,
+            String chatId,
+            String chatName,
+            String content,
+            OffsetDateTime scheduledAt,
+            String status,
+            int attempts,
+            String lastError,
+            OffsetDateTime createdAt,
+            OffsetDateTime sentAt
+    ) {}
 
     public record AutoReplyRuleInput(
             @NotBlank @Size(max = 120) String name,

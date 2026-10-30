@@ -11,6 +11,7 @@ import com.example.wechatbot.repository.BotConfigRepository;
 import com.example.wechatbot.repository.ConversationRepository;
 import com.example.wechatbot.repository.MessageLogRepository;
 import com.example.wechatbot.repository.OutboxMessageRepository;
+import com.example.wechatbot.repository.PromptTemplateRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
@@ -40,6 +41,7 @@ public class ChatOrchestrator {
     private final DisguiseProperties disguiseProperties;
     private final AutoReplyService autoReply;
     private final ContentFilterService contentFilter;
+    private final PromptTemplateRepository promptTemplateRepository;
 
     public ChatOrchestrator(BotConfigRepository botRepository,
                             ConversationRepository conversationRepository,
@@ -50,7 +52,8 @@ public class ChatOrchestrator {
                             DisguiseService disguise,
                             DisguiseProperties disguiseProperties,
                             AutoReplyService autoReply,
-                            ContentFilterService contentFilter) {
+                            ContentFilterService contentFilter,
+                            PromptTemplateRepository promptTemplateRepository) {
         this.botRepository = botRepository;
         this.conversationRepository = conversationRepository;
         this.messageRepository = messageRepository;
@@ -61,6 +64,7 @@ public class ChatOrchestrator {
         this.disguiseProperties = disguiseProperties;
         this.autoReply = autoReply;
         this.contentFilter = contentFilter;
+        this.promptTemplateRepository = promptTemplateRepository;
     }
 
     @Async("chatExecutor")
@@ -242,9 +246,10 @@ public class ChatOrchestrator {
 
         String style = disguise.promptSuffix();
         String searchContext = searchAugmenter.buildContext(bot, currentInbound.getContent());
+        String systemPrompt = resolveSystemPrompt(bot, conversation);
 
         List<ChatMessage> withStyle = new ArrayList<>(messages.size() + 3);
-        withStyle.add(ChatMessage.system(bot.getSystemPrompt()));
+        withStyle.add(ChatMessage.system(systemPrompt));
         if (!style.isBlank()) {
             withStyle.add(ChatMessage.system(style));
         }
@@ -253,6 +258,19 @@ public class ChatOrchestrator {
         }
         withStyle.addAll(messages);
         return List.copyOf(withStyle);
+    }
+
+    /** 会话绑定了提示词模板时优先使用模板，否则回退到机器人默认提示词。 */
+    private String resolveSystemPrompt(BotConfig bot, Conversation conversation) {
+        if (conversation.getPromptTemplateId() != null) {
+            String template = promptTemplateRepository.findById(conversation.getPromptTemplateId())
+                    .map(PromptTemplate::getContent)
+                    .orElse(null);
+            if (template != null && !template.isBlank()) {
+                return template;
+            }
+        }
+        return bot.getSystemPrompt();
     }
 
     private ZoneId zone() {

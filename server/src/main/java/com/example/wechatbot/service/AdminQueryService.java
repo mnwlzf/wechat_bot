@@ -5,10 +5,12 @@ import com.example.wechatbot.domain.Conversation;
 import com.example.wechatbot.domain.MessageDirection;
 import com.example.wechatbot.domain.MessageLog;
 import com.example.wechatbot.domain.OutboxStatus;
+import com.example.wechatbot.domain.PromptTemplate;
 import com.example.wechatbot.repository.ConversationRepository;
 import com.example.wechatbot.repository.MessageLogRepository;
 import com.example.wechatbot.repository.ModelProviderRepository;
 import com.example.wechatbot.repository.OutboxMessageRepository;
+import com.example.wechatbot.repository.PromptTemplateRepository;
 import com.example.wechatbot.web.dto.AdminDtos;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -26,15 +28,18 @@ public class AdminQueryService {
     private final MessageLogRepository messageRepository;
     private final OutboxMessageRepository outboxRepository;
     private final ModelProviderRepository providerRepository;
+    private final PromptTemplateRepository promptTemplateRepository;
 
     public AdminQueryService(ConversationRepository conversationRepository,
                              MessageLogRepository messageRepository,
                              OutboxMessageRepository outboxRepository,
-                             ModelProviderRepository providerRepository) {
+                             ModelProviderRepository providerRepository,
+                             PromptTemplateRepository promptTemplateRepository) {
         this.conversationRepository = conversationRepository;
         this.messageRepository = messageRepository;
         this.outboxRepository = outboxRepository;
         this.providerRepository = providerRepository;
+        this.promptTemplateRepository = promptTemplateRepository;
     }
 
     public AdminDtos.DashboardView dashboard() {
@@ -70,6 +75,10 @@ public class AdminQueryService {
     }
 
     private AdminDtos.ConversationView toConversationView(Conversation conversation) {
+        String templateName = conversation.getPromptTemplateId() == null
+                ? null
+                : promptTemplateRepository.findById(conversation.getPromptTemplateId())
+                    .map(PromptTemplate::getName).orElse(null);
         return new AdminDtos.ConversationView(
                 conversation.getId(),
                 conversation.getChatId(),
@@ -77,7 +86,9 @@ public class AdminQueryService {
                 conversation.getChatType(),
                 conversation.getLastMessage(),
                 conversation.getLastMessageAt(),
-                conversation.isBotPaused()
+                conversation.isBotPaused(),
+                conversation.getPromptTemplateId(),
+                templateName
         );
     }
 
@@ -87,6 +98,18 @@ public class AdminQueryService {
         Conversation conversation = conversationRepository.findById(conversationId)
                 .orElseThrow(() -> ApiException.notFound("会话不存在"));
         conversation.setBotPaused(paused);
+        return toConversationView(conversationRepository.save(conversation));
+    }
+
+    /** 会话级人格：绑定提示词模板，null 表示回退到机器人的默认提示词。 */
+    @Transactional
+    public AdminDtos.ConversationView setPersona(UUID conversationId, UUID promptTemplateId) {
+        Conversation conversation = conversationRepository.findById(conversationId)
+                .orElseThrow(() -> ApiException.notFound("会话不存在"));
+        if (promptTemplateId != null && !promptTemplateRepository.existsById(promptTemplateId)) {
+            throw ApiException.badRequest("提示词模板不存在");
+        }
+        conversation.setPromptTemplateId(promptTemplateId);
         return toConversationView(conversationRepository.save(conversation));
     }
 

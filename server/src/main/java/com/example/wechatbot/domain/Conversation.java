@@ -43,6 +43,10 @@ public class Conversation {
     @Column(name = "bot_paused", nullable = false)
     private boolean botPaused = false;
 
+    /** 该会话使用的提示词模板；为空时使用机器人默认系统提示词。 */
+    @Column(name = "prompt_template_id")
+    private UUID promptTemplateId;
+
     @Column(name = "created_at", nullable = false)
     private OffsetDateTime createdAt;
 

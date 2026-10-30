@@ -5,12 +5,14 @@ import {
   ChatDotRound,
   Cpu,
   DataBoard,
+  Document,
   MagicStick,
   Monitor,
   Operation,
   Promotion,
   Setting,
   SwitchButton,
+  Timer,
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 
@@ -64,6 +66,12 @@ function logout() {
         </el-menu-item>
         <el-menu-item index="/rules">
           <el-icon><Promotion /></el-icon><span>自动回复</span>
+        </el-menu-item>
+        <el-menu-item index="/prompts">
+          <el-icon><Document /></el-icon><span>提示词模板</span>
+        </el-menu-item>
+        <el-menu-item index="/scheduled">
+          <el-icon><Timer /></el-icon><span>定时消息</span>
         </el-menu-item>
         <el-menu-item index="/debug">
           <el-icon><MagicStick /></el-icon><span>在线调试</span>

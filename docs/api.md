@@ -70,6 +70,11 @@ $headers = @{ Authorization = "Bearer dev-admin-token" }
 | GET | `/api/admin/diagnostics` | 诊断聚合：钩子探活 + 回调计数 + 最近回调 + 失败投递 |
 | GET | `/api/admin/diagnostics/outbox` | 失败投递列表 |
 | POST | `/api/admin/diagnostics/outbox/{id}/retry` | 手动重试失败投递（attempts 归零重新入队） |
+| GET/POST/PUT/DELETE | `/api/admin/prompt-templates` | 提示词模板（可复用人格） |
+| POST | `/api/admin/conversations/{id}/persona` | 会话绑定提示词模板：`{"promptTemplateId":"…"}`，传 `null` 回退默认 |
+| GET/POST | `/api/admin/scheduled-messages` | 定时消息列表 / 新建 |
+| POST | `/api/admin/scheduled-messages/{id}/cancel` | 取消待发送的定时消息 |
+| DELETE | `/api/admin/scheduled-messages/{id}` | 删除定时消息记录 |
 | GET | `/api/admin/bots` | 机器人配置 |
 | PUT | `/api/admin/bots/{id}` | 更新机器人配置 |
 | POST | `/api/admin/debug/chat` | 在线调试（不发送微信） |
@@ -187,6 +192,31 @@ $headers = @{ Authorization = "Bearer dev-admin-token" }
 ```
 
 敏感词过滤：`PUT /api/admin/settings/filter`，请求体 `{"bannedWords":["违禁"],"mode":"rewrite"}`。`mode` 取 `off`（不改动）/ `rewrite`（\* 遮蔽）/ `block`（该条回复不发送，写入 `IGNORED` 记录）。
+
+### 提示词模板与定时消息
+
+提示词模板用于按会话切换人格，绑定时 `POST /api/admin/conversations/{id}/persona`：
+
+```json
+{ "promptTemplateId": "0b1f…" }
+```
+
+绑定的模板会**替代**机器人默认 `systemPrompt` 参与上下文拼装；解绑传 `null`。模板内容变更后，下一次回复即生效。
+
+定时消息到点后由后端调度器（默认 20 秒一轮）复制到 `outbox`，沿用同一套重试、租约与伪装节奏，因此：
+
+```json
+{
+  "chatId": "49878296302@chatroom",
+  "chatName": "客户群",
+  "content": "明天上午十点的例会挪到下午三点",
+  "scheduledAt": "2026-11-01T10:00:00+08:00"
+}
+```
+
+- `scheduledAt` 不能早于当前时间；`chatId` 支持 `wxid` 或 `@chatroom`；
+- 状态机：`PENDING`（待发送）→ `SENT`（已转投递队列）/ `CANCELLED` / `FAILED`（命中敏感词拦截或入队异常）；
+- 只有 `PENDING` 可以取消，已入队的消息请到诊断中心的失败投递里重试。
 
 
 ## 4. 外部集成 API
