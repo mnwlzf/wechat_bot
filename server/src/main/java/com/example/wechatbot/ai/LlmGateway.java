@@ -64,35 +64,23 @@ public class LlmGateway {
      * 与对话的 Base URL 解耦（中转站通常不代理搜索）。
      */
     public DeepSeekSearchClient.SearchOutcome search(BotConfig bot, String query, String originalQuestion) {
-        AppProperties.Search config = properties.getLlm().getSearch();
-        List<ModelProvider> candidates = candidates(bot.getModelProviderId()).stream()
-                .filter(ModelProvider::isWebSearchEnabled)
-                .toList();
-        if (candidates.isEmpty()) {
-            throw new LlmException("没有启用联网搜索的模型提供方");
-        }
-        List<String> errors = new ArrayList<>();
-        for (ModelProvider provider : candidates) {
-            try {
-                return search(provider, query, originalQuestion);
-            } catch (Exception ex) {
-                String error = provider.getName() + ": " + rootMessage(ex);
-                errors.add(error);
-                log.warn("联网搜索失败: {}", error);
-            }
-        }
-        throw new LlmException("联网搜索失败: " + String.join(" | ", errors));
+        return testSearch(query);
     }
 
-    /** 用指定 Provider 的 Key 搜索（管理端自测用）。 */
-    public DeepSeekSearchClient.SearchOutcome search(ModelProvider provider, String query, String originalQuestion) {
+    /** 联网搜索使用独立的搜索 Base URL 与搜索 Key，不读取聊天 Provider 的 Key。 */
+    public DeepSeekSearchClient.SearchOutcome testSearch(String query) {
         AppProperties.Search config = properties.getLlm().getSearch();
-        List<String> keys = searchKeys(config, provider);
+        List<String> keys = searchKeys(config);
         if (keys.isEmpty()) {
-            throw new LlmException("未配置可用于搜索的 API Key");
+            throw new LlmException("未配置联网搜索专用 API Key");
         }
-        return searchClient.search(config.getBaseUrl(), keys, query, originalQuestion,
+        return searchClient.search(config.getBaseUrl(), keys, query, null,
                 config.getCount(), config.isNeedContent(), config.getTimeoutSeconds());
+    }
+
+    /** 用指定 Provider 做权限校验，实际搜索仍使用独立搜索配置。 */
+    public DeepSeekSearchClient.SearchOutcome search(ModelProvider provider, String query, String originalQuestion) {
+        return testSearch(query);
     }
 
     public LlmReply test(ModelProvider provider) {
@@ -116,8 +104,8 @@ public class LlmGateway {
         return keys;
     }
 
-    /** 搜索优先用搜索专用 Key（官方域名），没配才退回模型 Provider 的 Key。 */
-    List<String> searchKeys(AppProperties.Search config, ModelProvider provider) {
+    /** 只使用联网搜索专用 Key，绝不回退到聊天模型 Key。 */
+    List<String> searchKeys(AppProperties.Search config) {
         List<String> keys = new ArrayList<>();
         String primary = config.getApiKey() == null ? "" : config.getApiKey().trim();
         String backup = config.getBackupApiKey() == null ? "" : config.getBackupApiKey().trim();
@@ -127,7 +115,7 @@ public class LlmGateway {
         if (!backup.isBlank() && !keys.contains(backup)) {
             keys.add(backup);
         }
-        return keys.isEmpty() ? apiKeys(provider) : keys;
+        return keys;
     }
 
     private String decrypt(String encrypted) {
@@ -163,3 +151,5 @@ public class LlmGateway {
         return current.getMessage() == null ? current.getClass().getSimpleName() : current.getMessage();
     }
 }
+
+

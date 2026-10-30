@@ -41,7 +41,6 @@ public class ProviderAdminService {
                 request.priority(), request.timeoutSeconds());
         provider.setApiKeyEncrypted(secretCipher.encrypt(request.apiKey()));
         provider.setApiKeyBackupEncrypted(secretCipher.encrypt(nullToEmpty(request.backupApiKey())));
-        provider.setWebSearchEnabled(request.webSearchEnabled());
         return toView(providerRepository.save(provider));
     }
 
@@ -56,7 +55,6 @@ public class ProviderAdminService {
             String backup = request.backupApiKey().trim();
             provider.setApiKeyBackupEncrypted(backup.isEmpty() ? "" : secretCipher.encrypt(backup));
         }
-        provider.setWebSearchEnabled(request.webSearchEnabled());
         return toView(providerRepository.save(provider));
     }
 
@@ -129,8 +127,7 @@ public class ProviderAdminService {
                 hint,
                 provider.getUpdatedAt(),
                 backupKey != null && !backupKey.isBlank(),
-                backupHint,
-                provider.isWebSearchEnabled()
+                backupHint
         );
     }
 
@@ -146,3 +143,5 @@ public class ProviderAdminService {
         return current.getMessage() == null ? current.getClass().getSimpleName() : current.getMessage();
     }
 }
+
+

@@ -58,7 +58,7 @@ public class AppProperties {
         private boolean enabled = true;
         private String mode = "HEURISTIC";
         private String baseUrl = "https://api.deepseek.com";
-        /** 搜索专用 Key；留空则复用模型 Provider 的主/备 Key。 */
+        /** 搜索专用 Key；与聊天模型 Key 完全独立，不做回退。 */
         private String apiKey = "";
         private String backupApiKey = "";
         private int count = 5;
@@ -100,3 +100,4 @@ public class AppProperties {
         }
     }
 }
+

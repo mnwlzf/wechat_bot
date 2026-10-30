@@ -30,7 +30,6 @@ const emptyForm = (): ProviderInput => ({
   priority: 100,
   timeoutSeconds: 60,
   backupApiKey: '',
-  webSearchEnabled: true,
 })
 const form = reactive<ProviderInput>(emptyForm())
 
@@ -80,7 +79,6 @@ function openEdit(provider: Provider) {
     priority: provider.priority,
     timeoutSeconds: provider.timeoutSeconds,
     backupApiKey: '',
-    webSearchEnabled: provider.webSearchEnabled,
   })
   dialogVisible.value = true
 }
@@ -172,7 +170,7 @@ onMounted(load)
       <div class="notice-icon"><el-icon><Connection /></el-icon></div>
       <div>
         <strong>Base URL 需要包含版本路径</strong>
-        <span>后端会拼接 <code>/chat/completions</code>。例如 DeepSeek 使用 https://api.deepseek.com/v1。</span>
+        <span>后端会拼接 <code>/chat/completions</code>。例如 DeepSeek 使用 https://api.deepseek.com/v1；联网搜索使用独立的 Base URL 和 Key，请在「运行策略」中配置。</span>
       </div>
     </div>
 
@@ -198,9 +196,6 @@ onMounted(load)
                       备用 Key
                     </el-tag>
                     <el-tag v-else size="small" effect="plain" type="info">单 Key</el-tag>
-                    <el-tag v-if="row.webSearchEnabled" size="small" effect="plain" type="primary">
-                      联网
-                    </el-tag>
                   </div>
                 </div>
               </div>
@@ -330,21 +325,6 @@ onMounted(load)
           </el-form-item>
         </div>
 
-        <div class="form-section">
-          <div class="form-section__title">
-            联网搜索
-            <small>按关键词触发 DeepSeek 官方搜索</small>
-          </div>
-          <div class="setting-row">
-            <div>
-              <strong>启用官方搜索</strong>
-              <small>使用 /v1/tools/search，需要 DeepSeek 官方 Key 才能生效</small>
-            </div>
-            <div class="setting-row__control">
-              <el-switch v-model="form.webSearchEnabled" />
-            </div>
-          </div>
-        </div>
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
@@ -562,3 +542,5 @@ onMounted(load)
   }
 }
 </style>
+
+

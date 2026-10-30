@@ -3,13 +3,18 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { ChatDotRound, Refresh, User } from '@element-plus/icons-vue'
 import { adminApi } from '@/api'
-import type { ChatCandidate, SettingsSnapshot } from '@/api/types'
+import type { ChatCandidate, SearchSettings, SearchSettingsInput, SearchTestResult, SettingsSnapshot } from '@/api/types'
 import { getErrorMessage } from '@/api/client'
 
 const loading = ref(false)
 const loadingCandidates = ref(false)
 const savingChat = ref(false)
 const savingLlm = ref(false)
+const savingSearch = ref(false)
+const testingSearch = ref(false)
+const searchSnapshot = ref<SearchSettings | null>(null)
+const searchTestResult = ref<SearchTestResult | null>(null)
+const searchTestQuery = ref('今天有哪些重要新闻')
 const snapshot = ref<SettingsSnapshot | null>(null)
 const candidates = ref<ChatCandidate[]>([])
 const candidateHint = ref('')
@@ -22,9 +27,22 @@ const chatForm = reactive({
 
 const llmForm = reactive({
   fallbackEnabled: true,
-  searchEnabled: true,
 })
 
+const searchForm = reactive<SearchSettingsInput>({
+  enabled: true,
+  mode: 'HEURISTIC',
+  baseUrl: 'https://api.deepseek.com',
+  apiKey: '',
+  backupApiKey: '',
+  clearApiKey: false,
+  clearBackupApiKey: false,
+  count: 5,
+  needContent: false,
+  maxResults: 4,
+  maxContentChars: 1200,
+  timeoutSeconds: 20,
+})
 const filterForm = reactive({
   bannedWords: [] as string[],
   mode: 'off' as 'off' | 'rewrite' | 'block',
@@ -73,9 +91,25 @@ const chatDirty = computed(() => {
 const llmDirty = computed(() => {
   const saved = snapshot.value
   if (!saved) return false
+  return saved.fallbackEnabled.value !== llmForm.fallbackEnabled
+})
+
+const searchDirty = computed(() => {
+  const saved = searchSnapshot.value
+  if (!saved) return false
   return (
-    saved.fallbackEnabled.value !== llmForm.fallbackEnabled ||
-    saved.searchEnabled.value !== llmForm.searchEnabled
+    saved.enabled !== searchForm.enabled ||
+    saved.mode !== searchForm.mode ||
+    saved.baseUrl !== searchForm.baseUrl ||
+    saved.count !== searchForm.count ||
+    saved.needContent !== searchForm.needContent ||
+    saved.maxResults !== searchForm.maxResults ||
+    saved.maxContentChars !== searchForm.maxContentChars ||
+    saved.timeoutSeconds !== searchForm.timeoutSeconds ||
+    Boolean(searchForm.apiKey?.trim()) ||
+    Boolean(searchForm.backupApiKey?.trim()) ||
+    searchForm.clearApiKey ||
+    searchForm.clearBackupApiKey
   )
 })
 
@@ -94,28 +128,45 @@ const selectedRows = computed(() =>
 const groupOptions = computed(() => candidates.value.filter((item) => item.group))
 const privateOptions = computed(() => candidates.value.filter((item) => !item.group))
 
+function applySearchSnapshot(value: SearchSettings) {
+  searchSnapshot.value = value
+  Object.assign(searchForm, {
+    enabled: value.enabled,
+    mode: value.mode,
+    baseUrl: value.baseUrl,
+    apiKey: '',
+    backupApiKey: '',
+    clearApiKey: false,
+    clearBackupApiKey: false,
+    count: value.count,
+    needContent: value.needContent,
+    maxResults: value.maxResults,
+    maxContentChars: value.maxContentChars,
+    timeoutSeconds: value.timeoutSeconds,
+  })
+}
+
 async function load() {
   loading.value = true
   try {
-    const data = await adminApi.settings()
+    const [data, search] = await Promise.all([adminApi.settings(), adminApi.searchSettings()])
     snapshot.value = data
     chatForm.allowedChats = [...data.allowedChats.value]
     chatForm.acceptAll = data.acceptAll.value
     chatForm.groupsEnabled = data.groupsEnabled.value
     llmForm.fallbackEnabled = data.fallbackEnabled.value
-    llmForm.searchEnabled = data.searchEnabled.value
     filterForm.bannedWords = [...(data.bannedWords?.value ?? [])]
     filterForm.mode = data.filterMode?.value ?? 'off'
     mediaForm.enabled = data.mediaEnabled?.value ?? true
     mediaForm.replyMode = data.mediaReplyMode?.value ?? 'llm'
     mediaForm.ackText = data.mediaAckText?.value ?? '收到，我看下～'
+    applySearchSnapshot(search)
   } catch (error) {
     ElMessage.error(getErrorMessage(error))
   } finally {
     loading.value = false
   }
 }
-
 /** 会话候选：历史会话（后端库）+ 微信当前会话 + 联系人，任一来源可用即可。 */
 async function loadCandidates(notify = false) {
   loadingCandidates.value = true
@@ -196,7 +247,6 @@ async function saveLlm() {
   try {
     snapshot.value = await adminApi.updateLlmPolicy({
       fallbackEnabled: llmForm.fallbackEnabled,
-      searchEnabled: llmForm.searchEnabled,
     })
     ElMessage.success('模型策略已生效，无需重启')
   } catch (error) {
@@ -206,6 +256,39 @@ async function saveLlm() {
   }
 }
 
+async function saveSearch() {
+  savingSearch.value = true
+  try {
+    const payload: SearchSettingsInput = {
+      ...searchForm,
+      apiKey: searchForm.apiKey?.trim() || undefined,
+      backupApiKey: searchForm.backupApiKey?.trim() || undefined,
+    }
+    applySearchSnapshot(await adminApi.updateSearchSettings(payload))
+    searchTestResult.value = null
+    ElMessage.success('联网搜索配置已生效')
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    savingSearch.value = false
+  }
+}
+
+async function testSearch() {
+  testingSearch.value = true
+  try {
+    searchTestResult.value = await adminApi.testSearchSettings(searchTestQuery.value)
+    if (searchTestResult.value.success) {
+      ElMessage.success(`搜索成功，返回 ${searchTestResult.value.resultCount} 条结果`)
+    } else {
+      ElMessage.error(searchTestResult.value.message)
+    }
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    testingSearch.value = false
+  }
+}
 async function saveFilter() {
   savingFilter.value = true
   try {
@@ -393,16 +476,6 @@ onMounted(async () => {
             <el-switch v-model="llmForm.fallbackEnabled" />
           </div>
         </div>
-        <div class="setting-row">
-          <div>
-            <strong>联网搜索</strong>
-            <small>需要 DeepSeek 官方 Key（LLM_SEARCH_API_KEY 或在模型配置里填写）</small>
-          </div>
-          <div class="setting-row__control">
-            <el-switch v-model="llmForm.searchEnabled" />
-          </div>
-        </div>
-
         <div class="card-actions">
           <span v-if="llmDirty" class="dirty-dot">有未保存的改动</span>
           <el-button type="primary" :disabled="!llmDirty" :loading="savingLlm" @click="saveLlm">
@@ -412,6 +485,139 @@ onMounted(async () => {
       </div>
     </section>
 
+    <section class="surface-card settings-wide">
+      <div class="surface-card__head">
+        <div>
+          <h2>联网搜索</h2>
+          <p class="head-desc">独立配置搜索 Base URL、主 / 备 Key 和结果参数，不复用任何聊天模型 Provider 的地址或密钥。</p>
+        </div>
+        <span class="count-badge">{{ searchForm.enabled ? '已启用' : '已关闭' }}</span>
+      </div>
+
+      <div class="surface-card__body">
+        <div class="setting-row">
+          <div>
+            <strong>启用联网搜索</strong>
+            <small>关闭后不会触发搜索，也不会读取搜索 Key；聊天模型仍正常工作</small>
+          </div>
+          <div class="setting-row__control">
+            <el-switch v-model="searchForm.enabled" />
+          </div>
+        </div>
+
+        <div class="search-config-grid">
+          <el-form label-position="top" class="search-form">
+            <div class="form-grid">
+              <el-form-item label="搜索模式">
+                <el-radio-group v-model="searchForm.mode" size="small">
+                  <el-radio-button label="OFF">关闭</el-radio-button>
+                  <el-radio-button label="HEURISTIC">按需触发</el-radio-button>
+                  <el-radio-button label="ALWAYS">总是搜索</el-radio-button>
+                </el-radio-group>
+              </el-form-item>
+              <el-form-item label="搜索 Base URL">
+                <el-input v-model="searchForm.baseUrl" placeholder="https://api.deepseek.com" />
+              </el-form-item>
+            </div>
+            <div class="form-grid">
+              <el-form-item label="搜索 API Key">
+                <el-input
+                  v-model="searchForm.apiKey"
+                  type="password"
+                  show-password
+                  autocomplete="new-password"
+                  :disabled="searchForm.clearApiKey"
+                  :placeholder="searchForm.clearApiKey ? '将清除现有搜索 Key' : searchSnapshot?.hasApiKey ? '留空表示保持现有搜索 Key' : '搜索专用 Key，例如 sk-...'"
+                />
+              </el-form-item>
+              <el-form-item label="搜索备用 API Key">
+                <el-input
+                  v-model="searchForm.backupApiKey"
+                  type="password"
+                  show-password
+                  autocomplete="new-password"
+                  :disabled="searchForm.clearBackupApiKey"
+                  :placeholder="searchForm.clearBackupApiKey ? '将清除现有备用搜索 Key' : searchSnapshot?.hasBackupApiKey ? '留空表示保持现有备用 Key' : '可选'"
+                />
+              </el-form-item>
+            </div>
+            <div class="search-key-status">
+              <span>
+                主 Key：
+                <code v-if="searchSnapshot?.hasApiKey">{{ searchSnapshot.apiKeyHint }}</code>
+                <b v-else>未配置</b>
+                <el-button
+                  v-if="searchSnapshot?.hasApiKey && !searchForm.clearApiKey"
+                  text
+                  type="danger"
+                  size="small"
+                  @click="searchForm.clearApiKey = true; searchForm.apiKey = ''"
+                >
+                  清除
+                </el-button>
+                <el-button v-else-if="searchForm.clearApiKey" text size="small" @click="searchForm.clearApiKey = false">
+                  撤销
+                </el-button>
+              </span>
+              <span>
+                备用 Key：
+                <code v-if="searchSnapshot?.hasBackupApiKey">{{ searchSnapshot.backupApiKeyHint }}</code>
+                <b v-else>未配置</b>
+                <el-button
+                  v-if="searchSnapshot?.hasBackupApiKey && !searchForm.clearBackupApiKey"
+                  text
+                  type="danger"
+                  size="small"
+                  @click="searchForm.clearBackupApiKey = true; searchForm.backupApiKey = ''"
+                >
+                  清除
+                </el-button>
+                <el-button v-else-if="searchForm.clearBackupApiKey" text size="small" @click="searchForm.clearBackupApiKey = false">
+                  撤销
+                </el-button>
+              </span>
+            </div>
+          </el-form>
+
+          <el-form label-position="top" class="search-form">
+            <div class="form-grid three">
+              <el-form-item label="请求条数">
+                <el-input-number v-model="searchForm.count" :min="1" :max="20" controls-position="right" />
+              </el-form-item>
+              <el-form-item label="最多采用结果">
+                <el-input-number v-model="searchForm.maxResults" :min="1" :max="10" controls-position="right" />
+              </el-form-item>
+              <el-form-item label="单条内容上限">
+                <el-input-number v-model="searchForm.maxContentChars" :min="100" :max="10000" :step="100" controls-position="right" />
+              </el-form-item>
+            </div>
+            <div class="form-grid">
+              <el-form-item label="超时时间（秒）">
+                <el-input-number v-model="searchForm.timeoutSeconds" :min="5" :max="120" controls-position="right" />
+              </el-form-item>
+              <el-form-item label="返回网页正文">
+                <el-switch v-model="searchForm.needContent" active-text="需要" inactive-text="仅摘要" />
+              </el-form-item>
+            </div>
+            <div class="search-test-row">
+              <el-input v-model="searchTestQuery" placeholder="测试搜索关键词" @keyup.enter="testSearch" />
+              <el-button :disabled="searchDirty" :loading="testingSearch" @click="testSearch">测试搜索</el-button>
+            </div>
+            <div v-if="searchDirty" class="field-hint">修改后请先保存，再测试搜索。</div>
+            <div v-if="searchTestResult" class="search-test-result" :class="{ failed: !searchTestResult.success }">
+              {{ searchTestResult.success ? `成功：${searchTestResult.resultCount} 条结果，${searchTestResult.latencyMs} ms` : `失败：${searchTestResult.message}` }}
+            </div>
+          </el-form>
+        </div>
+
+        <div class="card-actions">
+          <span v-if="searchDirty" class="dirty-dot">有未保存的改动</span>
+          <el-button type="primary" :disabled="!searchDirty" :loading="savingSearch" @click="saveSearch">
+            保存并生效
+          </el-button>
+        </div>
+      </div>
+    </section>
     <section class="surface-card settings-wide">
       <div class="surface-card__head">
         <div>
@@ -527,6 +733,71 @@ onMounted(async () => {
 .settings-grid .surface-card + .surface-card {
   margin-top: 0;
 }
+.search-config-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.search-form {
+  padding: 10px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  background: #fbfcfe;
+}
+
+.search-form :deep(.el-form-item) {
+  margin-bottom: 10px;
+}
+
+.search-key-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.search-key-status span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.search-key-status code {
+  color: var(--ink-soft);
+  font-size: 10px;
+}
+
+.search-key-status b {
+  color: var(--muted-soft);
+  font-weight: 500;
+}
+
+.search-test-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.search-test-row .el-input {
+  flex: 1;
+}
+
+.search-test-result {
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  color: #15803d;
+  background: #f0fdf4;
+  font-size: 10px;
+}
+
+.search-test-result.failed {
+  color: #b91c1c;
+  background: #fef2f2;
+}
 .picker-head {
   display: flex;
   align-items: center;
@@ -638,13 +909,82 @@ onMounted(async () => {
 }
 
 @media (max-width: 1100px) {
+  .search-config-grid {
+    grid-template-columns: 1fr;
+  }
+
   .settings-grid {
     grid-template-columns: 1fr;
   }
 }
 
 @media (max-width: 680px) {
-  .picker-head {
+  .search-config-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.search-form {
+  padding: 10px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  background: #fbfcfe;
+}
+
+.search-form :deep(.el-form-item) {
+  margin-bottom: 10px;
+}
+
+.search-key-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.search-key-status span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.search-key-status code {
+  color: var(--ink-soft);
+  font-size: 10px;
+}
+
+.search-key-status b {
+  color: var(--muted-soft);
+  font-weight: 500;
+}
+
+.search-test-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.search-test-row .el-input {
+  flex: 1;
+}
+
+.search-test-result {
+  margin-top: 6px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  color: #15803d;
+  background: #f0fdf4;
+  font-size: 10px;
+}
+
+.search-test-result.failed {
+  color: #b91c1c;
+  background: #fef2f2;
+}
+.picker-head {
     align-items: flex-start;
     flex-direction: column;
   }
@@ -663,6 +1003,14 @@ onMounted(async () => {
   }
 }
 </style>
+
+
+
+
+
+
+
+
 
 
 

@@ -44,7 +44,6 @@ class RuntimeSettingsServiceTest {
         assertThat(service.acceptAll()).isFalse();
         assertThat(service.groupsEnabled()).isFalse();
         assertThat(service.llmFallbackEnabled()).isTrue();
-        assertThat(service.searchEnabled()).isTrue();
     }
 
     @Test
@@ -53,8 +52,8 @@ class RuntimeSettingsServiceTest {
                 new AppSetting(RuntimeSettingsService.KEY_ALLOWED_CHATS, "wxid_a, wxid_b"),
                 new AppSetting(RuntimeSettingsService.KEY_ACCEPT_ALL, "false"),
                 new AppSetting(RuntimeSettingsService.KEY_GROUPS_ENABLED, "true"),
-                new AppSetting(RuntimeSettingsService.KEY_LLM_FALLBACK, "false"),
-                new AppSetting(RuntimeSettingsService.KEY_SEARCH_ENABLED, "false")));
+                new AppSetting(RuntimeSettingsService.KEY_LLM_FALLBACK, "false")
+        ));
         hookProperties.setAllowedChats(List.of("wxid_env"));
 
         service.reload();
@@ -63,7 +62,6 @@ class RuntimeSettingsServiceTest {
         assertThat(service.acceptAll()).isFalse();
         assertThat(service.groupsEnabled()).isTrue();
         assertThat(service.llmFallbackEnabled()).isFalse();
-        assertThat(service.searchEnabled()).isFalse();
     }
 
     @Test
@@ -75,9 +73,8 @@ class RuntimeSettingsServiceTest {
         assertThat(service.groupsEnabled()).isTrue();
         verify(repository, org.mockito.Mockito.times(3)).save(any(AppSetting.class));
 
-        service.updateLlmPolicy(false, false);
+        service.updateLlmPolicy(false);
         assertThat(service.llmFallbackEnabled()).isFalse();
-        assertThat(service.searchEnabled()).isFalse();
     }
 
     @Test
@@ -85,7 +82,7 @@ class RuntimeSettingsServiceTest {
         Map<String, Object> before = service.snapshot();
         assertThat(source(before, "allowedChats")).isEqualTo("env");
 
-        service.updateLlmPolicy(true, true);
+        service.updateLlmPolicy(true);
         Map<String, Object> after = service.snapshot();
         assertThat(source(after, "fallbackEnabled")).isEqualTo("db");
         assertThat(source(after, "allowedChats")).isEqualTo("env");
@@ -96,3 +93,4 @@ class RuntimeSettingsServiceTest {
         return String.valueOf(((Map<String, Object>) snapshot.get(key)).get("source"));
     }
 }
+

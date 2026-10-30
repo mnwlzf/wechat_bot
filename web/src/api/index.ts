@@ -27,6 +27,9 @@ import type {
   ProviderTestResult,
   ScheduledMessage,
   ScheduledMessageInput,
+  SearchSettings,
+  SearchSettingsInput,
+  SearchTestResult,
   SettingsSnapshot,
   UsagePricingInput,
   UsageSummary,
@@ -187,7 +190,18 @@ export const adminApi = {
   async deleteScheduledMessage(id: string) {
     await http.delete(`/api/admin/scheduled-messages/${id}`)
   },
-  async updateFilterPolicy(payload: FilterPolicyInput) {
+  async searchSettings() {
+    const { data } = await http.get<SearchSettings>('/api/admin/search-settings')
+    return data
+  },
+  async updateSearchSettings(payload: SearchSettingsInput) {
+    const { data } = await http.put<SearchSettings>('/api/admin/search-settings', payload)
+    return data
+  },
+  async testSearchSettings(query: string) {
+    const { data } = await http.post<SearchTestResult>('/api/admin/search-settings/test', { query })
+    return data
+  },  async updateFilterPolicy(payload: FilterPolicyInput) {
     const { data } = await http.put<SettingsSnapshot>('/api/admin/settings/filter', payload)
     return data
   },
@@ -204,6 +218,8 @@ export const adminApi = {
     return data
   },
 }
+
+
 
 
 

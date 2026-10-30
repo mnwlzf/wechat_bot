@@ -17,7 +17,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 可在管理端实时修改的策略项（会话白名单、群聊开关、模型回退、联网搜索）。
+ * 可在管理端实时修改的策略项（会话白名单、群聊开关、模型回退）。
  *
  * <p>数据库优先，没有记录时回落到环境变量默认值；写库后立即更新内存缓存，
  * 因此改配置不需要重启进程，也不需要改 .env。</p>
@@ -30,7 +30,6 @@ public class RuntimeSettingsService {
     public static final String KEY_ACCEPT_ALL = "wechat.acceptAll";
     public static final String KEY_GROUPS_ENABLED = "wechat.groupsEnabled";
     public static final String KEY_LLM_FALLBACK = "llm.fallbackEnabled";
-    public static final String KEY_SEARCH_ENABLED = "llm.searchEnabled";
     public static final String KEY_FILTER_WORDS = "filter.bannedWords";
     public static final String KEY_FILTER_MODE = "filter.mode";
     public static final String KEY_MEDIA_ENABLED = "media.enabled";
@@ -92,14 +91,9 @@ public class RuntimeSettingsService {
         return bool(KEY_LLM_FALLBACK, appProperties.getLlm().isFallbackEnabled());
     }
 
-    public boolean searchEnabled() {
-        return bool(KEY_SEARCH_ENABLED, appProperties.getLlm().getSearch().isEnabled());
-    }
-
-    public void updateLlmPolicy(boolean fallbackEnabled, boolean searchEnabled) {
+    public void updateLlmPolicy(boolean fallbackEnabled) {
         save(KEY_LLM_FALLBACK, String.valueOf(fallbackEnabled));
-        save(KEY_SEARCH_ENABLED, String.valueOf(searchEnabled));
-        log.info("模型策略已更新: fallbackEnabled={} searchEnabled={}", fallbackEnabled, searchEnabled);
+        log.info("模型策略已更新: fallbackEnabled={}", fallbackEnabled);
     }
 
     // ---------- 内容过滤 ----------
@@ -177,7 +171,6 @@ public class RuntimeSettingsService {
         result.put("acceptAll", view(KEY_ACCEPT_ALL, acceptAll()));
         result.put("groupsEnabled", view(KEY_GROUPS_ENABLED, groupsEnabled()));
         result.put("fallbackEnabled", view(KEY_LLM_FALLBACK, llmFallbackEnabled()));
-        result.put("searchEnabled", view(KEY_SEARCH_ENABLED, searchEnabled()));
         result.put("bannedWords", view(KEY_FILTER_WORDS, bannedWords()));
         result.put("filterMode", view(KEY_FILTER_MODE, filterMode()));
         result.put("mediaEnabled", view(KEY_MEDIA_ENABLED, mediaEnabled()));
@@ -256,3 +249,4 @@ public class RuntimeSettingsService {
                 .toList();
     }
 }
+

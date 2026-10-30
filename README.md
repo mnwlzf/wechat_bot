@@ -333,14 +333,14 @@ LLM_SEARCH_MODE=HEURISTIC        # OFF / HEURISTIC / ALWAYS
 LLM_SEARCH_BASE_URL=https://api.deepseek.com
 LLM_SEARCH_API_KEY=sk-官方key
 LLM_SEARCH_BACKUP_API_KEY=sk-官方备用key
-LLM_SEARCH_COUNT=5               # 请求条数 1~50
+LLM_SEARCH_COUNT=5               # 请求条数 1~20
 LLM_SEARCH_NEED_CONTENT=false    # true 会返回正文，费用更高
 LLM_SEARCH_MAX_RESULTS=4         # 注入提示词的最大条数
 LLM_SEARCH_MAX_CONTENT_CHARS=1200
 LLM_SEARCH_TIMEOUT_SECONDS=20
 ```
 
-- `LLM_SEARCH_API_KEY` 留空时复用 Provider 的主/备 Key；**中转站 Key 调官方搜索会 401**，所以建议单独填官方 Key。
+- 搜索 Base URL、搜索 Key、备用 Key 与聊天模型 Provider **完全独立**，不会复用聊天模型的 Key。\n- 可以在管理端「运行策略 → 联网搜索」直接修改，保存后立即生效并加密落库；密钥只显示末四位。
 - `HEURISTIC` 模式只在命中时效词（新闻/天气/股价/比分/查一下…）或“弱时效词 + 问号”时才搜，纯寒暄不搜，省钱。
 - 搜索结果以一条 system 消息注入到对话历史之前，并附“以结果为准、不要编造、不要直接贴链接”的约束。
 - 搜索失败（超时、额度、无结果）一律降级为不联网回复，不影响正常聊天。
@@ -355,7 +355,6 @@ LLM_SEARCH_TIMEOUT_SECONDS=20
 | `wechat.acceptAll` | 白名单为空时是否接收全部私聊 | `WECHAT_CALLBACK_ACCEPT_ALL` |
 | `wechat.groupsEnabled` | 是否处理群消息 | `WECHAT_CALLBACK_GROUPS_ENABLED` |
 | `llm.fallbackEnabled` | 是否启用备用链路（多 Provider 回退）。关闭后只走主 Provider 的主/备双 Key | `LLM_FALLBACK_ENABLED` |
-| `llm.searchEnabled` | 是否允许联网搜索 | `LLM_SEARCH_ENABLED` |
 | `media.enabled` / `media.replyMode` / `media.ackText` | 媒体消息开关与回复策略（`ignore` / `ack` / `llm`） | — |
 
 ### 7.4 引用消息与图片识别
@@ -367,7 +366,7 @@ LLM_SEARCH_TIMEOUT_SECONDS=20
 ```powershell
 # 只保留主链路 + 双 Key 兜底，不再切换下一个 Provider
 Invoke-RestMethod -Method Put http://localhost:8080/api/admin/settings/llm -Headers $h `
-  -Body (@{ fallbackEnabled = $false; searchEnabled = $true } | ConvertTo-Json)
+  -Body (@{ fallbackEnabled = $false } | ConvertTo-Json)
 ```
 
 `GET /api/admin/settings` 返回每项的 `value` 与 `source`（`db` 表示管理端改过，`env` 表示仍在用默认值）。想恢复默认值，删掉 `app_setting` 里对应的行并重启即可。
@@ -441,5 +440,8 @@ Invoke-RestMethod http://localhost:8080/api/admin/disguise/preview -Method Post 
 ```
 
 完整策略、参数基线、新号 7 天曲线和残余风险见 [docs/disguise.md](docs/disguise.md)。
+
+
+
 
 

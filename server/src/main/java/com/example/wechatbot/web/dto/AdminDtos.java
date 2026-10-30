@@ -18,8 +18,7 @@ public final class AdminDtos {
             boolean enabled,
             @Min(0) @Max(10000) int priority,
             @Min(5) @Max(300) int timeoutSeconds,
-            @Size(max = 5000) String backupApiKey,
-            boolean webSearchEnabled
+            @Size(max = 5000) String backupApiKey
     ) {}
 
     public record ProviderUpdate(
@@ -30,8 +29,7 @@ public final class AdminDtos {
             boolean enabled,
             @Min(0) @Max(10000) int priority,
             @Min(5) @Max(300) int timeoutSeconds,
-            @Size(max = 5000) String backupApiKey,
-            boolean webSearchEnabled
+            @Size(max = 5000) String backupApiKey
     ) {}
 
     public record ProviderView(
@@ -46,8 +44,7 @@ public final class AdminDtos {
             String apiKeyHint,
             OffsetDateTime updatedAt,
             boolean hasBackupApiKey,
-            String backupApiKeyHint,
-            boolean webSearchEnabled
+            String backupApiKeyHint
     ) {}
 
     public record BotUpdate(
@@ -206,7 +203,7 @@ public final class AdminDtos {
 
     public record WeChatPolicyUpdate(boolean groupsEnabled, boolean acceptAll, List<String> allowedChats) {}
 
-    public record LlmPolicyUpdate(boolean fallbackEnabled, boolean searchEnabled) {}
+    public record LlmPolicyUpdate(boolean fallbackEnabled) {}
 
     public record UsageDaily(String date, long inbound, long outbound, long promptTokens, long completionTokens) {}
 
@@ -221,3 +218,8 @@ public final class AdminDtos {
                             double estimatedCost, String currency,
                             List<UsageDaily> daily, List<UsageProvider> providers) {}
 }
+
+
+
+
+

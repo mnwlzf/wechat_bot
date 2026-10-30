@@ -19,7 +19,6 @@ export interface SettingsSnapshot {
   acceptAll: RuntimeSetting<boolean>
   groupsEnabled: RuntimeSetting<boolean>
   fallbackEnabled: RuntimeSetting<boolean>
-  searchEnabled: RuntimeSetting<boolean>
   bannedWords: RuntimeSetting<string[]>
   filterMode: RuntimeSetting<'off' | 'rewrite' | 'block'>
   mediaEnabled: RuntimeSetting<boolean>
@@ -174,7 +173,6 @@ export interface ChatCandidate {
 
 export interface LlmPolicyInput {
   fallbackEnabled: boolean
-  searchEnabled: boolean
 }
 
 export interface Provider {
@@ -190,7 +188,6 @@ export interface Provider {
   updatedAt: string
   hasBackupApiKey: boolean
   backupApiKeyHint?: string
-  webSearchEnabled: boolean
 }
 
 export interface ProviderInput {
@@ -202,7 +199,6 @@ export interface ProviderInput {
   priority: number
   timeoutSeconds: number
   backupApiKey?: string
-  webSearchEnabled: boolean
 }
 
 export interface Bot {
@@ -425,3 +421,41 @@ export interface DisguisePreview {
   aiScore: number
   parts: DisguisePreviewPart[]
 }
+
+export interface SearchSettings {
+  enabled: boolean
+  mode: 'OFF' | 'HEURISTIC' | 'ALWAYS'
+  baseUrl: string
+  hasApiKey: boolean
+  apiKeyHint?: string
+  hasBackupApiKey: boolean
+  backupApiKeyHint?: string
+  count: number
+  needContent: boolean
+  maxResults: number
+  maxContentChars: number
+  timeoutSeconds: number
+}
+
+export interface SearchSettingsInput {
+  enabled: boolean
+  mode: 'OFF' | 'HEURISTIC' | 'ALWAYS'
+  baseUrl: string
+  apiKey?: string
+  backupApiKey?: string
+  clearApiKey: boolean
+  clearBackupApiKey: boolean
+  count: number
+  needContent: boolean
+  maxResults: number
+  maxContentChars: number
+  timeoutSeconds: number
+}
+
+export interface SearchTestResult {
+  success: boolean
+  message: string
+  resultCount: number
+  latencyMs: number
+}
+

@@ -35,7 +35,7 @@ public class SettingsController {
 
     @PutMapping("/llm")
     public Map<String, Object> updateLlm(@RequestBody AdminDtos.LlmPolicyUpdate request) {
-        settings.updateLlmPolicy(request.fallbackEnabled(), request.searchEnabled());
+        settings.updateLlmPolicy(request.fallbackEnabled());
         return settings.snapshot();
     }
 
@@ -57,3 +57,4 @@ public class SettingsController {
         return settings.snapshot();
     }
 }
+

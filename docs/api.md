@@ -60,11 +60,13 @@ $headers = @{ Authorization = "Bearer dev-admin-token" }
 | GET/POST/PUT/DELETE | `/api/admin/providers` | 模型提供方 |
 | GET | `/api/admin/providers/bootstrap` | 本次启动的环境变量引导结果（密钥掩码） |
 | POST | `/api/admin/providers/{id}/test` | 模型连通测试（主 Key 失败会自动用备用 Key） |
-| POST | `/api/admin/providers/{id}/search?q=` | 用该提供方的主/备 Key 调 DeepSeek 官方搜索 |
+| POST | `/api/admin/providers/{id}/search?q=` | 兼容接口；实际使用独立的联网搜索配置 |
 | GET | `/api/admin/settings` | 运行时策略快照（值 + 来源 db/env） |
 | PUT | `/api/admin/settings/wechat` | 会话白名单 / 全量接收 / 群聊开关，立即生效 |
-| PUT | `/api/admin/settings/llm` | 备用链路与联网搜索开关，立即生效 |
+| PUT | `/api/admin/settings/llm` | 模型备用链路开关，立即生效 |
 | PUT | `/api/admin/settings/filter` | 敏感词词表与过滤模式（off / rewrite / block），立即生效 |
+| GET/PUT | `/api/admin/search-settings` | 独立联网搜索 Base URL、主/备 Key、模式与结果参数 |
+| POST | `/api/admin/search-settings/test` | 使用独立搜索配置测试联网搜索 |
 | POST | `/api/admin/conversations/{id}/takeover` | 人工接管开关：`{"paused":true}` 期间只记录不自动回复 |
 | GET/POST/PUT/DELETE | `/api/admin/auto-replies` | 关键词 / 正则自动回复规则 |
 | GET | `/api/admin/diagnostics` | 诊断聚合：钩子探活 + 回调计数 + 最近回调 + 失败投递 |
@@ -112,6 +114,25 @@ $headers = @{ Authorization = "Bearer dev-admin-token" }
 
 `action` 取值：`created` / `updated` / `unchanged` / `skipped`。`warnings` 会给出“Base URL 不是 http(s)”“缺少 API Key”“现有密钥无法用当前 `APP_SECRET_KEY` 解密”等提示；API Key 本身永不回显。
 
+### 联网搜索配置
+
+联网搜索与聊天模型 Provider 完全分离。聊天 Provider 的 `baseUrl` / `apiKey` 不会用于搜索。
+
+```http
+GET /api/admin/search-settings
+PUT /api/admin/search-settings
+POST /api/admin/search-settings/test
+```
+
+`PUT` 可配置：
+
+- `baseUrl`：搜索专用 Base URL，例如 `https://api.deepseek.com`
+- `apiKey` / `backupApiKey`：搜索专用主/备 Key，加密保存
+- `mode`：`OFF` / `HEURISTIC` / `ALWAYS`
+- `count`、`maxResults`、`maxContentChars`、`timeoutSeconds`
+- `needContent`：是否请求网页正文
+
+密钥只返回掩码；留空表示保持现有 Key，`clearApiKey` / `clearBackupApiKey` 用于显式清除。
 ### 伪装层 API
 
 `GET /api/admin/disguise` 返回当前在线状态、下次活跃时间、配额上限、累计计数与最近 40 次决策：
@@ -373,5 +394,6 @@ Hook 推来的非文本消息（`type` 不是 `1`）不再丢弃，而是归类�
 - `404`：资源不存在
 - `503`：Hook 不可连接、未登录或版本不匹配
 - `500`：未预期服务器错误
+
 
 

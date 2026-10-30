@@ -1,21 +1,15 @@
 package com.example.wechatbot.ai;
 
 import com.example.wechatbot.config.AppProperties;
-import com.example.wechatbot.config.WeChatHookProperties;
 import com.example.wechatbot.domain.BotConfig;
-import com.example.wechatbot.repository.AppSettingRepository;
-import com.example.wechatbot.service.RuntimeSettingsService;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.mock;
 
 class SearchAugmenterTest {
 
     private final AppProperties properties = new AppProperties();
-    private final RuntimeSettingsService settings = new RuntimeSettingsService(
-            mock(AppSettingRepository.class), new WeChatHookProperties(), properties);
-    private final SearchAugmenter augmenter = new SearchAugmenter(null, properties, settings);
+    private final SearchAugmenter augmenter = new SearchAugmenter(null, properties);
 
     @Test
     void skipsSmallTalk() {
@@ -53,14 +47,6 @@ class SearchAugmenterTest {
     }
 
     @Test
-    void runtimeToggleOverridesEnvDefault() {
-        assertThat(settings.searchEnabled()).isTrue();
-        settings.updateLlmPolicy(true, false);
-        assertThat(settings.searchEnabled()).isFalse();
-        assertThat(augmenter.buildContext(new BotConfig(), "帮我查一下明天的天气")).isNull();
-    }
-
-    @Test
     void resolvesModeSafely() {
         AppProperties.Search search = properties.getLlm().getSearch();
         assertThat(search.resolvedMode()).isEqualTo(AppProperties.Search.Mode.HEURISTIC);
@@ -72,3 +58,4 @@ class SearchAugmenterTest {
         assertThat(search.resolvedMode()).isEqualTo(AppProperties.Search.Mode.OFF);
     }
 }
+

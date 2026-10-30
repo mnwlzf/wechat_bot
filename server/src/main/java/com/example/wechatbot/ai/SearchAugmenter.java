@@ -2,7 +2,6 @@ package com.example.wechatbot.ai;
 
 import com.example.wechatbot.config.AppProperties;
 import com.example.wechatbot.domain.BotConfig;
-import com.example.wechatbot.service.RuntimeSettingsService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -42,12 +41,10 @@ public class SearchAugmenter {
 
     private final LlmGateway gateway;
     private final AppProperties properties;
-    private final RuntimeSettingsService settings;
 
-    public SearchAugmenter(LlmGateway gateway, AppProperties properties, RuntimeSettingsService settings) {
+    public SearchAugmenter(LlmGateway gateway, AppProperties properties) {
         this.gateway = gateway;
         this.properties = properties;
-        this.settings = settings;
     }
 
     /** 返回可直接塞进 system 消息的搜索上下文；不需要或失败时返回 {@code null}。 */
@@ -56,9 +53,6 @@ public class SearchAugmenter {
             return null;
         }
         AppProperties.Search config = properties.getLlm().getSearch();
-        if (!settings.searchEnabled()) {
-            return null;
-        }
         AppProperties.Search.Mode mode = config.resolvedMode();
         if (mode == AppProperties.Search.Mode.OFF) {
             return null;
@@ -150,3 +144,6 @@ public class SearchAugmenter {
         return single.length() > 40 ? single.substring(0, 40) + "…" : single;
     }
 }
+
+
+
