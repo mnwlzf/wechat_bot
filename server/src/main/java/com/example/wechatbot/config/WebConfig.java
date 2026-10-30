@@ -32,7 +32,7 @@ public class WebConfig implements WebMvcConfigurer {
     @Override
     public void addResourceHandlers(ResourceHandlerRegistry registry) {
         registry.addResourceHandler("/**")
-                .addResourceLocations("classpath:/static/")
+                .addResourceLocations("classpath:/static/", "file:web/dist/", "file:../web/dist/")
                 .resourceChain(false)
                 .addResolver(new PathResourceResolver() {
                     @Override

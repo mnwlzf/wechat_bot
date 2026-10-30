@@ -6,6 +6,7 @@ spring:
   # 让 IDEA / java -jar 直接读仓库根目录的 .env（工作目录必须是仓库根目录）
   # 已存在的环境变量优先级更高，因此 scripts/run-backend.ps1 注入的值仍然生效
   config:
+    # 只读取工作目录下的 .env；IDEA 运行配置与 spring-boot:run 都把工作目录设为仓库根目录
     import: optional:file:./.env[.properties]
   application:
     name: wechat-bot-server

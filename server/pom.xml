@@ -79,6 +79,10 @@
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <!-- 让 mvn spring-boot:run 与 IDEA 一样以仓库根目录为工作目录，直接读到根目录 .env -->
+                    <workingDirectory>${project.basedir}/..</workingDirectory>
+                </configuration>
             </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>

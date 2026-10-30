@@ -141,17 +141,16 @@ Maven 会把 `web/dist` 复制进 JAR 的 `static/` 目录。只修改后端时�
 3. **开启注解处理**（Lombok 需要）：`Settings → Build → Compiler → Annotation Processors → Enable annotation processing`；
 4. **Working directory 必须是仓库根目录** `D:\wechat_bot` —— `.env` 是按相对路径 `./.env` 加载的，指到 `server/` 就读不到。
 
-运行配置已经设好：主类 `com.example.wechatbot.WechatBotApplication`、工作目录 `$PROJECT_DIR$`、`-Dfile.encoding=UTF-8`、JRE 21。
+运行配置已经设好，**打开项目后点右上角绿色三角即可**，不需要再改任何东西：
 
-注意端口：`.env` 里 `SERVER_PORT=8080`，所以 IDEA 默认起在 **8080**。而 `scripts/run-backend.ps1` 起的实例在 **18080**，微信的 `CallBackURL` 指向 18080。两种方式二选一，或者给 IDEA 运行配置加一个环境变量：
+- 主类 `com.example.wechatbot.WechatBotApplication`
+- 工作目录 `$PROJECT_DIR$`（这样 `spring.config.import=optional:file:./.env` 能直接读到根目录 `.env`）
+- 环境变量 `SERVER_PORT=18080`（与微信 `CallBackURL` 指向的端口一致）
+- `-Dfile.encoding=UTF-8`
 
-```text
-SERVER_PORT=18080
-```
+端口说明：`.env` 里的 `SERVER_PORT` 也改成了 `18080`，与 `scripts/run-backend.ps1`、`wechat-guard.ps1`、`write-wx-ini.ps1` 里的回调地址保持一致。**IDEA 与脚本二选一运行**，同一个端口不能同时被两个实例占用。
 
-（系统环境变量优先级高于 `.env`，所以加了就会覆盖。）同一个端口不能同时被两个实例占用。
-
-另外：IDEA 里直接 Run 不会执行 Maven 的 `copy-vue-dist`，`target/classes/static` 可能没有前端文件，访问 `/` 会 404。先跑一次 `mvn -f server/pom.xml process-resources`（或直接 `mvn package`）即可；只调后端接口时无所谓。
+前端不需要额外构建步骤：`web/dist` 已存在时，后端会直接从 `file:web/dist/` 提供页面（`WebConfig` 里配置了 classpath 与文件目录两级回退），访问 `http://127.0.0.1:18080/` 即可。如果改过前端代码，跑一次 `pnpm --dir web build` 刷新 `web/dist`。
 
 ## 6. 配置允许的聊天
 
