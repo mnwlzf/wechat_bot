@@ -135,6 +135,50 @@ class MediaMessageParserTest {
     }
 
     @Test
+    void imageKeepsRealKeysApartFromThumbKeys() {
+        String xml = "<msg><img aeskey=\"6f22c248aeed0eea892724bf57691483\" encryver=\"1\""
+                + " cdnthumbaeskey=\"00112233445566778899aabbccddeeff\""
+                + " cdnthumbmd5=\"89d861652a29abb6c5c9e8c188d62105\""
+                + " length=\"219229\" md5=\"afff3bac26f7e382439d4eba57a9f191\"/></msg>";
+
+        MediaMessageParser.Parsed parsed = MediaMessageParser.parse(3, xml);
+
+        assertThat(parsed.md5()).isEqualTo("afff3bac26f7e382439d4eba57a9f191");
+        assertThat(parsed.aeskey()).isEqualTo("6f22c248aeed0eea892724bf57691483");
+        assertThat(parsed.thumbMd5()).isEqualTo("89d861652a29abb6c5c9e8c188d62105");
+        assertThat(parsed.thumbAeskey()).isEqualTo("00112233445566778899aabbccddeeff");
+        assertThat(parsed.md5Candidates())
+                .containsExactly("afff3bac26f7e382439d4eba57a9f191", "89d861652a29abb6c5c9e8c188d62105");
+    }
+
+    @Test
+    void thumbAttributesFirstDoNotShadowRealKeys() {
+        // 微信不同版本属性顺序不同：缩略图属性排在前面时，不能把它的后半截当成本体的 md5 / aeskey
+        String xml = "<msg><img cdnthumbmd5=\"89d861652a29abb6c5c9e8c188d62105\""
+                + " cdnthumbaeskey=\"00112233445566778899aabbccddeeff\""
+                + " md5=\"afff3bac26f7e382439d4eba57a9f191\""
+                + " aeskey=\"6f22c248aeed0eea892724bf57691483\"/></msg>";
+
+        MediaMessageParser.Parsed parsed = MediaMessageParser.parse(3, xml);
+
+        assertThat(parsed.md5()).isEqualTo("afff3bac26f7e382439d4eba57a9f191");
+        assertThat(parsed.aeskey()).isEqualTo("6f22c248aeed0eea892724bf57691483");
+        assertThat(parsed.thumbMd5()).isEqualTo("89d861652a29abb6c5c9e8c188d62105");
+    }
+
+    @Test
+    void imageWithoutThumbAttributesStillWorks() {
+        String xml = "<msg><img aeskey=\"6f22c248aeed0eea892724bf57691483\""
+                + " md5=\"afff3bac26f7e382439d4eba57a9f191\"/></msg>";
+
+        MediaMessageParser.Parsed parsed = MediaMessageParser.parse(3, xml);
+
+        assertThat(parsed.thumbMd5()).isNull();
+        assertThat(parsed.thumbAeskey()).isNull();
+        assertThat(parsed.md5Candidates()).containsExactly("afff3bac26f7e382439d4eba57a9f191");
+    }
+
+    @Test
     void quotedImageBecomesPlaceholderInsteadOfXml() {
         String inner = "<msg><img aeskey=\"00112233445566778899aabbccddeeff\""
                 + " md5=\"9f2c1b7a44e94f0d8b1c2d3e4f5a6b7c\"/></msg>";

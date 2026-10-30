@@ -290,10 +290,16 @@ public class ChatOrchestrator {
                 if (current) {
                     content = withQuote(item, content);
                 }
-                String image = current ? imageDataUrl(item) : null;
+                WeChatImageResolver.Attachment image = current
+                        ? imageAttachment(conversation.getChatId(), item)
+                        : null;
+                if (image != null && image.thumbnail()) {
+                    // 本地只有缩略图时明确告诉模型画面受限，避免它假装看清了小字
+                    content = content + "\n（这张图只有缩略图，分辨率有限，细节可能看不清）";
+                }
                 messages.add(image == null
                         ? ChatMessage.user(content)
-                        : ChatMessage.userWithImage(content, image));
+                        : ChatMessage.userWithImage(content, image.dataUrl()));
             } else if (item.getStatus() == MessageStatus.SUCCESS) {
                 messages.add(ChatMessage.assistant(item.getContent()));
             }
@@ -331,12 +337,24 @@ public class ChatOrchestrator {
         return "[" + label + "：" + abbreviate(quote, 200) + "]\n" + content;
     }
 
-    /** 当前消息是图片时取 data URL；取不到返回 null，模型只看到 [图片] 占位文本。 */
-    private String imageDataUrl(MessageLog item) {
-        if (item.getMediaKind() != MediaKind.IMAGE || item.getMediaMd5() == null) {
+    /** 当前消息是图片时取附件；取不到返回 null，模型只看到 [图片] 占位文本。 */
+    private WeChatImageResolver.Attachment imageAttachment(String chatId, MessageLog item) {
+        if (item.getMediaKind() != MediaKind.IMAGE) {
             return null;
         }
-        return imageResolver.toDataUrl(item.getMediaMd5(), item.getMediaAeskey()).orElse(null);
+        List<String> md5Candidates = new ArrayList<>(2);
+        addIfPresent(md5Candidates, item.getMediaMd5());
+        addIfPresent(md5Candidates, item.getMediaThumbMd5());
+        if (md5Candidates.isEmpty()) {
+            return null;
+        }
+        return imageResolver.toDataUrl(chatId, item.getCreatedAt(), md5Candidates).orElse(null);
+    }
+
+    private static void addIfPresent(List<String> values, String value) {
+        if (value != null && !value.isBlank() && !values.contains(value)) {
+            values.add(value);
+        }
     }
 
     /** 会话绑定了提示词模板时优先使用模板，否则回退到机器人默认提示词。 */

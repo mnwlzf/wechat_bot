@@ -67,6 +67,15 @@ public class HookCallbackService {
         } else {
             media = MediaMessageParser.parse(type, rawContent);
             content = media.placeholder();
+            if (media.kind() == com.example.wechatbot.domain.MediaKind.IMAGE) {
+                // 图片定位/解密出问题时，唯一能复盘的就是这条原文；图片消息量很小，直接记 INFO
+                log.info("图片消息原文: md5={} thumbMd5={} aeskey={} thumbAeskey={} raw={}",
+                        media.md5(), media.thumbMd5(), media.aeskey(), media.thumbAeskey(),
+                        truncate(rawContent, 900));
+            } else {
+                log.debug("媒体消息: type={} kind={} raw={}", type, media.kind(),
+                        truncate(rawContent, 400));
+            }
         }
         if (content.isBlank()) {
             return Result.ignored("空消息内容", null, null);

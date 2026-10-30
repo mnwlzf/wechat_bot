@@ -21,11 +21,13 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
+import java.time.OffsetDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Base64;
-import java.util.Collections;
+import java.util.HashMap;
 import java.util.Iterator;
-import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -35,39 +37,30 @@ import java.util.stream.Stream;
 /**
  * 把微信图片消息变成模型能吃的 {@code data:image/jpeg;base64,...}。
  *
- * <p>微信收到的图片在本地是加密的 {@code .dat}（见 {@link WeChatDatDecoder}），路径形如
- * {@code xwechat_files/<wxid>/msg/attach/<会话 hash>/<yyyy-MM>/Img/<md5>.dat}。
- * 定位靠消息 XML 里的 {@code md5}，解密靠 {@code aeskey}：</p>
- * <ol>
- *   <li>先请 Hook 的 {@code /Decode_Pic} 解码（微信自己的解密例程，最准）；</li>
- *   <li>Hook 没产出文件时，用 {@link WeChatDatDecoder} 在本地 AES 解密兜底；</li>
- *   <li>两条路都失败就返回空，让调用方退化成 {@code [图片]} 占位文本。</li>
- * </ol>
+ * <p>微信收到的图片在本地是加密的 {@code .dat}，路径固定为</p>
+ * <pre>
+ * xwechat_files/&lt;wxid&gt;/msg/attach/&lt;md5(会话 id)&gt;/&lt;yyyy-MM&gt;/Img/&lt;文件名&gt;.dat
+ * </pre>
+ *
+ * <p>「文件名」用的是报文里某个 32 位 md5（原图 {@code md5} 或 {@code cdnthumbmd5}，不固定），
+ * 因此按「原图 md5 → 缩略图 md5 → 同会话时间窗内的任何 .dat」三级回退定位；
+ * 解密用 {@link WeChatDatDecoder} 的本机密钥（不是报文里的 aeskey）。
+ * 高清副本可能是 {@code wxgf}（HEVC）容器，JDK 解不了，此时自动回退到 {@code _t.dat} 缩略图。</p>
  *
  * <p>任何异常都不外抛：图片识别属于增强能力，不能因为它失败而中断回复流程。</p>
  */
 @Component
 public class WeChatImageResolver {
     private static final Logger log = LoggerFactory.getLogger(WeChatImageResolver.class);
-    private static final int MAX_CACHED_PATHS = 512;
+    private static final DateTimeFormatter MONTH = DateTimeFormatter.ofPattern("yyyy-MM");
+    /** 同一张图在本地的几种副本，高清优先。 */
+    private static final List<String> SUFFIXES = List.of(".dat", "_h.dat", "_t.dat");
 
-    private final WeChatHookClient hookClient;
     private final WeChatHookProperties hookProperties;
     private final VisionProperties vision;
+    private final Map<String, List<WeChatDatDecoder.Key>> keyCache = new HashMap<>();
 
-    /** md5 → 本地 .dat 路径，省掉重复的目录遍历。 */
-    private final Map<String, Path> pathCache = Collections.synchronizedMap(
-            new LinkedHashMap<>(64, 0.75f, true) {
-                @Override
-                protected boolean removeEldestEntry(Map.Entry<String, Path> eldest) {
-                    return size() > MAX_CACHED_PATHS;
-                }
-            });
-
-    public WeChatImageResolver(WeChatHookClient hookClient,
-                               WeChatHookProperties hookProperties,
-                               VisionProperties vision) {
-        this.hookClient = hookClient;
+    public WeChatImageResolver(WeChatHookProperties hookProperties, VisionProperties vision) {
         this.hookProperties = hookProperties;
         this.vision = vision;
     }
@@ -77,96 +70,185 @@ public class WeChatImageResolver {
     }
 
     /**
-     * @param md5    消息 XML 里的图片 md5
-     * @param aeskey 消息 XML 里的 aeskey
+     * 一张可以塞进模型请求的图片。
+     *
+     * @param dataUrl   {@code data:image/jpeg;base64,...}
+     * @param thumbnail 是否只有缩略图（高清副本是 wxgf 解不了，或本地只有 {@code _t.dat}）
+     */
+    public record Attachment(String dataUrl, boolean thumbnail) {}
+
+    /**
+     * @param chatId        会话 id（wxid / xxx@chatroom），用来算出本地目录名
+     * @param sentAt        消息时间，用于时间窗兜底匹配
+     * @param md5Candidates 报文里出现的所有图片 md5（原图优先，其次缩略图）
      * @return 可直接放进请求体的 data URL；拿不到图片时返回空
      */
-    public Optional<String> toDataUrl(String md5, String aeskey) {
-        if (!vision.isEnabled() || md5 == null || md5.isBlank()) {
+    public Optional<Attachment> toDataUrl(String chatId,
+                                          OffsetDateTime sentAt,
+                                          List<String> md5Candidates) {
+        if (!vision.isEnabled()) {
             return Optional.empty();
         }
         try {
-            Path cached = cacheFile(md5, aeskey);
-            if (Files.isRegularFile(cached)) {
-                return Optional.of(dataUrl(Files.readAllBytes(cached)));
-            }
-            Path dat = locate(md5).orElse(null);
-            if (dat == null) {
-                log.info("未找到图片本地文件，按占位文本处理: md5={}", md5);
+            List<Location> locations = locations(chatId, sentAt);
+            if (locations.isEmpty()) {
+                log.info("未找到图片目录，按占位文本处理: chat={} md5={} 根目录={}", chatId, md5Candidates, roots());
                 return Optional.empty();
             }
-            byte[] image = decode(dat, aeskey);
-            if (image == null) {
-                log.info("图片解码失败，按占位文本处理: {}", dat.getFileName());
-                return Optional.empty();
+            for (Location location : locations) {
+                List<Path> files = candidatesIn(location.dir(), sentAt, md5Candidates);
+                if (files.isEmpty()) {
+                    continue;
+                }
+                log.info("图片候选文件 {} 个（{}）: {}", files.size(), location.dir(), files);
+                List<WeChatDatDecoder.Key> keys = keysOf(location.accountWxid());
+                for (Path dat : files) {
+                    Path cached = cacheFile(dat);
+                    if (Files.isRegularFile(cached)) {
+                        return Optional.of(new Attachment(dataUrl(Files.readAllBytes(cached)), isThumb(dat)));
+                    }
+                    byte[] image = decode(dat, keys);
+                    if (image == null) {
+                        continue;
+                    }
+                    byte[] jpeg = shrink(image);
+                    if (jpeg == null) {
+                        log.info("图片无法转成 JPEG，跳过: {}", dat.getFileName());
+                        continue;
+                    }
+                    Files.createDirectories(cached.getParent());
+                    Files.write(cached, jpeg);
+                    log.info("图片已解码并缓存: {} {}KB -> {}KB", dat.getFileName(),
+                            image.length / 1024, jpeg.length / 1024);
+                    return Optional.of(new Attachment(dataUrl(jpeg), isThumb(dat)));
+                }
             }
-            byte[] jpeg = shrink(image);
-            if (jpeg == null) {
-                log.info("图片无法重新编码，按占位文本处理: {}", dat.getFileName());
-                return Optional.empty();
-            }
-            Files.createDirectories(cached.getParent());
-            Files.write(cached, jpeg);
-            log.info("图片已解码并缓存: md5={} {}KB -> {}KB", md5,
-                    image.length / 1024, jpeg.length / 1024);
-            return Optional.of(dataUrl(jpeg));
+            log.info("图片全部候选解码失败，按占位文本处理: chat={} md5={}", chatId, md5Candidates);
+            return Optional.empty();
         } catch (Exception ex) {
             log.warn("图片准备失败（降级为占位文本）: {}", ex.getMessage());
             return Optional.empty();
         }
     }
 
-    /** 按 md5 在微信数据目录里找 {@code Img/<md5>.dat}。 */
-    public Optional<Path> locate(String md5) {
-        if (md5 == null || !md5.toLowerCase(Locale.ROOT).matches("[0-9a-f]{32}")) {
-            return Optional.empty();
+    // ------------------------------------------------------------------ 定位
+
+    /** 会话对应的图片目录 + 该目录所属账号（用于推本机密钥）。 */
+    record Location(Path dir, String accountWxid) {}
+
+    /**
+     * 按 md5 快路径 + 同会话时间窗兜底，挑出可能要试的 {@code .dat}。
+     *
+     * <p>package-private 便于单测直接注入临时目录验证。</p>
+     */
+    List<Path> candidates(String chatId, OffsetDateTime sentAt, List<String> md5Candidates) {
+        LinkedHashSet<Path> found = new LinkedHashSet<>();
+        for (Location location : locations(chatId, sentAt)) {
+            found.addAll(candidatesIn(location.dir(), sentAt, md5Candidates));
         }
-        Path cached = pathCache.get(md5);
-        if (cached != null && Files.isRegularFile(cached)) {
-            return Optional.of(cached);
-        }
-        String fileName = md5.toLowerCase(Locale.ROOT) + ".dat";
-        for (Path root : roots()) {
-            Optional<Path> found = findUnder(root, fileName);
-            if (found.isPresent()) {
-                pathCache.put(md5, found.get());
-                return found;
-            }
-        }
-        return Optional.empty();
+        return new ArrayList<>(found);
     }
 
-    private Optional<Path> findUnder(Path root, String fileName) {
-        if (!Files.isDirectory(root)) {
-            return Optional.empty();
-        }
-        List<Path> attachDirs = new ArrayList<>();
-        Path direct = root.resolve("msg").resolve("attach");
-        if (Files.isDirectory(direct)) {
-            attachDirs.add(direct);
-        }
-        try (Stream<Path> children = Files.list(root)) {
-            children.filter(Files::isDirectory)
-                    .map(child -> child.resolve("msg").resolve("attach"))
-                    .filter(Files::isDirectory)
-                    .forEach(attachDirs::add);
-        } catch (Exception ex) {
-            log.debug("遍历微信数据目录失败: {} ({})", root, ex.getMessage());
-        }
-        for (Path attach : attachDirs) {
-            try (Stream<Path> walk = Files.walk(attach, 4)) {
-                Optional<Path> hit = walk
-                        .filter(Files::isRegularFile)
-                        .filter(path -> path.getFileName().toString().equalsIgnoreCase(fileName))
-                        .findFirst();
-                if (hit.isPresent()) {
-                    return hit;
+    private List<Path> candidatesIn(Path dir, OffsetDateTime sentAt, List<String> md5Candidates) {
+        LinkedHashSet<Path> found = new LinkedHashSet<>();
+        if (md5Candidates != null) {
+            for (String md5 : md5Candidates) {
+                if (md5 == null || !md5.toLowerCase(Locale.ROOT).matches("[0-9a-f]{32}")) {
+                    continue;
                 }
-            } catch (Exception ex) {
-                log.debug("扫描图片目录失败: {} ({})", attach, ex.getMessage());
+                for (String suffix : SUFFIXES) {
+                    Path path = dir.resolve(md5.toLowerCase(Locale.ROOT) + suffix);
+                    if (Files.isRegularFile(path)) {
+                        found.add(path);
+                    }
+                }
             }
         }
-        return Optional.empty();
+        if (found.isEmpty()) {
+            found.addAll(byTimeWindow(dir, sentAt));
+        }
+        return new ArrayList<>(found);
+    }
+
+    /**
+     * 文件名对不上时，退而求其次：同一会话目录里，消息时间前后 {@code matchWindowSeconds}
+     * 内写盘的 {@code .dat}，按时间接近程度排序，同样接近时高清副本优先。
+     */
+    private List<Path> byTimeWindow(Path dir, OffsetDateTime sentAt) {
+        long target = (sentAt == null ? OffsetDateTime.now() : sentAt).toInstant().toEpochMilli();
+        long window = Math.max(30, vision.getMatchWindowSeconds()) * 1000L;
+        List<Path> hits = new ArrayList<>();
+        if (!Files.isDirectory(dir)) {
+            return hits;
+        }
+        try (Stream<Path> files = Files.list(dir)) {
+            files.filter(Files::isRegularFile)
+                    .filter(path -> path.getFileName().toString().endsWith(".dat"))
+                    .filter(path -> Math.abs(lastModified(path) - target) <= window)
+                    .forEach(hits::add);
+        } catch (Exception ex) {
+            log.debug("扫描图片目录失败: {} ({})", dir, ex.getMessage());
+        }
+        hits.sort((left, right) -> {
+            long deltaLeft = Math.abs(lastModified(left) - target);
+            long deltaRight = Math.abs(lastModified(right) - target);
+            if (deltaLeft != deltaRight) {
+                return Long.compare(deltaLeft, deltaRight);
+            }
+            return Integer.compare(rank(left), rank(right));
+        });
+        return hits;
+    }
+
+    /** 高清副本排前面：{@code .dat} / {@code _h.dat} 优于 {@code _t.dat}。 */
+    private static int rank(Path path) {
+        return isThumb(path) ? 1 : 0;
+    }
+
+    private static boolean isThumb(Path path) {
+        return path.getFileName().toString().endsWith("_t.dat");
+    }
+
+    /** 会话目录：{@code <root>/<wxid>/msg/attach/<md5(chatId)>/<yyyy-MM>/Img}，跨月时多看一个月。 */
+    List<Path> imageDirs(String chatId, OffsetDateTime sentAt) {
+        return locations(chatId, sentAt).stream().map(Location::dir).toList();
+    }
+
+    List<Location> locations(String chatId, OffsetDateTime sentAt) {
+        List<Location> dirs = new ArrayList<>();
+        if (chatId == null || chatId.isBlank()) {
+            return dirs;
+        }
+        String hash = md5Hex(chatId);
+        OffsetDateTime base = sentAt == null ? OffsetDateTime.now() : sentAt;
+        List<String> months = List.of(base.format(MONTH), base.minusMonths(1).format(MONTH));
+        for (Path root : roots()) {
+            if (!Files.isDirectory(root)) {
+                continue;
+            }
+            List<Path> accounts = new ArrayList<>();
+            if (Files.isDirectory(root.resolve("msg").resolve("attach"))) {
+                accounts.add(root);
+            }
+            try (Stream<Path> children = Files.list(root)) {
+                children.filter(Files::isDirectory).forEach(accounts::add);
+            } catch (Exception ex) {
+                log.debug("遍历微信数据目录失败: {} ({})", root, ex.getMessage());
+            }
+            for (Path account : accounts) {
+                Path attach = account.resolve("msg").resolve("attach").resolve(hash);
+                if (!Files.isDirectory(attach)) {
+                    continue;
+                }
+                for (String month : months) {
+                    Path img = attach.resolve(month).resolve("Img");
+                    if (Files.isDirectory(img)) {
+                        dirs.add(new Location(img, account.getFileName().toString()));
+                    }
+                }
+            }
+        }
+        return dirs;
     }
 
     private List<Path> roots() {
@@ -175,64 +257,82 @@ public class WeChatImageResolver {
             return List.of(Path.of(configured.trim()));
         }
         String home = System.getProperty("user.home", "");
-        List<Path> defaults = new ArrayList<>();
-        if (!home.isBlank()) {
-            defaults.add(Path.of(home, "Documents", "xwechat_files"));
-            defaults.add(Path.of(home, "Documents", "WeChat Files"));
+        if (home.isBlank()) {
+            return List.of();
         }
+        List<Path> defaults = new ArrayList<>();
+        defaults.add(Path.of(home, "Documents", "xwechat_files"));
+        defaults.add(Path.of(home, "Documents", "WeChat Files"));
         return defaults;
     }
 
-    /** Hook 优先，本地解密兜底。 */
-    private byte[] decode(Path dat, String aeskey) {
-        byte[] viaHook = decodeWithHook(dat);
-        if (viaHook != null) {
-            return viaHook;
+    // ------------------------------------------------------------------ 解密
+
+    /** 本机密钥按账号缓存：一次派生多把候选（不同 kvcomm code）。 */
+    private List<WeChatDatDecoder.Key> keysOf(String accountWxid) {
+        if (accountWxid == null || accountWxid.isBlank()) {
+            return List.of();
         }
+        return keyCache.computeIfAbsent(accountWxid, wxid -> {
+            List<WeChatDatDecoder.Key> keys = WeChatDatDecoder.localKeys(kvcommDir(), wxid);
+            if (keys.isEmpty()) {
+                log.warn("未能从 kvcomm 推出图片解密密钥，图片将只保留占位文本: wxid={} kvcomm={}",
+                        wxid, kvcommDir());
+            } else {
+                log.info("图片解密密钥就绪: wxid={} 候选 {} 把", wxid, keys.size());
+            }
+            return keys;
+        });
+    }
+
+    private Path kvcommDir() {
+        String configured = vision.getKvcommDir();
+        if (configured != null && !configured.isBlank()) {
+            return Path.of(configured.trim());
+        }
+        String appData = System.getenv("APPDATA");
+        if (appData != null && !appData.isBlank()) {
+            return Path.of(appData, "Tencent", "xwechat", "net", "kvcomm");
+        }
+        String home = System.getProperty("user.home", "");
+        return home.isBlank()
+                ? Path.of("kvcomm")
+                : Path.of(home, "AppData", "Roaming", "Tencent", "xwechat", "net", "kvcomm");
+    }
+
+    /** 用本机密钥解密；{@code wxgf}（HEVC）解不出来时返回 null，交给下一个候选（缩略图）。 */
+    private byte[] decode(Path dat, List<WeChatDatDecoder.Key> keys) {
+        byte[] raw;
         try {
-            return WeChatDatDecoder.decode(Files.readAllBytes(dat), aeskey);
+            raw = Files.readAllBytes(dat);
         } catch (Exception ex) {
             log.debug("读取图片文件失败: {} ({})", dat, ex.getMessage());
             return null;
         }
-    }
-
-    private byte[] decodeWithHook(Path dat) {
-        Path tmp = null;
-        try {
-            tmp = Files.createTempFile("wx-image-", ".jpg");
-            Files.deleteIfExists(tmp);
-            hookClient.decodePicture(dat.toString(), tmp.toString());
-            long deadline = System.currentTimeMillis() + Math.max(0, vision.getDecodeWaitMs());
-            while (System.currentTimeMillis() < deadline) {
-                if (Files.isRegularFile(tmp) && Files.size(tmp) > 0) {
-                    byte[] bytes = Files.readAllBytes(tmp);
-                    if (WeChatDatDecoder.looksLikeImage(bytes)) {
-                        return bytes;
-                    }
-                    return null;
-                }
-                Thread.sleep(100);
+        if (!WeChatDatDecoder.isV2(raw)) {
+            return WeChatDatDecoder.looksLikeImage(raw) ? raw : null;
+        }
+        if (keys.isEmpty()) {
+            return null;
+        }
+        for (WeChatDatDecoder.Key key : keys) {
+            byte[] plain = WeChatDatDecoder.decode(raw, key);
+            if (plain == null) {
+                continue;
             }
-            return null;
-        } catch (InterruptedException ex) {
-            Thread.currentThread().interrupt();
-            return null;
-        } catch (Exception ex) {
-            log.debug("Hook 解码图片不可用: {}", ex.getMessage());
-            return null;
-        } finally {
-            if (tmp != null) {
-                try {
-                    Files.deleteIfExists(tmp);
-                } catch (Exception ignored) {
-                    // 临时文件清不掉不影响主流程
-                }
+            if (WeChatDatDecoder.looksLikeImage(plain)) {
+                return plain;
+            }
+            if (WeChatDatDecoder.isWxgf(plain)) {
+                log.info("图片是 wxgf(HEVC) 高清格式，JDK 无法解码，改用缩略图: {}", dat.getFileName());
+                return null;
             }
         }
+        log.info("图片解密失败（{} 把密钥都试过）: {}", keys.size(), dat.getFileName());
+        return null;
     }
 
-    /** 缩放到长边上限内并统一转成 JPEG，控制请求体积。 */
+    /** 缩放到长边上限内并统一转成 JPEG；ImageIO 读不出来（如 wxgf）时返回 null。 */
     private byte[] shrink(byte[] image) {
         BufferedImage source;
         try {
@@ -241,8 +341,7 @@ public class WeChatImageResolver {
             source = null;
         }
         if (source == null) {
-            // 解不出像素（少见格式），原样透传，让模型自己判断
-            return image.length <= vision.getMaxBytes() ? image : null;
+            return null;
         }
         BufferedImage scaled = scale(source);
         int maxBytes = Math.max(64_000, vision.getMaxBytes());
@@ -320,13 +419,31 @@ public class WeChatImageResolver {
         }
     }
 
-    private Path cacheFile(String md5, String aeskey) {
-        return Path.of(vision.getCacheDir(), "img-" + sha1(md5 + "|" + (aeskey == null ? "" : aeskey)) + ".jpg");
+    // ------------------------------------------------------------------ 杂项
+
+    private Path cacheFile(Path dat) {
+        String key = dat.getFileName() + "|" + fileSize(dat) + "|" + lastModified(dat);
+        return Path.of(vision.getCacheDir(), "img-" + sha1(key) + ".jpg");
+    }
+
+    private static long fileSize(Path path) {
+        try {
+            return Files.size(path);
+        } catch (Exception ex) {
+            return -1;
+        }
+    }
+
+    private static long lastModified(Path path) {
+        try {
+            return Files.getLastModifiedTime(path).toMillis();
+        } catch (Exception ex) {
+            return 0;
+        }
     }
 
     private String dataUrl(byte[] bytes) {
-        String mime = mimeOf(bytes);
-        return "data:" + mime + ";base64," + Base64.getEncoder().encodeToString(bytes);
+        return "data:" + mimeOf(bytes) + ";base64," + Base64.getEncoder().encodeToString(bytes);
     }
 
     private String mimeOf(byte[] bytes) {
@@ -342,11 +459,19 @@ public class WeChatImageResolver {
         return "image/jpeg";
     }
 
-    private String sha1(String value) {
+    private static String md5Hex(String value) {
+        return digest("MD5", value);
+    }
+
+    private static String sha1(String value) {
+        return digest("SHA-1", value);
+    }
+
+    private static String digest(String algorithm, String value) {
         try {
-            byte[] digest = MessageDigest.getInstance("SHA-1").digest(value.getBytes(StandardCharsets.UTF_8));
-            StringBuilder builder = new StringBuilder(40);
-            for (byte b : digest) {
+            byte[] bytes = MessageDigest.getInstance(algorithm).digest(value.getBytes(StandardCharsets.UTF_8));
+            StringBuilder builder = new StringBuilder(bytes.length * 2);
+            for (byte b : bytes) {
                 builder.append(String.format(Locale.ROOT, "%02x", b));
             }
             return builder.toString();

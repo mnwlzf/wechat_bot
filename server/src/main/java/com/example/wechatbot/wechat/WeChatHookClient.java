@@ -160,7 +160,8 @@ public class WeChatHookClient {
     /**
      * 调用 Hook 的 {@code /Decode_Pic} 把本地加密图片（{@code .dat}）解成普通图片文件。
      *
-     * <p>该接口固定返回 {@code ret=0}，真正结果只能看目标文件有没有生成，因此调用方必须自己校验。</p>
+     * <p>实测该接口固定返回 {@code ret=0} 却不落盘（4.1.10.27），图片解密因此改由
+     * {@link WeChatDatDecoder} 在本地完成；这里保留调用入口，便于换 Hook 版本时验证。</p>
      */
     public void decodePicture(String srcPath, String dstPath) {
         if (srcPath == null || srcPath.isBlank() || dstPath == null || dstPath.isBlank()) {

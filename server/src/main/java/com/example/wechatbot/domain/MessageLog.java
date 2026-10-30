@@ -69,6 +69,14 @@ public class MessageLog {
     @Column(name = "media_aeskey", length = 64)
     private String mediaAeskey;
 
+    /** 图片缩略图 md5（cdnthumbmd5）：本地 {@code .dat} 的文件名有时用的是它。 */
+    @Column(name = "media_thumb_md5", length = 64)
+    private String mediaThumbMd5;
+
+    /** 图片缩略图密钥（cdnthumbaeskey）。 */
+    @Column(name = "media_thumb_aeskey", length = 64)
+    private String mediaThumbAeskey;
+
     /** 引用消息里被引用的发送者。 */
     @Column(name = "quote_author", length = 180)
     private String quoteAuthor;

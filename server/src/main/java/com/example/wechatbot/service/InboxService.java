@@ -127,6 +127,8 @@ public class InboxService {
             inbound.setMediaUrl(event.mediaUrl());
             inbound.setMediaMd5(hook.mediaMd5());
             inbound.setMediaAeskey(hook.mediaAeskey());
+            inbound.setMediaThumbMd5(hook.mediaThumbMd5());
+            inbound.setMediaThumbAeskey(hook.mediaThumbAeskey());
         }
         // 引用消息本质是文本，rawType 仍然记下来便于排查（49 = appmsg）
         inbound.setRawType(event.rawType());

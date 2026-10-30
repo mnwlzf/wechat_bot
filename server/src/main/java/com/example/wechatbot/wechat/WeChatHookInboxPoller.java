@@ -192,6 +192,8 @@ public class WeChatHookInboxPoller {
             content = quote.text();
         } else {
             media = MediaMessageParser.parse(localType, content);
+            log.debug("媒体消息: type={} kind={} md5={} thumbMd5={} raw={}", localType, media.kind(),
+                    media.md5(), media.thumbMd5(), truncate(content, 900));
             content = media.placeholder();
         }
 

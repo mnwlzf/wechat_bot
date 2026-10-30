@@ -167,7 +167,7 @@ class InboxServiceMediaPolicyTest {
                 "wxid_friend", "张三", "可以，我十点到", null, false,
                 null, null, null, null, 49);
 
-        AgentDtos.EventAccepted result = service.accept(event, new HookExtras("张三", "[语音 4″]", null, null));
+        AgentDtos.EventAccepted result = service.accept(event, HookExtras.of(new MediaMessageParser.Quoted("可以，我十点到", "张三", "[语音 4″]"), null));
 
         assertThat(result.status()).isEqualTo("ACCEPTED");
         verify(chatOrchestrator).generateReplyAsync(eq(bot.getId()), any(UUID.class), any(UUID.class));

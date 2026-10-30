@@ -88,7 +88,10 @@ app:
       max-edge: ${LLM_VISION_MAX_EDGE:1024}          # 长边像素上限，超过等比缩放
       max-bytes: ${LLM_VISION_MAX_BYTES:1500000}     # 单张图编码后字节上限
       cache-dir: ${LLM_VISION_CACHE_DIR:data/media}  # 解码后的 JPEG 缓存目录
-      decode-wait-ms: ${LLM_VISION_DECODE_WAIT_MS:1500}  # 等 Hook 解码落盘的时长
+      # 微信本地图片密钥目录（kvcomm）；留空自动取 %APPDATA%\Tencent\xwechat\net\kvcomm
+      kvcomm-dir: ${LLM_VISION_KVCOMM_DIR:}
+      # 本地文件名用的 md5 不确定，对不上时按「同会话目录 + 消息时间前后这么多秒」兜底匹配
+      match-window-seconds: ${LLM_VISION_MATCH_WINDOW_SECONDS:180}
     # DeepSeek 官方联网搜索（POST {base-url}/v1/tools/search）
     search:
       enabled: ${LLM_SEARCH_ENABLED:true}

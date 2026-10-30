@@ -1,86 +1,146 @@
 package com.example.wechatbot.wechat;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.util.List;
+import java.util.Random;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 class WeChatDatDecoderTest {
-    private static final String AES_KEY_HEX = "00112233445566778899aabbccddeeff";
+
+    private static final byte[] AES_KEY = "d94aa3a46668dda5".getBytes(StandardCharsets.US_ASCII);
+    private static final int XOR_KEY = 238;
+
+    @TempDir
+    Path temp;
 
     @Test
-    void decryptsV2StyleFileWithAesKey() {
-        byte[] plain = jpegStub(600);
-        byte[] dat = WeChatDatDecoder.encodeForTest(plain, hex(AES_KEY_HEX), 16);
+    void detectsV2Container() {
+        byte[] dat = WeChatDatDecoder.encodeForTest(payload(64), AES_KEY, XOR_KEY);
 
-        assertThat(WeChatDatDecoder.decode(dat, AES_KEY_HEX)).isEqualTo(plain);
-    }
-
-    @Test
-    void toleratesUnknownHeaderLength() {
-        byte[] plain = pngStub(400);
-        byte[] dat = WeChatDatDecoder.encodeForTest(plain, hex(AES_KEY_HEX), 40);
-
-        assertThat(WeChatDatDecoder.decode(dat, AES_KEY_HEX)).isEqualTo(plain);
+        assertThat(WeChatDatDecoder.isV2(dat)).isTrue();
+        assertThat(WeChatDatDecoder.isV2(new byte[]{1, 2, 3})).isFalse();
+        assertThat(WeChatDatDecoder.isV2(payload(64))).isFalse();
     }
 
     @Test
-    void returnsNullForWrongKey() {
-        byte[] dat = WeChatDatDecoder.encodeForTest(jpegStub(300), hex(AES_KEY_HEX), 16);
+    void roundTripsSmallPayload() {
+        byte[] plain = payload(300);
 
-        assertThat(WeChatDatDecoder.decode(dat, "ffeeddccbbaa99887766554433221100")).isNull();
+        byte[] dat = WeChatDatDecoder.encodeForTest(plain, AES_KEY, XOR_KEY);
+
+        assertThat(WeChatDatDecoder.decode(dat, new WeChatDatDecoder.Key(1, AES_KEY, XOR_KEY)))
+                .isEqualTo(plain);
     }
 
     @Test
-    void returnsNullWhenKeyMissing() {
-        byte[] dat = WeChatDatDecoder.encodeForTest(jpegStub(300), hex(AES_KEY_HEX), 16);
+    void roundTripsPayloadSpanningAesAndXorSegments() {
+        // 超过 1024 字节才会走到「尾部单字节 XOR」分支
+        byte[] plain = payload(9_000);
 
-        assertThat(WeChatDatDecoder.decode(dat, null)).isNull();
-        assertThat(WeChatDatDecoder.decode(dat, "")).isNull();
+        byte[] dat = WeChatDatDecoder.encodeForTest(plain, AES_KEY, XOR_KEY);
+        byte[] decoded = WeChatDatDecoder.decode(dat, new WeChatDatDecoder.Key(1, AES_KEY, XOR_KEY));
+
+        assertThat(decoded).isEqualTo(plain);
+        assertThat(decoded).hasSize(9_000);
     }
 
     @Test
-    void passesThroughUnencryptedImage() {
-        byte[] plain = jpegStub(200);
+    void wrongKeyIsRejectedInsteadOfReturningGarbage() {
+        byte[] dat = WeChatDatDecoder.encodeForTest(payload(2_000), AES_KEY, XOR_KEY);
+        byte[] wrong = "0123456789abcdef".getBytes(StandardCharsets.US_ASCII);
 
-        assertThat(WeChatDatDecoder.decode(plain, AES_KEY_HEX)).isEqualTo(plain);
-        assertThat(WeChatDatDecoder.looksLikeImage(plain)).isTrue();
+        assertThat(WeChatDatDecoder.decode(dat, new WeChatDatDecoder.Key(1, wrong, XOR_KEY))).isNull();
     }
 
     @Test
-    void garbageIsNotAnImage() {
-        assertThat(WeChatDatDecoder.looksLikeImage(new byte[]{0x07, 0x08, 0x56, 0x32})).isFalse();
+    void v1PlaintextImagePassesThrough() {
+        byte[] jpeg = {(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, (byte) 0xE0, 0, 0x10, 'J', 'F', 'I', 'F'};
+
+        assertThat(WeChatDatDecoder.decode(jpeg, null)).isEqualTo(jpeg);
+        assertThat(WeChatDatDecoder.decode(new byte[]{1, 2, 3, 4, 5, 6, 7, 8}, null)).isNull();
     }
 
-    private static byte[] jpegStub(int length) {
-        byte[] data = new byte[Math.max(8, length)];
-        data[0] = (byte) 0xFF;
-        data[1] = (byte) 0xD8;
-        data[2] = (byte) 0xFF;
-        for (int i = 3; i < data.length - 2; i++) {
-            data[i] = (byte) (i % 251);
-        }
-        data[data.length - 2] = (byte) 0xFF;
-        data[data.length - 1] = (byte) 0xD9;
-        return data;
+    @Test
+    void recognisesImageMagicAndWxgf() {
+        assertThat(WeChatDatDecoder.looksLikeImage(new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, 0})).isTrue();
+        assertThat(WeChatDatDecoder.looksLikeImage(new byte[]{(byte) 0x89, 'P', 'N', 'G'})).isTrue();
+        assertThat(WeChatDatDecoder.looksLikeImage("wxgf\u0013\u0000\u0002\u0005".getBytes(StandardCharsets.ISO_8859_1)))
+                .isFalse();
+        assertThat(WeChatDatDecoder.isWxgf("wxgf\u0013\u0000\u0002\u0005".getBytes(StandardCharsets.ISO_8859_1)))
+                .isTrue();
+        assertThat(WeChatDatDecoder.isWxgf(new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF})).isFalse();
     }
 
-    private static byte[] pngStub(int length) {
-        byte[] data = new byte[Math.max(8, length)];
-        data[0] = (byte) 0x89;
-        data[1] = 0x50;
-        data[2] = 0x4E;
-        data[3] = 0x47;
-        for (int i = 4; i < data.length; i++) {
-            data[i] = (byte) (i % 241);
-        }
-        return data;
+    @Test
+    void keyCarriesCodeAndXorByte() throws Exception {
+        Files.writeString(temp.resolve("key_2067883758_1.statistic"), "x");
+
+        WeChatDatDecoder.Key key = WeChatDatDecoder.localKeys(temp, "wxid_ivk48u4eu9rs22").get(0);
+
+        assertThat(key.code()).isEqualTo(2067883758L);
+        assertThat(key.xorKey()).isEqualTo(2067883758 & 0xFF);
+        assertThat(new String(key.aesKey(), StandardCharsets.US_ASCII))
+                .isEqualTo(md5("2067883758wxid_ivk48u4eu9rs22").substring(0, 16));
     }
 
-    private static byte[] hex(String value) {
-        byte[] bytes = new byte[value.length() / 2];
-        for (int i = 0; i < bytes.length; i++) {
-            bytes[i] = (byte) Integer.parseInt(value.substring(i * 2, i * 2 + 2), 16);
-        }
+    @Test
+    void derivesKeysEvenAfterKvcommFileRotation() throws Exception {
+        // 实测 .statistic 会被轮转成 .monitor，甚至只剩 monitordata_<code>_…；
+        // 所以不认死文件名格式，只要数字候选里包含真正的 code 即可
+        Files.writeString(temp.resolve("key_2067883758_4065597979_1_1793345110_21248_600_input.monitor"), "x");
+        Files.writeString(temp.resolve("monitordata_2067883758_20756"), "x");
+
+        List<String> aesKeys = WeChatDatDecoder.localKeys(temp, "wxid_ivk48u4eu9rs22_dc7e").stream()
+                .map(key -> new String(key.aesKey(), StandardCharsets.US_ASCII))
+                .toList();
+
+        assertThat(aesKeys)
+                .contains(md5("2067883758wxid_ivk48u4eu9rs22").substring(0, 16))
+                .contains(md5("2067883758wxid_ivk48u4eu9rs22_dc7e").substring(0, 16));
+    }
+
+    @Test
+    void noKvcommMeansNoKeys() throws Exception {
+        assertThat(WeChatDatDecoder.localKeys(temp, "wxid_any")).isEmpty();
+        assertThat(WeChatDatDecoder.localKeys(temp.resolve("missing"), "wxid_any")).isEmpty();
+        assertThat(WeChatDatDecoder.localKeys(temp, "")).isEmpty();
+    }
+
+    /** 用派生出来的密钥真实解密一遍，确认两端一致。 */
+    @Test
+    void derivedKeyDecryptsEncodedFile() throws Exception {
+        Files.writeString(temp.resolve("key_2067883758_1.statistic"), "x");
+        byte[] plain = payload(3_000);
+        WeChatDatDecoder.Key key = WeChatDatDecoder.localKeys(temp, "wxid_ivk48u4eu9rs22").get(0);
+
+        byte[] dat = WeChatDatDecoder.encodeForTest(plain, key.aesKey(), key.xorKey());
+
+        assertThat(WeChatDatDecoder.decode(dat, key)).isEqualTo(plain);
+    }
+
+    private static byte[] payload(int size) {
+        byte[] bytes = new byte[size];
+        new Random(size).nextBytes(bytes);
+        // 以 JPEG 魔数开头，贴近真实文件
+        bytes[0] = (byte) 0xFF;
+        bytes[1] = (byte) 0xD8;
+        bytes[2] = (byte) 0xFF;
         return bytes;
+    }
+
+    private static String md5(String value) throws Exception {
+        byte[] digest = MessageDigest.getInstance("MD5").digest(value.getBytes(StandardCharsets.UTF_8));
+        StringBuilder builder = new StringBuilder();
+        for (byte b : digest) {
+            builder.append(String.format("%02x", b));
+        }
+        return builder.toString();
     }
 }

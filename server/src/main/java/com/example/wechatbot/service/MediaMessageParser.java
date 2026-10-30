@@ -39,8 +39,15 @@ public final class MediaMessageParser {
     private static final Pattern VOICE_LENGTH = Pattern.compile("voicelength=\"(\\d+)\"");
     private static final Pattern FILE_EXT = Pattern.compile("<fileext>(.*?)</fileext>", Pattern.DOTALL);
     private static final Pattern IMG_LENGTH = Pattern.compile("length=\"(\\d+)\"");
-    private static final Pattern IMG_MD5 = Pattern.compile("md5=\"([0-9a-fA-F]{32})\"");
-    private static final Pattern IMG_AESKEY = Pattern.compile("aeskey=\"([0-9a-fA-F]{16,64})\"");
+    /**
+     * 图片属性必须带前界断言：微信报文里同时有 {@code cdnthumbmd5} / {@code cdnthumbaeskey}，
+     * 不加 {@code (?<![A-Za-z0-9_])} 会先把这两个的后半截当成本体 {@code md5} / {@code aeskey} 抓出来。
+     */
+    private static final Pattern IMG_MD5 = Pattern.compile("(?<![A-Za-z0-9_])md5=\"([0-9a-fA-F]{32})\"");
+    private static final Pattern IMG_AESKEY = Pattern.compile("(?<![A-Za-z0-9_])aeskey=\"([0-9a-fA-F]{16,64})\"");
+    private static final Pattern IMG_THUMB_MD5 = Pattern.compile("cdnthumbmd5=\"([0-9a-fA-F]{32})\"");
+    private static final Pattern IMG_THUMB_AESKEY = Pattern.compile("cdnthumbaeskey=\"([0-9a-fA-F]{16,64})\"");
+    private static final Pattern IMG_FILEID = Pattern.compile("(?<![A-Za-z0-9_])fileid=\"([0-9a-fA-F]{32})\"");
 
     private static final Pattern REFERMSG = Pattern.compile("<refermsg>(.*?)</refermsg>", Pattern.DOTALL);
     private static final Pattern REFER_CONTENT = Pattern.compile("<content>(.*?)</content>", Pattern.DOTALL);
@@ -51,11 +58,31 @@ public final class MediaMessageParser {
     private MediaMessageParser() {}
 
     /**
-     * @param md5    图片的 md5，用于在本地 {@code msg/attach/*}{@code /Img/<md5>.dat} 定位原图
-     * @param aeskey 图片 V2 格式的解密密钥（16 字节 hex）
+     * @param md5        图片原图 md5
+     * @param aeskey     原图 V2 格式的解密密钥（16 字节 hex）
+     * @param thumbMd5   缩略图 md5：本机 {@code Img/} 目录里的文件名有时用的是它，不是原图 md5
+     * @param thumbAeskey 缩略图密钥
      */
     public record Parsed(MediaKind kind, String placeholder, String name, Long size, String url,
-                         String md5, String aeskey) {}
+                         String md5, String aeskey, String thumbMd5, String thumbAeskey) {
+
+        public Parsed(MediaKind kind, String placeholder, String name, Long size, String url,
+                      String md5, String aeskey) {
+            this(kind, placeholder, name, size, url, md5, aeskey, null, null);
+        }
+
+        /** 本地文件名可能用到的所有 md5：原图优先，其次缩略图。 */
+        public java.util.List<String> md5Candidates() {
+            java.util.List<String> values = new java.util.ArrayList<>(2);
+            if (md5 != null && !md5.isBlank()) {
+                values.add(md5);
+            }
+            if (thumbMd5 != null && !thumbMd5.isBlank() && !values.contains(thumbMd5)) {
+                values.add(thumbMd5);
+            }
+            return values;
+        }
+    }
 
     /** 引用消息：{@code text} 是本次说的话，另外两个字段是被引用的对象。 */
     public record Quoted(String text, String quoteAuthor, String quoteText) {}
@@ -163,8 +190,11 @@ public final class MediaMessageParser {
             size = number(IMG_LENGTH, raw);
         }
         String url = sanitizeUrl(first(URL, raw));
-        String md5 = kind == MediaKind.IMAGE ? blankToNull(first(IMG_MD5, raw)) : null;
-        String aeskey = kind == MediaKind.IMAGE ? blankToNull(first(IMG_AESKEY, raw)) : null;
+        boolean image = kind == MediaKind.IMAGE;
+        String md5 = image ? blankToNull(first(IMG_MD5, raw)) : null;
+        String aeskey = image ? blankToNull(first(IMG_AESKEY, raw)) : null;
+        String thumbMd5 = image ? blankToNull(first(IMG_THUMB_MD5, raw)) : null;
+        String thumbAeskey = image ? blankToNull(first(IMG_THUMB_AESKEY, raw)) : null;
 
         String placeholder = switch (kind) {
             case IMAGE -> "[图片]";
@@ -176,7 +206,8 @@ public final class MediaMessageParser {
             case SYSTEM -> systemPlaceholder(raw);
             case OTHER -> "[消息 type=" + type + "]";
         };
-        return new Parsed(kind, placeholder, name.isBlank() ? null : clip(name, 255), size, url, md5, aeskey);
+        return new Parsed(kind, placeholder, name.isBlank() ? null : clip(name, 255), size, url,
+                md5, aeskey, thumbMd5, thumbAeskey);
     }
 
     /** 引用原文本身可能又是一段 XML（被引用的是链接/文件卡片），这里再抽一层。 */

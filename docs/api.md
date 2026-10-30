@@ -276,12 +276,15 @@ Hook 推来的非文本消息（`type` 不是 `1`）不再丢弃，而是归类�
 
 `type=3` 的图片会真正交给模型看（语音、视频、文件仍只有占位文本）。链路：
 
-1. 从报文里取 `md5`、`aeskey`，按 md5 在 `%USERPROFILE%\Documents\xwechat_files\<wxid>\msg\attach\<会话 hash>\<yyyy-MM>\Img\<md5>.dat` 定位本地加密图；
-2. 先请求 Hook 的 `/Decode_Pic` 交给微信自己的解密例程；没产出文件时，用 `aeskey` 在本地做 AES-128-ECB 解密（偏移扫描 + 图片魔数校验，兼容 V1 未加密文件）；
-3. 长边缩放到 `LLM_VISION_MAX_EDGE` 内并统一转 JPEG，按 md5+aeskey 缓存到 `data/media`；
-4. 以 `data:image/jpeg;base64,...` 作为 OpenAI 兼容的多段 content（`{type:text}` + `{type:image_url}`）随请求发出。
+1. 从报文里取图片属性：`md5`、`aeskey`（原图）与 `cdnthumbmd5`、`cdnthumbaeskey`（缩略图），分别落库到 `media_md5`、`media_aeskey`、`media_thumb_md5`、`media_thumb_aeskey`；
+2. 按 `md5(会话 id)` 直接算出本地目录 `%USERPROFILE%\Documents\xwechat_files\<wxid>\msg\attach\<md5(会话)>\<yyyy-MM>\Img\`（跨月时也看上一个月份）；
+3. 依次尝试 `<md5>.dat`、`<md5>_h.dat`、`<md5>_t.dat`、`<cdnthumbmd5>.dat`、`<cdnthumbmd5>_h.dat`、`<cdnthumbmd5>_t.dat`——本地文件名用的是报文里某个 md5（原图或缩略图），并不固定；都对不上时退回「同会话目录里消息时间前后 `LLM_VISION_MATCH_WINDOW_SECONDS` 秒内写盘的 `.dat`」，按时间接近度排序、同样接近时高清副本优先；
+4. 解密用**本机密钥**，不是报文里的 `aeskey`（后者只用于从腾讯 CDN 下载原图）：微信 4.x 的 V2 容器是「15 字节头 + 前 `aes_size` 字节 AES-128-ECB + 尾部单字节 XOR」，密钥由 `%APPDATA%\Tencent\xwechat\net\kvcomm` 下 `key_<code>_*.statistic` 的 code 与账号 wxid 派生（`md5(code + wxid)` 的前 16 位）；
+5. 高清副本常是微信自有的 `wxgf`（HEVC）容器，JDK 无法解码，此时自动回退到 `_t.dat` 缩略图（分辨率较小，模型看到的是缩略图；想让它看清原图，先在电脑微信里打开该图片下载原图再重发）；
+6. 长边缩放到 `LLM_VISION_MAX_EDGE` 内并统一转 JPEG，按文件指纹缓存到 `data/media`；
+7. 以 `data:image/jpeg;base64,...` 作为 OpenAI 兼容的多段 content（`{type:text}` + `{type:image_url}`）随请求发出。
 
-任何一步失败都退化成 `[图片]` 占位文本继续回复，不会中断链路；上游若明确拒绝带图请求（400/413/422），客户端会自动去掉图片、用纯文本重试一次。
+任何一步失败都退化成 `[图片]` 占位文本继续回复，不会中断链路；上游若明确拒绝带图请求（400/413/422），客户端会自动去掉图片、用纯文本重试一次。图片消息会打一条 INFO 日志（含报文原文与解析出的 md5/密钥），定位或解密出问题时直接看日志。
 
 | 环境变量 | 默认 | 说明 |
 | --- | --- | --- |
@@ -289,7 +292,8 @@ Hook 推来的非文本消息（`type` 不是 `1`）不再丢弃，而是归类�
 | `LLM_VISION_MAX_EDGE` | `1024` | 长边像素上限，超过等比缩放 |
 | `LLM_VISION_MAX_BYTES` | `1500000` | 单张图编码后字节上限 |
 | `LLM_VISION_CACHE_DIR` | `data/media` | 解码后的 JPEG 缓存目录 |
-| `LLM_VISION_DECODE_WAIT_MS` | `1500` | 等 `/Decode_Pic` 落盘的最长时间 |
+| `LLM_VISION_KVCOMM_DIR` | 空 | 微信本机密钥目录；留空自动取 `%APPDATA%\Tencent\xwechat\net\kvcomm` |
+| `LLM_VISION_MATCH_WINDOW_SECONDS` | `180` | 文件名对不上时的时间窗（秒） |
 | `WECHAT_IMAGE_ROOT` | 空 | 微信数据目录；留空自动取 `%USERPROFILE%\Documents\xwechat_files` |
 
 ### 用量统计
