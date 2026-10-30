@@ -44,4 +44,16 @@ public class SettingsController {
         settings.updateFilterPolicy(request.bannedWords(), request.mode());
         return settings.snapshot();
     }
+
+    @PutMapping("/media")
+    public Map<String, Object> updateMedia(@RequestBody AdminDtos.MediaPolicyUpdate request) {
+        settings.updateMediaPolicy(request.enabled(), request.replyMode(), request.ackText());
+        return settings.snapshot();
+    }
+
+    @PutMapping("/pricing")
+    public Map<String, Object> updatePricing(@RequestBody AdminDtos.UsagePricingUpdate request) {
+        settings.updateUsagePricing(request.promptPricePerK(), request.completionPricePerK());
+        return settings.snapshot();
+    }
 }

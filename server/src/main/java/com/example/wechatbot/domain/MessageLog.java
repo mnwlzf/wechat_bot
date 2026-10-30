@@ -47,6 +47,22 @@ public class MessageLog {
     @Column(name = "error_message", length = 1000)
     private String errorMessage;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "media_kind", length = 20)
+    private MediaKind mediaKind;
+
+    @Column(name = "media_name", length = 255)
+    private String mediaName;
+
+    @Column(name = "media_size")
+    private Long mediaSize;
+
+    @Column(name = "media_url", length = 1000)
+    private String mediaUrl;
+
+    @Column(name = "raw_type")
+    private Integer rawType;
+
     @Column(name = "prompt_tokens")
     private Integer promptTokens;
 

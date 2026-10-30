@@ -17,6 +17,7 @@ import type {
   HookContact,
   DebugResult,
   LlmPolicyInput,
+  MediaPolicyInput,
   Message,
   PageResult,
   PromptTemplate,
@@ -27,6 +28,8 @@ import type {
   ScheduledMessage,
   ScheduledMessageInput,
   SettingsSnapshot,
+  UsagePricingInput,
+  UsageSummary,
   WeChatPolicyInput,
 } from './types'
 
@@ -186,6 +189,18 @@ export const adminApi = {
   },
   async updateFilterPolicy(payload: FilterPolicyInput) {
     const { data } = await http.put<SettingsSnapshot>('/api/admin/settings/filter', payload)
+    return data
+  },
+  async updateMediaPolicy(payload: MediaPolicyInput) {
+    const { data } = await http.put<SettingsSnapshot>('/api/admin/settings/media', payload)
+    return data
+  },
+  async updatePricing(payload: UsagePricingInput) {
+    const { data } = await http.put<SettingsSnapshot>('/api/admin/settings/pricing', payload)
+    return data
+  },
+  async usage(days = 7) {
+    const { data } = await http.get<UsageSummary>('/api/admin/usage', { params: { days } })
     return data
   },
 }

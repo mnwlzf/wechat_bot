@@ -126,6 +126,11 @@ public class AdminQueryService {
                 message.getPromptTokens(),
                 message.getCompletionTokens(),
                 message.getLatencyMs(),
+                message.getMediaKind() == null ? null : message.getMediaKind().name(),
+                message.getMediaName(),
+                message.getMediaSize(),
+                message.getMediaUrl(),
+                message.getRawType(),
                 message.getCreatedAt()
         );
     }

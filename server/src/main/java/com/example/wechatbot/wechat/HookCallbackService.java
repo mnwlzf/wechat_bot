@@ -3,6 +3,7 @@ package com.example.wechatbot.wechat;
 import com.example.wechatbot.config.WeChatHookProperties;
 import com.example.wechatbot.domain.ChatType;
 import com.example.wechatbot.service.InboxService;
+import com.example.wechatbot.service.MediaMessageParser;
 import com.example.wechatbot.service.RuntimeSettingsService;
 import com.example.wechatbot.web.dto.AgentDtos;
 import org.slf4j.Logger;
@@ -29,7 +30,6 @@ public class HookCallbackService {
     private static final Logger log = LoggerFactory.getLogger(HookCallbackService.class);
 
     static final int EVENT_MESSAGE = 1001;
-    static final int TYPE_TEXT = 1;
 
     private final WeChatHookProperties properties;
     private final RuntimeSettingsService settings;
@@ -54,10 +54,15 @@ public class HookCallbackService {
             return Result.ignored("忽略事件类型 " + eventType, null, null);
         }
         int type = intValue(payload.get("type"));
-        if (type != TYPE_TEXT) {
-            return Result.ignored("忽略消息类型 " + type, null, null);
+        String rawContent = text(payload.get("content"));
+        MediaMessageParser.Parsed media = null;
+        String content;
+        if (MediaMessageParser.isText(type)) {
+            content = rawContent;
+        } else {
+            media = MediaMessageParser.parse(type, rawContent);
+            content = media.placeholder();
         }
-        String content = text(payload.get("content"));
         if (content.isBlank()) {
             return Result.ignored("空消息内容", null, null);
         }
@@ -102,7 +107,12 @@ public class HookCallbackService {
                 truncate(sender, 180),
                 truncate(content.trim(), 10_000),
                 timestamp(payload.get("timestamp")),
-                false
+                false,
+                media == null ? null : media.kind().name(),
+                media == null ? null : media.name(),
+                media == null ? null : media.size(),
+                media == null ? null : media.url(),
+                media == null ? null : type
         );
 
         AgentDtos.EventAccepted accepted = inboxService.accept(event);
@@ -110,7 +120,8 @@ public class HookCallbackService {
             log.debug("Hook 回调事件未进入回复流程: chat={} status={} reason={}",
                     chatId, accepted.status(), accepted.reason());
         } else {
-            log.info("Hook 回调收到消息，chat={} sender={} eventId={}", chatId, sender, eventId);
+            log.info("Hook 回调收到消息，chat={} sender={} type={} eventId={}",
+                    chatId, sender, type, eventId);
         }
         return new Result(accepted.status(), accepted.reason(), chatId, eventId);
     }

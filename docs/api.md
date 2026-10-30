@@ -75,6 +75,9 @@ $headers = @{ Authorization = "Bearer dev-admin-token" }
 | GET/POST | `/api/admin/scheduled-messages` | 定时消息列表 / 新建 |
 | POST | `/api/admin/scheduled-messages/{id}/cancel` | 取消待发送的定时消息 |
 | DELETE | `/api/admin/scheduled-messages/{id}` | 删除定时消息记录 |
+| PUT | `/api/admin/settings/media` | 媒体消息策略（enabled / replyMode / ackText） |
+| PUT | `/api/admin/settings/pricing` | 用量计价（每千 token 单价，用于估算成本） |
+| GET | `/api/admin/usage?days=7` | 用量统计：收发量、token、耗时、模型分布 |
 | GET | `/api/admin/bots` | 机器人配置 |
 | PUT | `/api/admin/bots/{id}` | 更新机器人配置 |
 | POST | `/api/admin/debug/chat` | 在线调试（不发送微信） |
@@ -193,6 +196,59 @@ $headers = @{ Authorization = "Bearer dev-admin-token" }
 ```
 
 敏感词过滤：`PUT /api/admin/settings/filter`，请求体 `{"bannedWords":["违禁"],"mode":"rewrite"}`。`mode` 取 `off`（不改动）/ `rewrite`（\* 遮蔽）/ `block`（该条回复不发送，写入 `IGNORED` 记录）。
+
+### 媒体消息
+
+Hook 推来的非文本消息（`type` 不是 `1`）不再丢弃，而是归类落库：
+
+| `type` | `mediaKind` | 占位文本 |
+| --- | --- | --- |
+| 3 | `IMAGE` | `[图片]` |
+| 34 | `VOICE` | `[语音 4″]`（能解析出 `voicelength` 时带时长） |
+| 43 | `VIDEO` | `[视频]` |
+| 47 | `STICKER` | `[表情]` |
+| 49 | `FILE` / `LINK` | `[文件] 报价单.pdf` / `[链接] 标题`（按报文里是否有 `fileext`、`filename` 区分） |
+| 10000 / 10002 | `SYSTEM` | `[系统消息] …` |
+| 其它 | `OTHER` | `[消息 type=48]` |
+
+`message_log` 同时记录 `media_kind`、`media_name`、`media_size`、`media_url`、`raw_type`，会话记录里以标签形式展示。
+
+回复策略在管理端「运行策略 → 媒体消息」配置，或 `PUT /api/admin/settings/media`：
+
+```json
+{ "enabled": true, "replyMode": "ack", "ackText": "收到，我看下～" }
+```
+
+- `enabled=false`：媒体消息直接丢弃，不写记录；
+- `replyMode=ignore`（默认）：只记录，不回复；
+- `replyMode=ack`：回一句固定话术，同样经过敏感词过滤、伪装层与 outbox；
+- `replyMode=llm`：把占位文本交给模型自然回应。
+
+注意：模型是纯文本的，**看不到图片内容、听不到语音、读不了文件**，`llm` 模式下模型只会基于占位文本回应（例如「这张图我这边看不清，能描述一下吗？」）。群聊里媒体消息没有文字、无法命中唤醒词，因此只记录不回复。
+
+### 用量统计
+
+`GET /api/admin/usage?days=7`（`days` 取值 1–90，超出按 90 计）：
+
+```json
+{
+  "days": 7,
+  "from": "2026-10-24T00:00:00+08:00",
+  "to": "2026-10-30T11:47:04+08:00",
+  "totals": {
+    "inbound": 37, "outbound": 64, "replied": 64, "ignored": 0, "failed": 0,
+    "promptTokens": 34853, "completionTokens": 11264,
+    "avgLatencyMs": 4491, "activeConversations": 7
+  },
+  "estimatedCost": 0.0,
+  "currency": "CNY",
+  "daily": [{ "date": "2026-10-29", "inbound": 23, "outbound": 43, "promptTokens": 21546, "completionTokens": 9582 }],
+  "providers": [{ "provider": "deepseek", "model": "deepseek-v4.1-flash", "replies": 64,
+                  "promptTokens": 34853, "completionTokens": 11264, "avgLatencyMs": 4491 }]
+}
+```
+
+数据全部来自 `message_log`，不做额外埋点。预估成本需要先在「运行策略」填写每千 token 单价（`PUT /api/admin/settings/pricing`，`{"promptPricePerK":0.001,"completionPricePerK":0.002}`），未填写时返回 0。
 
 ### 提示词模板与定时消息
 

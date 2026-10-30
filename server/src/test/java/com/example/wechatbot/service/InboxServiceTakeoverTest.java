@@ -25,10 +25,11 @@ class InboxServiceTakeoverTest {
     private final DedupeService dedupeService = mock(DedupeService.class);
     private final RateLimitService rateLimitService = mock(RateLimitService.class);
     private final ChatOrchestrator chatOrchestrator = mock(ChatOrchestrator.class);
+    private final RuntimeSettingsService settings = mock(RuntimeSettingsService.class);
 
     private final InboxService service = new InboxService(
             botRepository, conversationRepository, messageRepository,
-            dedupeService, rateLimitService, chatOrchestrator);
+            dedupeService, rateLimitService, chatOrchestrator, settings);
 
     private BotConfig bot() {
         BotConfig bot = new BotConfig();
@@ -42,7 +43,7 @@ class InboxServiceTakeoverTest {
     }
 
     private AgentDtos.AgentEventRequest event(UUID botId) {
-        return new AgentDtos.AgentEventRequest(
+        return AgentDtos.AgentEventRequest.text(
                 "evt-1", botId, "message", "wxid_friend", "张三",
                 ChatType.PRIVATE, "wxid_friend", "张三", "你好", null, false);
     }

@@ -2,9 +2,9 @@
 import { onMounted, ref } from 'vue'
 import dayjs from 'dayjs'
 import { ElMessage } from 'element-plus'
-import { ChatDotRound, Refresh, Search } from '@element-plus/icons-vue'
+import { ChatDotRound, Document, Link, Microphone, Picture, Refresh, Search, Star, VideoCamera } from '@element-plus/icons-vue'
 import { adminApi } from '@/api'
-import type { Conversation, Message, PageResult, PromptTemplate } from '@/api/types'
+import type { Conversation, MediaKind, Message, PageResult, PromptTemplate } from '@/api/types'
 import { getErrorMessage } from '@/api/client'
 
 const loading = ref(false)
@@ -70,6 +70,31 @@ function formatTime(value: string) {
 
 function messageTime(value: string) {
   return dayjs(value).format('HH:mm')
+}
+
+const mediaMeta: Record<MediaKind, { label: string; icon: unknown }> = {
+  IMAGE: { label: '图片', icon: Picture },
+  VOICE: { label: '语音', icon: Microphone },
+  VIDEO: { label: '视频', icon: VideoCamera },
+  FILE: { label: '文件', icon: Document },
+  LINK: { label: '链接', icon: Link },
+  STICKER: { label: '表情', icon: Star },
+  SYSTEM: { label: '系统', icon: ChatDotRound },
+  OTHER: { label: '消息', icon: ChatDotRound },
+}
+
+function mediaLabel(kind: MediaKind) {
+  return mediaMeta[kind]?.label || '消息'
+}
+
+function mediaIcon(kind: MediaKind) {
+  return mediaMeta[kind]?.icon || ChatDotRound
+}
+
+function formatSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
 function avatarText(name?: string) {
@@ -255,7 +280,13 @@ onMounted(async () => {
                 <time>{{ messageTime(message.createdAt) }}</time>
               </div>
               <div class="bubble" :class="{ inbound: message.direction === 'INBOUND', failed: message.status === 'FAILED' }">
-                {{ message.content }}
+                <span v-if="message.mediaKind" class="media-chip">
+                  <el-icon :size="13"><component :is="mediaIcon(message.mediaKind)" /></el-icon>
+                  <span class="media-label">{{ mediaLabel(message.mediaKind) }}</span>
+                  <span v-if="message.mediaName" class="media-name">{{ message.mediaName }}</span>
+                  <span v-if="message.mediaSize" class="media-size">{{ formatSize(message.mediaSize) }}</span>
+                </span>
+                <template v-else>{{ message.content }}</template>
               </div>
               <div v-if="message.errorMessage" class="error-text">{{ message.errorMessage }}</div>
               <div v-if="message.direction === 'OUTBOUND'" class="model-meta">
@@ -346,6 +377,32 @@ onMounted(async () => {
 .persona-select {
   width: 128px;
   flex: 0 0 auto;
+}
+
+.media-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 0;
+  color: var(--ink-soft);
+  font-size: var(--fs-xs);
+}
+
+.media-label {
+  font-weight: 550;
+}
+
+.media-name {
+  overflow: hidden;
+  max-width: 200px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+.media-size {
+  color: var(--muted-soft);
+  font-size: 10px;
 }
 :deep(.el-table__row) { cursor: pointer; }
 .pagination { display: flex; justify-content: flex-end; padding: 8px 12px; border-top: 1px solid var(--line-soft); }

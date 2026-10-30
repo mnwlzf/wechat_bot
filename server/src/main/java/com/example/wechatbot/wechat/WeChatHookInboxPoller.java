@@ -5,6 +5,7 @@ import com.example.wechatbot.domain.ChatType;
 import com.example.wechatbot.domain.WeChatHookCursor;
 import com.example.wechatbot.repository.WeChatHookCursorRepository;
 import com.example.wechatbot.service.InboxService;
+import com.example.wechatbot.service.MediaMessageParser;
 import com.example.wechatbot.web.dto.AgentDtos;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -159,16 +160,22 @@ public class WeChatHookInboxPoller {
                                                     Map<String, String> senderMap,
                                                     String selfWxid) {
         int localType = intValue(getIgnoreCase(row, "local_type"), 0);
-        if (localType != 1) {
-            return null;
-        }
-        String contentType = stringValue(getIgnoreCase(row, "content_type")).toLowerCase(Locale.ROOT);
-        if (!contentType.isEmpty() && !"text".equals(contentType)) {
+        if (localType <= 0) {
             return null;
         }
         String content = stringValue(getIgnoreCase(row, "message_content"));
-        if (content.isBlank()) {
-            return null;
+        MediaMessageParser.Parsed media = null;
+        if (localType == MediaMessageParser.TYPE_TEXT) {
+            String contentType = stringValue(getIgnoreCase(row, "content_type")).toLowerCase(Locale.ROOT);
+            if (!contentType.isEmpty() && !"text".equals(contentType)) {
+                return null;
+            }
+            if (content.isBlank()) {
+                return null;
+            }
+        } else {
+            media = MediaMessageParser.parse(localType, content);
+            content = media.placeholder();
         }
 
         boolean group = chatId.contains("@chatroom");
@@ -213,7 +220,12 @@ public class WeChatHookInboxPoller {
                 truncate(displayName(senderId), 180),
                 truncate(content.trim(), 10_000),
                 sentAt,
-                false
+                false,
+                media == null ? null : media.kind().name(),
+                media == null ? null : media.name(),
+                media == null ? null : media.size(),
+                media == null ? null : media.url(),
+                media == null ? null : localType
         );
     }
 

@@ -157,6 +157,10 @@ public final class AdminDtos {
 
     public record FilterPolicyUpdate(List<String> bannedWords, String mode) {}
 
+    public record MediaPolicyUpdate(boolean enabled, String replyMode, @Size(max = 500) String ackText) {}
+
+    public record UsagePricingUpdate(@Min(0) double promptPricePerK, @Min(0) double completionPricePerK) {}
+
     public record MessageView(
             UUID id,
             String direction,
@@ -169,6 +173,11 @@ public final class AdminDtos {
             Integer promptTokens,
             Integer completionTokens,
             Long latencyMs,
+            String mediaKind,
+            String mediaName,
+            Long mediaSize,
+            String mediaUrl,
+            Integer rawType,
             OffsetDateTime createdAt
     ) {}
 
@@ -196,4 +205,17 @@ public final class AdminDtos {
     public record WeChatPolicyUpdate(boolean groupsEnabled, boolean acceptAll, List<String> allowedChats) {}
 
     public record LlmPolicyUpdate(boolean fallbackEnabled, boolean searchEnabled) {}
+
+    public record UsageDaily(String date, long inbound, long outbound, long promptTokens, long completionTokens) {}
+
+    public record UsageProvider(String provider, String model, long replies, long promptTokens,
+                                long completionTokens, double avgLatencyMs) {}
+
+    public record UsageTotals(long inbound, long outbound, long replied, long ignored, long failed,
+                              long promptTokens, long completionTokens, long avgLatencyMs,
+                              long activeConversations) {}
+
+    public record UsageView(int days, OffsetDateTime from, OffsetDateTime to, UsageTotals totals,
+                            double estimatedCost, String currency,
+                            List<UsageDaily> daily, List<UsageProvider> providers) {}
 }

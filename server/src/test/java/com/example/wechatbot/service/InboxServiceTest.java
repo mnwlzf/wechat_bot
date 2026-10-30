@@ -15,7 +15,8 @@ class InboxServiceTest {
             mock(MessageLogRepository.class),
             mock(DedupeService.class),
             mock(RateLimitService.class),
-            mock(ChatOrchestrator.class)
+            mock(ChatOrchestrator.class),
+            mock(RuntimeSettingsService.class)
     );
 
     @Test

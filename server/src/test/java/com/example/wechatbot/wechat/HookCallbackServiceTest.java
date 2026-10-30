@@ -140,14 +140,20 @@ class HookCallbackServiceTest {
     }
 
     @Test
-    void ignoresNonMessageEventsAndNonTextPayloads() {
+    void ignoresNonMessageEventsButAcceptsMediaPayloads() {
         assertThat(service.handle(Map.of(
                 "event_type", 10002, "msgid", 47L, "type", 1, "wxid", "w", "content", "x")).status())
                 .isEqualTo("IGNORED");
+
+        ArgumentCaptor<AgentDtos.AgentEventRequest> captor =
+                ArgumentCaptor.forClass(AgentDtos.AgentEventRequest.class);
         assertThat(service.handle(Map.of(
-                "event_type", 1001, "msgid", 48L, "type", 47, "wxid", "w", "content", "x")).status())
-                .isEqualTo("IGNORED");
-        verifyNoInteractions(inboxService);
+                "event_type", 1001, "msgid", 48L, "type", 47, "wxid", "w", "content", "")).status())
+                .isEqualTo("ACCEPTED");
+        verify(inboxService).accept(captor.capture());
+        assertThat(captor.getValue().mediaKind()).isEqualTo("STICKER");
+        assertThat(captor.getValue().content()).isEqualTo("[表情]");
+        assertThat(captor.getValue().rawType()).isEqualTo(47);
     }
 
     @Test

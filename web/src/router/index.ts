@@ -75,6 +75,12 @@ const router = createRouter({
           meta: { title: '诊断中心' },
         },
         {
+          path: 'usage',
+          name: 'usage',
+          component: () => import('@/views/UsageView.vue'),
+          meta: { title: '用量统计' },
+        },
+        {
           path: 'debug',
           name: 'debug',
           component: () => import('@/views/DebugView.vue'),

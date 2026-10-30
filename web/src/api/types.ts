@@ -22,6 +22,66 @@ export interface SettingsSnapshot {
   searchEnabled: RuntimeSetting<boolean>
   bannedWords: RuntimeSetting<string[]>
   filterMode: RuntimeSetting<'off' | 'rewrite' | 'block'>
+  mediaEnabled: RuntimeSetting<boolean>
+  mediaReplyMode: RuntimeSetting<MediaReplyMode>
+  mediaAckText: RuntimeSetting<string>
+  promptPricePerK: RuntimeSetting<number>
+  completionPricePerK: RuntimeSetting<number>
+}
+
+export type MediaReplyMode = 'ignore' | 'ack' | 'llm'
+
+export type MediaKind = 'IMAGE' | 'VOICE' | 'VIDEO' | 'FILE' | 'LINK' | 'STICKER' | 'SYSTEM' | 'OTHER'
+
+export interface MediaPolicyInput {
+  enabled: boolean
+  replyMode: MediaReplyMode
+  ackText: string
+}
+
+export interface UsagePricingInput {
+  promptPricePerK: number
+  completionPricePerK: number
+}
+
+export interface UsageDaily {
+  date: string
+  inbound: number
+  outbound: number
+  promptTokens: number
+  completionTokens: number
+}
+
+export interface UsageProvider {
+  provider: string
+  model: string
+  replies: number
+  promptTokens: number
+  completionTokens: number
+  avgLatencyMs: number
+}
+
+export interface UsageTotals {
+  inbound: number
+  outbound: number
+  replied: number
+  ignored: number
+  failed: number
+  promptTokens: number
+  completionTokens: number
+  avgLatencyMs: number
+  activeConversations: number
+}
+
+export interface UsageSummary {
+  days: number
+  from: string
+  to: string
+  totals: UsageTotals
+  estimatedCost: number
+  currency: string
+  daily: UsageDaily[]
+  providers: UsageProvider[]
 }
 
 export interface FilterPolicyInput {
@@ -238,6 +298,11 @@ export interface Message {
   promptTokens?: number
   completionTokens?: number
   latencyMs?: number
+  mediaKind?: MediaKind
+  mediaName?: string
+  mediaSize?: number
+  mediaUrl?: string
+  rawType?: number
   createdAt: string
 }
 

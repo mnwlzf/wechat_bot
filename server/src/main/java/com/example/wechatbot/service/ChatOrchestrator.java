@@ -81,12 +81,9 @@ public class ChatOrchestrator {
     }
 
     public LlmReply generateReply(UUID botId, UUID conversationId, UUID inboundId, boolean enqueueOutbox) {
-        BotConfig bot = botRepository.findById(botId)
-                .orElseThrow(() -> new IllegalStateException("机器人配置不存在"));
-        Conversation conversation = conversationRepository.findById(conversationId)
-                .orElseThrow(() -> new IllegalStateException("会话不存在"));
-        MessageLog inbound = messageRepository.findById(inboundId)
-                .orElseThrow(() -> new IllegalStateException("入站消息不存在"));
+        BotConfig bot = requireBot(botId);
+        Conversation conversation = requireConversation(conversationId);
+        MessageLog inbound = requireInbound(inboundId);
 
         try {
             LlmReply reply = autoReply.match(conversation.getChatType(), inbound.getContent())
@@ -104,82 +101,133 @@ public class ChatOrchestrator {
                     reply = regenerateWithVariation(bot, context, reply);
                 }
             }
+            return deliver(bot, conversation, inbound, reply, enqueueOutbox);
+        } catch (Exception ex) {
+            markFailed(inbound, ex);
+            throw ex;
+        }
+    }
 
-            ContentFilterService.Result filtered = contentFilter.apply(reply.content());
-            if (filtered.blocked()) {
-                inbound.setStatus(MessageStatus.SUCCESS);
-                inbound.setErrorMessage(null);
-                messageRepository.save(inbound);
+    /**
+     * 固定话术回复（媒体消息确认、人工触发等）。与模型回复共用同一条投递链路：
+     * 敏感词过滤 → 伪装层排期 → outbox，因此不会被防封策略绕过。
+     */
+    @Async("chatExecutor")
+    public void generateFixedReplyAsync(UUID botId, UUID conversationId, UUID inboundId, String text) {
+        try {
+            generateFixedReply(botId, conversationId, inboundId, text);
+        } catch (Exception ex) {
+            log.error("Async fixed reply failed for conversation {}", conversationId, ex);
+        }
+    }
 
-                MessageLog blocked = outboundLog(conversationId, bot, reply, reply.content());
-                blocked.setStatus(MessageStatus.IGNORED);
-                blocked.setErrorMessage(abbreviate(filtered.note(), 1000));
-                messageRepository.save(blocked);
-                conversation.setLastMessage(abbreviate(reply.content(), 500));
-                conversation.setLastMessageAt(OffsetDateTime.now());
-                conversationRepository.save(conversation);
-                log.info("敏感词拦截，未发送: conversation={} note={}", conversationId, filtered.note());
-                return reply;
-            }
-            if (filtered.content() != null && !filtered.content().equals(reply.content())) {
-                log.info("敏感词改写: conversation={} note={}", conversationId, filtered.note());
-                reply = reply.withContent(filtered.content());
-            }
+    public LlmReply generateFixedReply(UUID botId, UUID conversationId, UUID inboundId, String text) {
+        BotConfig bot = requireBot(botId);
+        Conversation conversation = requireConversation(conversationId);
+        MessageLog inbound = requireInbound(inboundId);
+        try {
+            return deliver(bot, conversation, inbound, LlmReply.rule(text), true);
+        } catch (Exception ex) {
+            markFailed(inbound, ex);
+            throw ex;
+        }
+    }
 
+    private LlmReply deliver(BotConfig bot, Conversation conversation, MessageLog inbound,
+                             LlmReply reply, boolean enqueueOutbox) {
+        UUID botId = bot.getId();
+        UUID conversationId = conversation.getId();
+
+        ContentFilterService.Result filtered = contentFilter.apply(reply.content());
+        if (filtered.blocked()) {
             inbound.setStatus(MessageStatus.SUCCESS);
             inbound.setErrorMessage(null);
             messageRepository.save(inbound);
 
-            DisguiseService.Plan plan = enqueueOutbox
-                    ? disguise.plan(conversation.getChatId(), conversation.getChatType(), reply.content(), Instant.now())
-                    : disguise.preview(conversation.getChatId(), conversation.getChatType(), reply.content(), Instant.now());
-
-            if (plan.dropped() && enqueueOutbox) {
-                MessageLog skipped = outboundLog(conversationId, bot, reply, reply.content());
-                skipped.setStatus(MessageStatus.IGNORED);
-                skipped.setErrorMessage(abbreviate("伪装层未发送：" + plan.decision() + " " + plan.note(), 1000));
-                messageRepository.save(skipped);
-                log.info("伪装层未发送，conversation={} decision={} note={}",
-                        conversationId, plan.decision(), plan.note());
-                conversation.setLastMessage(abbreviate(reply.content(), 500));
-                conversation.setLastMessageAt(OffsetDateTime.now());
-                conversationRepository.save(conversation);
-                return reply;
-            }
-
-            List<DisguiseService.PlannedPart> parts = plan.parts();
-            for (DisguiseService.PlannedPart part : parts) {
-                MessageLog outbound = outboundLog(conversationId, bot, reply, part.text());
-                messageRepository.save(outbound);
-
-                if (enqueueOutbox) {
-                    OutboxMessage outbox = new OutboxMessage();
-                    outbox.setBotId(botId);
-                    outbox.setConversationId(conversationId);
-                    outbox.setChatId(conversation.getChatId());
-                    outbox.setContent(part.text());
-                    outbox.setStatus(OutboxStatus.PENDING);
-                    outbox.setNextAttemptAt(OffsetDateTime.ofInstant(part.sendAt(), zone()));
-                    outboxRepository.save(outbox);
-                }
-            }
-
-            String joined = plan.dropped() ? reply.content() : plan.joinedText();
-            conversation.setLastMessage(abbreviate(joined, 500));
+            MessageLog blocked = outboundLog(conversationId, bot, reply, reply.content());
+            blocked.setStatus(MessageStatus.IGNORED);
+            blocked.setErrorMessage(abbreviate(filtered.note(), 1000));
+            messageRepository.save(blocked);
+            conversation.setLastMessage(abbreviate(reply.content(), 500));
             conversation.setLastMessageAt(OffsetDateTime.now());
             conversationRepository.save(conversation);
-
-            if (!plan.dropped()) {
-                log.info("伪装层排期，conversation={} parts={} first={} note={}",
-                        conversationId, parts.size(), plan.firstSendAt(), plan.note());
-            }
-            return plan.dropped() ? reply : withContent(reply, joined);
-        } catch (Exception ex) {
-            inbound.setStatus(MessageStatus.FAILED);
-            inbound.setErrorMessage(abbreviate(rootMessage(ex), 1000));
-            messageRepository.save(inbound);
-            throw ex;
+            log.info("敏感词拦截，未发送: conversation={} note={}", conversationId, filtered.note());
+            return reply;
         }
+        if (filtered.content() != null && !filtered.content().equals(reply.content())) {
+            log.info("敏感词改写: conversation={} note={}", conversationId, filtered.note());
+            reply = reply.withContent(filtered.content());
+        }
+
+        inbound.setStatus(MessageStatus.SUCCESS);
+        inbound.setErrorMessage(null);
+        messageRepository.save(inbound);
+
+        DisguiseService.Plan plan = enqueueOutbox
+                ? disguise.plan(conversation.getChatId(), conversation.getChatType(), reply.content(), Instant.now())
+                : disguise.preview(conversation.getChatId(), conversation.getChatType(), reply.content(), Instant.now());
+
+        if (plan.dropped() && enqueueOutbox) {
+            MessageLog skipped = outboundLog(conversationId, bot, reply, reply.content());
+            skipped.setStatus(MessageStatus.IGNORED);
+            skipped.setErrorMessage(abbreviate("伪装层未发送：" + plan.decision() + " " + plan.note(), 1000));
+            messageRepository.save(skipped);
+            log.info("伪装层未发送，conversation={} decision={} note={}",
+                    conversationId, plan.decision(), plan.note());
+            conversation.setLastMessage(abbreviate(reply.content(), 500));
+            conversation.setLastMessageAt(OffsetDateTime.now());
+            conversationRepository.save(conversation);
+            return reply;
+        }
+
+        List<DisguiseService.PlannedPart> parts = plan.parts();
+        for (DisguiseService.PlannedPart part : parts) {
+            MessageLog outbound = outboundLog(conversationId, bot, reply, part.text());
+            messageRepository.save(outbound);
+
+            if (enqueueOutbox) {
+                OutboxMessage outbox = new OutboxMessage();
+                outbox.setBotId(botId);
+                outbox.setConversationId(conversationId);
+                outbox.setChatId(conversation.getChatId());
+                outbox.setContent(part.text());
+                outbox.setStatus(OutboxStatus.PENDING);
+                outbox.setNextAttemptAt(OffsetDateTime.ofInstant(part.sendAt(), zone()));
+                outboxRepository.save(outbox);
+            }
+        }
+
+        String joined = plan.dropped() ? reply.content() : plan.joinedText();
+        conversation.setLastMessage(abbreviate(joined, 500));
+        conversation.setLastMessageAt(OffsetDateTime.now());
+        conversationRepository.save(conversation);
+
+        if (!plan.dropped()) {
+            log.info("伪装层排期，conversation={} parts={} first={} note={}",
+                    conversationId, parts.size(), plan.firstSendAt(), plan.note());
+        }
+        return plan.dropped() ? reply : withContent(reply, joined);
+    }
+
+    private BotConfig requireBot(UUID botId) {
+        return botRepository.findById(botId)
+                .orElseThrow(() -> new IllegalStateException("机器人配置不存在"));
+    }
+
+    private Conversation requireConversation(UUID conversationId) {
+        return conversationRepository.findById(conversationId)
+                .orElseThrow(() -> new IllegalStateException("会话不存在"));
+    }
+
+    private MessageLog requireInbound(UUID inboundId) {
+        return messageRepository.findById(inboundId)
+                .orElseThrow(() -> new IllegalStateException("入站消息不存在"));
+    }
+
+    private void markFailed(MessageLog inbound, Exception ex) {
+        inbound.setStatus(MessageStatus.FAILED);
+        inbound.setErrorMessage(abbreviate(rootMessage(ex), 1000));
+        messageRepository.save(inbound);
     }
 
     private MessageLog outboundLog(UUID conversationId, BotConfig bot, LlmReply reply, String content) {

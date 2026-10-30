@@ -13,6 +13,7 @@ import {
   Setting,
   SwitchButton,
   Timer,
+  TrendCharts,
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 
@@ -81,6 +82,9 @@ function logout() {
         </el-menu-item>
         <el-menu-item index="/diagnostics">
           <el-icon><Monitor /></el-icon><span>诊断中心</span>
+        </el-menu-item>
+        <el-menu-item index="/usage">
+          <el-icon><TrendCharts /></el-icon><span>用量统计</span>
         </el-menu-item>
       </el-menu>
 

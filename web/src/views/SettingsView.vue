@@ -32,6 +32,24 @@ const filterForm = reactive({
 
 const savingFilter = ref(false)
 
+const mediaForm = reactive({
+  enabled: true,
+  replyMode: 'ignore' as 'ignore' | 'ack' | 'llm',
+  ackText: '收到，我看下～',
+})
+
+const savingMedia = ref(false)
+
+const mediaDirty = computed(() => {
+  const saved = snapshot.value
+  if (!saved) return false
+  return (
+    saved.mediaEnabled?.value !== mediaForm.enabled ||
+    saved.mediaReplyMode?.value !== mediaForm.replyMode ||
+    saved.mediaAckText?.value !== mediaForm.ackText
+  )
+})
+
 const filterDirty = computed(() => {
   const saved = snapshot.value
   if (!saved) return false
@@ -88,6 +106,9 @@ async function load() {
     llmForm.searchEnabled = data.searchEnabled.value
     filterForm.bannedWords = [...(data.bannedWords?.value ?? [])]
     filterForm.mode = data.filterMode?.value ?? 'off'
+    mediaForm.enabled = data.mediaEnabled?.value ?? true
+    mediaForm.replyMode = data.mediaReplyMode?.value ?? 'ignore'
+    mediaForm.ackText = data.mediaAckText?.value ?? '收到，我看下～'
   } catch (error) {
     ElMessage.error(getErrorMessage(error))
   } finally {
@@ -197,6 +218,22 @@ async function saveFilter() {
     ElMessage.error(getErrorMessage(error))
   } finally {
     savingFilter.value = false
+  }
+}
+
+async function saveMedia() {
+  savingMedia.value = true
+  try {
+    snapshot.value = await adminApi.updateMediaPolicy({
+      enabled: mediaForm.enabled,
+      replyMode: mediaForm.replyMode,
+      ackText: mediaForm.ackText,
+    })
+    ElMessage.success('媒体消息策略已生效')
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    savingMedia.value = false
   }
 }
 
@@ -415,6 +452,57 @@ onMounted(async () => {
         <div class="card-actions">
           <span v-if="filterDirty" class="dirty-dot">有未保存的改动</span>
           <el-button type="primary" :disabled="!filterDirty" :loading="savingFilter" @click="saveFilter">
+            保存并生效
+          </el-button>
+        </div>
+      </div>
+    </section>
+
+    <section class="surface-card settings-wide">
+      <div class="surface-card__head">
+        <div>
+          <h2>媒体消息</h2>
+          <p class="head-desc">图片、语音、文件、链接的处理方式。模型是纯文本的，看不到图片内容、也听不到语音。</p>
+        </div>
+        <span class="count-badge">{{ snapshot ? sourceLabel(snapshot.mediaReplyMode?.source) : '—' }}</span>
+      </div>
+
+      <div class="surface-card__body">
+        <div class="setting-row">
+          <div>
+            <strong>接收并记录媒体消息</strong>
+            <small>关闭后图片/语音/文件直接丢弃，不写会话记录</small>
+          </div>
+          <div class="setting-row__control">
+            <el-switch v-model="mediaForm.enabled" />
+          </div>
+        </div>
+
+        <div class="setting-row">
+          <div>
+            <strong>回复策略</strong>
+            <small>只记录：不回复；固定话术：回一句确认；交给模型：把占位文本（如「[图片]」）交给模型自然回应</small>
+          </div>
+          <div class="setting-row__control">
+            <el-radio-group v-model="mediaForm.replyMode" size="small" :disabled="!mediaForm.enabled">
+              <el-radio-button label="ignore">只记录</el-radio-button>
+              <el-radio-button label="ack">固定话术</el-radio-button>
+              <el-radio-button label="llm">交给模型</el-radio-button>
+            </el-radio-group>
+          </div>
+        </div>
+
+        <el-input
+          v-model="mediaForm.ackText"
+          class="picker"
+          maxlength="500"
+          :disabled="!mediaForm.enabled || mediaForm.replyMode !== 'ack'"
+          placeholder="固定话术内容，例如：收到，我看下～"
+        />
+
+        <div class="card-actions">
+          <span v-if="mediaDirty" class="dirty-dot">有未保存的改动</span>
+          <el-button type="primary" :disabled="!mediaDirty" :loading="savingMedia" @click="saveMedia">
             保存并生效
           </el-button>
         </div>
