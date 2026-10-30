@@ -1,0 +1,12 @@
+{
+  "name": "wechat-bot",
+  "private": true,
+  "version": "0.1.0",
+  "description": "微信 AI 客服机器人：Spring Boot 后端 + Vue 3 前端",
+  "scripts": {
+    "dev": "npm --prefix web run dev",
+    "build": "npm --prefix web run build",
+    "preview": "npm --prefix web run preview",
+    "web:install": "npm --prefix web install"
+  }
+}
