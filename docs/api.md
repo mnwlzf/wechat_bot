@@ -64,6 +64,12 @@ $headers = @{ Authorization = "Bearer dev-admin-token" }
 | GET | `/api/admin/settings` | 运行时策略快照（值 + 来源 db/env） |
 | PUT | `/api/admin/settings/wechat` | 会话白名单 / 全量接收 / 群聊开关，立即生效 |
 | PUT | `/api/admin/settings/llm` | 备用链路与联网搜索开关，立即生效 |
+| PUT | `/api/admin/settings/filter` | 敏感词词表与过滤模式（off / rewrite / block），立即生效 |
+| POST | `/api/admin/conversations/{id}/takeover` | 人工接管开关：`{"paused":true}` 期间只记录不自动回复 |
+| GET/POST/PUT/DELETE | `/api/admin/auto-replies` | 关键词 / 正则自动回复规则 |
+| GET | `/api/admin/diagnostics` | 诊断聚合：钩子探活 + 回调计数 + 最近回调 + 失败投递 |
+| GET | `/api/admin/diagnostics/outbox` | 失败投递列表 |
+| POST | `/api/admin/diagnostics/outbox/{id}/retry` | 手动重试失败投递（attempts 归零重新入队） |
 | GET | `/api/admin/bots` | 机器人配置 |
 | PUT | `/api/admin/bots/{id}` | 更新机器人配置 |
 | POST | `/api/admin/debug/chat` | 在线调试（不发送微信） |
@@ -141,6 +147,46 @@ $headers = @{ Authorization = "Bearer dev-admin-token" }
   "parts": [{ "text": "好的！整理如下：code", "delaySeconds": 7 }]
 }
 ```
+
+### 自动回复规则与诊断
+
+关键词规则命中后**不调用模型**，直接返回固定话术（仍走伪装层的延迟与配额）。规则按 `priority` 升序匹配，`scope` 支持 `ALL` / `PRIVATE` / `GROUP`：
+
+```json
+{
+  "name": "价格咨询",
+  "matchType": "CONTAINS",
+  "pattern": "价格",
+  "reply": "价格表：https://example.com/price",
+  "scope": "ALL",
+  "priority": 10,
+  "enabled": true
+}
+```
+
+`matchType` 取 `EXACT` / `CONTAINS` / `REGEX`；正则非法时保存直接返回 400。
+
+人工接管：`POST /api/admin/conversations/{id}/takeover`，请求体 `{"paused": true}`。接管期间收到的消息以 `IGNORED` 入库并记录“人工接管中，未自动回复”，不会进入模型链路。
+
+诊断聚合示例（`GET /api/admin/diagnostics`）：
+
+```json
+{
+  "generatedAt": "2026-10-30T02:02:07.562Z",
+  "wechat": {
+    "hook": { "baseUrl": "http://127.0.0.1:30001", "reachable": true, "instance": "0x7ff83bfc0000", "latencyMs": 370, "error": "" },
+    "callback": { "total": 28, "accepted": 21, "ignored": 7, "lastEventAt": "2026-10-30T01:58:11.002+08:00" },
+    "guard": { "configured": true, "present": true, "status": { "state": "running", "restarts": 0 } },
+    "allowedChats": ["49878296302@chatroom"]
+  },
+  "recentCallbacks": [
+    { "receivedAt": "2026-10-30T01:58:11+08:00", "status": "ACCEPTED", "reason": "消息已接收", "chatId": "wxid_demo", "payload": { "content": "在吗" } }
+  ],
+  "outbox": { "failedCount": 0, "failed": [] }
+}
+```
+
+敏感词过滤：`PUT /api/admin/settings/filter`，请求体 `{"bannedWords":["违禁"],"mode":"rewrite"}`。`mode` 取 `off`（不改动）/ `rewrite`（\* 遮蔽）/ `block`（该条回复不发送，写入 `IGNORED` 记录）。
 
 
 ## 4. 外部集成 API
