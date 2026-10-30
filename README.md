@@ -356,6 +356,13 @@ LLM_SEARCH_TIMEOUT_SECONDS=20
 | `wechat.groupsEnabled` | 是否处理群消息 | `WECHAT_CALLBACK_GROUPS_ENABLED` |
 | `llm.fallbackEnabled` | 是否启用备用链路（多 Provider 回退）。关闭后只走主 Provider 的主/备双 Key | `LLM_FALLBACK_ENABLED` |
 | `llm.searchEnabled` | 是否允许联网搜索 | `LLM_SEARCH_ENABLED` |
+| `media.enabled` / `media.replyMode` / `media.ackText` | 媒体消息开关与回复策略（`ignore` / `ack` / `llm`） | — |
+
+### 7.4 引用消息与图片识别
+
+- **引用消息**：`type=49` 且带 `<refermsg>` 时按文本处理，`content` 是本次说的话，`quote_author`/`quote_text` 记录被引用的发送者与内容；被引用的对象可能是文本、图片、语音、表情、文件或链接，统一渲染成占位文本（`[图片]`、`[语音 4″]`、`[文件] 报价单.pdf` …）。送给模型时当前消息会拼成 `[引用 张三：原文]` + 本次说的话。
+- **图片识别**：`type=3` 的图片会真的交给模型看——按 `md5` 在微信数据目录定位本地 `.dat`，先走 Hook 的 `/Decode_Pic`，失败再用 `aeskey` 本地 AES 解密，缩放到长边 1024 内、转 JPEG 后以多段 content（`text` + `image_url`）发送。任一步失败都退化为 `[图片]` 占位文本，不影响回复；上游拒绝带图请求时自动改纯文本重试。
+- 相关环境变量：`LLM_VISION_ENABLED`、`LLM_VISION_MAX_EDGE`、`LLM_VISION_MAX_BYTES`、`LLM_VISION_CACHE_DIR`、`LLM_VISION_DECODE_WAIT_MS`、`WECHAT_IMAGE_ROOT`，详见 [docs/api.md](docs/api.md#图片识别)。
 
 ```powershell
 # 只保留主链路 + 双 Key 兜底，不再切换下一个 Provider

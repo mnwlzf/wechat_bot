@@ -303,6 +303,8 @@ export interface Message {
   mediaSize?: number
   mediaUrl?: string
   rawType?: number
+  quoteAuthor?: string
+  quoteText?: string
   createdAt: string
 }
 

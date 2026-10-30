@@ -131,6 +131,8 @@ public class AdminQueryService {
                 message.getMediaSize(),
                 message.getMediaUrl(),
                 message.getRawType(),
+                message.getQuoteAuthor(),
+                message.getQuoteText(),
                 message.getCreatedAt()
         );
     }

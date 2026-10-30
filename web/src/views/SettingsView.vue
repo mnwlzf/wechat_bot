@@ -34,7 +34,7 @@ const savingFilter = ref(false)
 
 const mediaForm = reactive({
   enabled: true,
-  replyMode: 'ignore' as 'ignore' | 'ack' | 'llm',
+  replyMode: 'llm' as 'ignore' | 'ack' | 'llm',
   ackText: '收到，我看下～',
 })
 
@@ -107,7 +107,7 @@ async function load() {
     filterForm.bannedWords = [...(data.bannedWords?.value ?? [])]
     filterForm.mode = data.filterMode?.value ?? 'off'
     mediaForm.enabled = data.mediaEnabled?.value ?? true
-    mediaForm.replyMode = data.mediaReplyMode?.value ?? 'ignore'
+    mediaForm.replyMode = data.mediaReplyMode?.value ?? 'llm'
     mediaForm.ackText = data.mediaAckText?.value ?? '收到，我看下～'
   } catch (error) {
     ElMessage.error(getErrorMessage(error))
@@ -462,7 +462,7 @@ onMounted(async () => {
       <div class="surface-card__head">
         <div>
           <h2>媒体消息</h2>
-          <p class="head-desc">图片、语音、文件、链接的处理方式。模型是纯文本的，看不到图片内容、也听不到语音。</p>
+          <p class="head-desc">图片、语音、文件、链接的处理方式。图片会解码后直接交给模型看，语音、文件、链接仍只有占位文本。</p>
         </div>
         <span class="count-badge">{{ snapshot ? sourceLabel(snapshot.mediaReplyMode?.source) : '—' }}</span>
       </div>
@@ -481,7 +481,7 @@ onMounted(async () => {
         <div class="setting-row">
           <div>
             <strong>回复策略</strong>
-            <small>只记录：不回复；固定话术：回一句确认；交给模型：把占位文本（如「[图片]」）交给模型自然回应</small>
+            <small>只记录：不回复；固定话术：回一句确认；交给模型：文本类占位（如「[语音 4″]」）交给模型回应，图片则连图一起发（需模型支持图片输入，否则自动降级为纯文本）</small>
           </div>
           <div class="setting-row__control">
             <el-radio-group v-model="mediaForm.replyMode" size="small" :disabled="!mediaForm.enabled">

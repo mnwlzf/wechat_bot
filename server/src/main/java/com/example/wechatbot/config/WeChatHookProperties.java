@@ -25,6 +25,8 @@ public class WeChatHookProperties {
     private boolean callbackRequireLoopback = true;
     private boolean callbackGroupsEnabled = false;
     private String guardStatusFile = "logs/guard-status.json";
+    /** 微信数据目录（xwechat_files 的父级）；留空自动取 %USERPROFILE%\Documents\xwechat_files。 */
+    private String imageRoot = "";
     private boolean skipHistory = true;
     private long pollIntervalMs = 2000;
     private long initialDelayMs = 5000;
@@ -59,6 +61,8 @@ public class WeChatHookProperties {
     public void setCallbackGroupsEnabled(boolean callbackGroupsEnabled) { this.callbackGroupsEnabled = callbackGroupsEnabled; }
     public String getGuardStatusFile() { return guardStatusFile; }
     public void setGuardStatusFile(String guardStatusFile) { this.guardStatusFile = guardStatusFile; }
+    public String getImageRoot() { return imageRoot; }
+    public void setImageRoot(String imageRoot) { this.imageRoot = imageRoot; }
     public boolean isSkipHistory() { return skipHistory; }
     public void setSkipHistory(boolean skipHistory) { this.skipHistory = skipHistory; }
     public long getPollIntervalMs() { return pollIntervalMs; }

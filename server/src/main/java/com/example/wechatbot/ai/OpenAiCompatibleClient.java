@@ -54,9 +54,42 @@ public class OpenAiCompatibleClient {
      *
      * <p>401/402/403 视为该 Key 不可用，立即切下一个 Key；
      * 429/5xx/连接失败在同一個 Key 上重试一次后再切换。</p>
+     *
+     * <p>消息里带图时按 OpenAI 多段 content（text + image_url）发送；
+     * 若上游明确拒绝（400/413/422），自动去掉图片再试一次，避免图片能力把整条回复拖挂。</p>
      */
     public LlmReply complete(ModelProvider provider, List<String> apiKeys, List<ChatMessage> messages,
                              double temperature, int maxTokens) {
+        boolean withImages = messages != null && messages.stream().anyMatch(ChatMessage::hasImage);
+        if (!withImages) {
+            return call(provider, apiKeys, messages, temperature, maxTokens, false);
+        }
+        try {
+            return call(provider, apiKeys, messages, temperature, maxTokens, true);
+        } catch (LlmException ex) {
+            if (!rejectedImages(ex.getMessage())) {
+                throw ex;
+            }
+            log.warn("模型不接受图片输入，降级为纯文本重试（provider={}）: {}", provider.getName(), ex.getMessage());
+            try {
+                return call(provider, apiKeys, messages, temperature, maxTokens, false);
+            } catch (LlmException retry) {
+                throw new LlmException("带图调用失败(" + abbreviate(ex.getMessage())
+                        + ")，纯文本重试也失败: " + abbreviate(retry.getMessage()), retry);
+            }
+        }
+    }
+
+    /** 上游对「带图请求」的典型拒绝：请求体格式、体积或能力不支持。 */
+    private static boolean rejectedImages(String message) {
+        if (message == null) {
+            return false;
+        }
+        return message.contains("返回 400") || message.contains("返回 413") || message.contains("返回 422");
+    }
+
+    private LlmReply call(ModelProvider provider, List<String> apiKeys, List<ChatMessage> messages,
+                          double temperature, int maxTokens, boolean withImages) {
         if (provider.getBaseUrl() == null || provider.getBaseUrl().isBlank()) {
             throw new LlmException("模型 Base URL 未配置");
         }
@@ -79,7 +112,7 @@ public class OpenAiCompatibleClient {
 
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("model", provider.getModel());
-        body.put("messages", messages);
+        body.put("messages", toPayload(messages, withImages));
         body.put("temperature", temperature);
         body.put("max_tokens", maxTokens);
         body.put("stream", false);
@@ -139,6 +172,34 @@ public class OpenAiCompatibleClient {
 
     private static String keyLabel(int index) {
         return index == 0 ? "主 Key" : "备用 Key " + index;
+    }
+
+    /**
+     * 组装请求里的 {@code messages}：普通消息 {@code content} 是字符串，
+     * 带图消息按 OpenAI 规范展开成 {@code [{type:text},{type:image_url}]}。
+     */
+    private List<Map<String, Object>> toPayload(List<ChatMessage> messages, boolean withImages) {
+        List<Map<String, Object>> payload = new ArrayList<>();
+        if (messages == null) {
+            return payload;
+        }
+        for (ChatMessage message : messages) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("role", message.role());
+            String text = message.content() == null ? "" : message.content();
+            if (withImages && message.hasImage()) {
+                List<Map<String, Object>> parts = new ArrayList<>(2);
+                if (!text.isBlank()) {
+                    parts.add(Map.of("type", "text", "text", text));
+                }
+                parts.add(Map.of("type", "image_url", "image_url", Map.of("url", message.imageDataUrl())));
+                item.put("content", parts);
+            } else {
+                item.put("content", text);
+            }
+            payload.add(item);
+        }
+        return payload;
     }
 
     /**

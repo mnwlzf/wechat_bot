@@ -5,6 +5,7 @@ import com.example.wechatbot.domain.ChatType;
 import com.example.wechatbot.domain.WeChatHookCursor;
 import com.example.wechatbot.repository.WeChatHookCursorRepository;
 import com.example.wechatbot.service.InboxService;
+import com.example.wechatbot.service.HookExtras;
 import com.example.wechatbot.service.MediaMessageParser;
 import com.example.wechatbot.web.dto.AgentDtos;
 import org.slf4j.Logger;
@@ -141,9 +142,9 @@ public class WeChatHookInboxPoller {
         int accepted = 0;
         for (Map<String, Object> row : rows) {
             long rowAnchor = longValue(getIgnoreCase(row, anchor), cursor.getCursorValue());
-            AgentDtos.AgentEventRequest event = convertRow(chatId, tableRef.database(), row, senderMap, account);
-            if (event != null) {
-                inboxService.accept(event);
+            Converted converted = convert(chatId, tableRef.database(), row, senderMap, account);
+            if (converted != null) {
+                inboxService.accept(converted.event(), converted.extras());
                 accepted++;
             }
             cursor.setCursorValue(Math.max(cursor.getCursorValue(), rowAnchor));
@@ -154,17 +155,30 @@ public class WeChatHookInboxPoller {
         }
     }
 
+    /** 一条消息转换后的事件 + 微信侧附加信息（引用原文、图片密钥）。 */
+    record Converted(AgentDtos.AgentEventRequest event, HookExtras extras) {}
+
     AgentDtos.AgentEventRequest convertRow(String chatId,
                                                     String database,
                                                     Map<String, Object> row,
                                                     Map<String, String> senderMap,
                                                     String selfWxid) {
+        Converted converted = convert(chatId, database, row, senderMap, selfWxid);
+        return converted == null ? null : converted.event();
+    }
+
+    Converted convert(String chatId,
+                      String database,
+                      Map<String, Object> row,
+                      Map<String, String> senderMap,
+                      String selfWxid) {
         int localType = intValue(getIgnoreCase(row, "local_type"), 0);
         if (localType <= 0) {
             return null;
         }
         String content = stringValue(getIgnoreCase(row, "message_content"));
         MediaMessageParser.Parsed media = null;
+        MediaMessageParser.Quoted quote = null;
         if (localType == MediaMessageParser.TYPE_TEXT) {
             String contentType = stringValue(getIgnoreCase(row, "content_type")).toLowerCase(Locale.ROOT);
             if (!contentType.isEmpty() && !"text".equals(contentType)) {
@@ -173,6 +187,9 @@ public class WeChatHookInboxPoller {
             if (content.isBlank()) {
                 return null;
             }
+        } else if ((quote = MediaMessageParser.parseQuote(localType, content)) != null) {
+            // 引用回复本质是文本：用本次说的话当内容，被引用原文单独带走
+            content = quote.text();
         } else {
             media = MediaMessageParser.parse(localType, content);
             content = media.placeholder();
@@ -209,7 +226,7 @@ public class WeChatHookInboxPoller {
         String eventId = "wxh_" + sha256Short(database + ":" + chatId + ":" + anchorValue);
         OffsetDateTime sentAt = timestamp(getIgnoreCase(row, "create_time"));
 
-        return new AgentDtos.AgentEventRequest(
+        AgentDtos.AgentEventRequest event = new AgentDtos.AgentEventRequest(
                 eventId,
                 null,
                 "message",
@@ -225,8 +242,9 @@ public class WeChatHookInboxPoller {
                 media == null ? null : media.name(),
                 media == null ? null : media.size(),
                 media == null ? null : media.url(),
-                media == null ? null : localType
+                media == null && quote == null ? null : localType
         );
+        return new Converted(event, HookExtras.of(quote, media));
     }
 
     private boolean isKnownSender(String prefixSender, String senderId, Map<String, String> senderMap) {

@@ -63,7 +63,7 @@ class WeChatHookInboxPollerTest {
         });
 
         InboxService inboxService = mock(InboxService.class);
-        when(inboxService.accept(any())).thenReturn(new AgentDtos.EventAccepted("ACCEPTED", "ok", null));
+        when(inboxService.accept(any(), any())).thenReturn(new AgentDtos.EventAccepted("ACCEPTED", "ok", null));
 
         WeChatHookClient client = new WeChatHookClient(properties);
         WeChatHookInboxPoller poller = new WeChatHookInboxPoller(properties, client, cursorRepository, inboxService);
@@ -72,9 +72,9 @@ class WeChatHookInboxPollerTest {
         assertThat(cursors.get("wxid_me|" + chatId).getCursorValue()).isEqualTo(5);
 
         poller.poll();
-        verify(inboxService, times(1)).accept(any());
+        verify(inboxService, times(1)).accept(any(), any());
         ArgumentCaptor<AgentDtos.AgentEventRequest> event = ArgumentCaptor.forClass(AgentDtos.AgentEventRequest.class);
-        verify(inboxService).accept(event.capture());
+        verify(inboxService).accept(event.capture(), any());
         assertThat(event.getValue().content()).isEqualTo("新消息");
         assertThat(event.getValue().chatName()).isEqualTo("朋友A");
         assertThat(cursors.get("wxid_me|" + chatId).getCursorValue()).isEqualTo(6);

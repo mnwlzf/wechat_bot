@@ -156,4 +156,29 @@ class InboxServiceMediaPolicyTest {
         assertThat(result.reason()).contains("媒体消息处理未启用");
         verify(messageRepository, never()).save(any());
     }
+
+    @Test
+    void quotedReplyIsTreatedAsTextWithQuoteRecorded() {
+        BotConfig bot = bot();
+        stubCommon(bot);
+
+        AgentDtos.AgentEventRequest event = new AgentDtos.AgentEventRequest(
+                "evt-quote", bot.getId(), "message", "wxid_friend", "张三", ChatType.PRIVATE,
+                "wxid_friend", "张三", "可以，我十点到", null, false,
+                null, null, null, null, 49);
+
+        AgentDtos.EventAccepted result = service.accept(event, new HookExtras("张三", "[语音 4″]", null, null));
+
+        assertThat(result.status()).isEqualTo("ACCEPTED");
+        verify(chatOrchestrator).generateReplyAsync(eq(bot.getId()), any(UUID.class), any(UUID.class));
+
+        ArgumentCaptor<MessageLog> captor = ArgumentCaptor.forClass(MessageLog.class);
+        verify(messageRepository, atLeastOnce()).save(captor.capture());
+        MessageLog stored = captor.getAllValues().get(0);
+        assertThat(stored.getContent()).isEqualTo("可以，我十点到");
+        assertThat(stored.getQuoteAuthor()).isEqualTo("张三");
+        assertThat(stored.getQuoteText()).isEqualTo("[语音 4″]");
+        assertThat(stored.getMediaKind()).isNull();
+        assertThat(stored.getRawType()).isEqualTo(49);
+    }
 }

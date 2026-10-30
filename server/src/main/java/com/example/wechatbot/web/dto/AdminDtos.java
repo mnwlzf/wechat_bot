@@ -178,6 +178,8 @@ public final class AdminDtos {
             Long mediaSize,
             String mediaUrl,
             Integer rawType,
+            String quoteAuthor,
+            String quoteText,
             OffsetDateTime createdAt
     ) {}
 

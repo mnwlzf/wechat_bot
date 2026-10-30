@@ -2,6 +2,7 @@ package com.example.wechatbot.wechat;
 
 import com.example.wechatbot.config.WeChatHookProperties;
 import com.example.wechatbot.domain.ChatType;
+import com.example.wechatbot.service.HookExtras;
 import com.example.wechatbot.service.InboxService;
 import com.example.wechatbot.service.MediaMessageParser;
 import com.example.wechatbot.service.RuntimeSettingsService;
@@ -56,9 +57,13 @@ public class HookCallbackService {
         int type = intValue(payload.get("type"));
         String rawContent = text(payload.get("content"));
         MediaMessageParser.Parsed media = null;
+        MediaMessageParser.Quoted quote = null;
         String content;
         if (MediaMessageParser.isText(type)) {
             content = rawContent;
+        } else if ((quote = MediaMessageParser.parseQuote(type, rawContent)) != null) {
+            // 引用回复本质是文本：用本次说的话当内容，被引用原文单独带走
+            content = quote.text();
         } else {
             media = MediaMessageParser.parse(type, rawContent);
             content = media.placeholder();
@@ -112,10 +117,10 @@ public class HookCallbackService {
                 media == null ? null : media.name(),
                 media == null ? null : media.size(),
                 media == null ? null : media.url(),
-                media == null ? null : type
+                media == null && quote == null ? null : type
         );
 
-        AgentDtos.EventAccepted accepted = inboxService.accept(event);
+        AgentDtos.EventAccepted accepted = inboxService.accept(event, HookExtras.of(quote, media));
         if (!"ACCEPTED".equalsIgnoreCase(accepted.status())) {
             log.debug("Hook 回调事件未进入回复流程: chat={} status={} reason={}",
                     chatId, accepted.status(), accepted.reason());

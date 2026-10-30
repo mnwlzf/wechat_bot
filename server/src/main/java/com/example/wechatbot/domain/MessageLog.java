@@ -63,6 +63,20 @@ public class MessageLog {
     @Column(name = "raw_type")
     private Integer rawType;
 
+    @Column(name = "media_md5", length = 64)
+    private String mediaMd5;
+
+    @Column(name = "media_aeskey", length = 64)
+    private String mediaAeskey;
+
+    /** 引用消息里被引用的发送者。 */
+    @Column(name = "quote_author", length = 180)
+    private String quoteAuthor;
+
+    /** 引用消息里被引用的原文。 */
+    @Column(name = "quote_text", length = 1000)
+    private String quoteText;
+
     @Column(name = "prompt_tokens")
     private Integer promptTokens;
 

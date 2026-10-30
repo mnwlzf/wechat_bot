@@ -33,7 +33,7 @@ class HookCallbackServiceTest {
         properties = new WeChatHookProperties();
         properties.setCallbackEnabled(true);
         inboxService = mock(InboxService.class);
-        when(inboxService.accept(any()))
+        when(inboxService.accept(any(), any()))
                 .thenReturn(new AgentDtos.EventAccepted("ACCEPTED", "ok", null));
         AppSettingRepository settingsRepository = mock(AppSettingRepository.class);
         when(settingsRepository.findAll()).thenReturn(List.of());
@@ -59,7 +59,7 @@ class HookCallbackServiceTest {
         assertThat(result.status()).isEqualTo("ACCEPTED");
         ArgumentCaptor<AgentDtos.AgentEventRequest> captor =
                 ArgumentCaptor.forClass(AgentDtos.AgentEventRequest.class);
-        verify(inboxService).accept(captor.capture());
+        verify(inboxService).accept(captor.capture(), any());
         AgentDtos.AgentEventRequest event = captor.getValue();
         assertThat(event.eventId()).isEqualTo("hook_42");
         assertThat(event.chatId()).isEqualTo("wxid_friend");
@@ -86,7 +86,7 @@ class HookCallbackServiceTest {
         assertThat(result.status()).isEqualTo("ACCEPTED");
         ArgumentCaptor<AgentDtos.AgentEventRequest> captor =
                 ArgumentCaptor.forClass(AgentDtos.AgentEventRequest.class);
-        verify(inboxService).accept(captor.capture());
+        verify(inboxService).accept(captor.capture(), any());
         assertThat(captor.getValue().chatId()).isEqualTo("123@chatroom");
         assertThat(captor.getValue().chatType()).isEqualTo(ChatType.GROUP);
         assertThat(captor.getValue().senderId()).isEqualTo("wxid_member");
@@ -150,7 +150,7 @@ class HookCallbackServiceTest {
         assertThat(service.handle(Map.of(
                 "event_type", 1001, "msgid", 48L, "type", 47, "wxid", "w", "content", "")).status())
                 .isEqualTo("ACCEPTED");
-        verify(inboxService).accept(captor.capture());
+        verify(inboxService).accept(captor.capture(), any());
         assertThat(captor.getValue().mediaKind()).isEqualTo("STICKER");
         assertThat(captor.getValue().content()).isEqualTo("[表情]");
         assertThat(captor.getValue().rawType()).isEqualTo(47);
@@ -170,7 +170,7 @@ class HookCallbackServiceTest {
                 "content", "hi");
 
         assertThat(service.handle(payload).status()).isEqualTo("ACCEPTED");
-        verify(inboxService).accept(any());
+        verify(inboxService).accept(any(), any());
     }
 
     @Test

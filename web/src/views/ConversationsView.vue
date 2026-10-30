@@ -280,6 +280,10 @@ onMounted(async () => {
                 <time>{{ messageTime(message.createdAt) }}</time>
               </div>
               <div class="bubble" :class="{ inbound: message.direction === 'INBOUND', failed: message.status === 'FAILED' }">
+                <div v-if="message.quoteText" class="quote-block">
+                  <span class="quote-author">{{ message.quoteAuthor || '引用' }}</span>
+                  <span class="quote-text">{{ message.quoteText }}</span>
+                </div>
                 <span v-if="message.mediaKind" class="media-chip">
                   <el-icon :size="13"><component :is="mediaIcon(message.mediaKind)" /></el-icon>
                   <span class="media-label">{{ mediaLabel(message.mediaKind) }}</span>
@@ -403,6 +407,32 @@ onMounted(async () => {
 .media-size {
   color: var(--muted-soft);
   font-size: 10px;
+}
+
+.quote-block {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+  padding: 4px 8px;
+  border-left: 2px solid var(--line-strong, rgba(0, 0, 0, 0.18));
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.035);
+  color: var(--ink-soft);
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+}
+
+.quote-author {
+  flex: 0 0 auto;
+  font-weight: 550;
+}
+
+.quote-text {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  word-break: break-word;
 }
 :deep(.el-table__row) { cursor: pointer; }
 .pagination { display: flex; justify-content: flex-end; padding: 8px 12px; border-top: 1px solid var(--line-soft); }

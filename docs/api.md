@@ -211,20 +211,65 @@ Hook 推来的非文本消息（`type` 不是 `1`）不再丢弃，而是归类�
 | 10000 / 10002 | `SYSTEM` | `[系统消息] …` |
 | 其它 | `OTHER` | `[消息 type=48]` |
 
-`message_log` 同时记录 `media_kind`、`media_name`、`media_size`、`media_url`、`raw_type`，会话记录里以标签形式展示。
+`message_log` 同时记录 `media_kind`、`media_name`、`media_size`、`media_url`、`media_md5`、`media_aeskey`、`raw_type`，会话记录里以标签形式展示。
 
 回复策略在管理端「运行策略 → 媒体消息」配置，或 `PUT /api/admin/settings/media`：
 
 ```json
-{ "enabled": true, "replyMode": "ack", "ackText": "收到，我看下～" }
+{ "enabled": true, "replyMode": "llm", "ackText": "收到，我看下～" }
 ```
 
 - `enabled=false`：媒体消息直接丢弃，不写记录；
-- `replyMode=ignore`（默认）：只记录，不回复；
+- `replyMode=ignore`：只记录，不回复；
 - `replyMode=ack`：回一句固定话术，同样经过敏感词过滤、伪装层与 outbox；
-- `replyMode=llm`：把占位文本交给模型自然回应。
+- `replyMode=llm`（默认）：把消息交给模型自然回应；图片会连图一起发（见下节）。
 
-注意：模型是纯文本的，**看不到图片内容、听不到语音、读不了文件**，`llm` 模式下模型只会基于占位文本回应（例如「这张图我这边看不清，能描述一下吗？」）。群聊里媒体消息没有文字、无法命中唤醒词，因此只记录不回复。
+群聊里媒体消息没有文字、无法命中唤醒词，因此只记录不回复。
+
+### 引用消息
+
+微信「引用某条消息再回复」是 `type=49` 的 appmsg（子类型 57）：外层 `<title>` 是用户本次说的话，`<refermsg>` 里装着被引用那条消息的发送者和内容。这类消息按文本处理，且**识别优先级高于媒体识别**（否则 `type=49` 会被误判成链接）：
+
+- `content` = 用户本次说的话，照常参与唤醒词匹配、上下文与回复；
+- `quote_author` / `quote_text` = 被引用消息的发送者与被引用的内容。
+
+被引用的不一定是文字，可能是图片、表情、文件、语音、链接、视频。这里按 `<refermsg>` 自己的 `type` 渲染成占位文本，不会把 XML 塞进提示词：
+
+| 被引用的是 | `quote_text` |
+| --- | --- |
+| 文本 | 原文 |
+| 图片 | `[图片]` |
+| 语音 | `[语音 4″]`（能解析出 `voicelength` 时带时长） |
+| 表情 | `[表情]` |
+| 文件 | `[文件] 报价单.pdf` |
+| 链接 | `[链接] 标题` |
+
+送进模型时，当前这条消息会拼成：
+
+```
+[引用 张三：明天上午十点开会]
+可以，我十点到
+```
+
+### 图片识别
+
+`type=3` 的图片会真正交给模型看（语音、视频、文件仍只有占位文本）。链路：
+
+1. 从报文里取 `md5`、`aeskey`，按 md5 在 `%USERPROFILE%\Documents\xwechat_files\<wxid>\msg\attach\<会话 hash>\<yyyy-MM>\Img\<md5>.dat` 定位本地加密图；
+2. 先请求 Hook 的 `/Decode_Pic` 交给微信自己的解密例程；没产出文件时，用 `aeskey` 在本地做 AES-128-ECB 解密（偏移扫描 + 图片魔数校验，兼容 V1 未加密文件）；
+3. 长边缩放到 `LLM_VISION_MAX_EDGE` 内并统一转 JPEG，按 md5+aeskey 缓存到 `data/media`；
+4. 以 `data:image/jpeg;base64,...` 作为 OpenAI 兼容的多段 content（`{type:text}` + `{type:image_url}`）随请求发出。
+
+任何一步失败都退化成 `[图片]` 占位文本继续回复，不会中断链路；上游若明确拒绝带图请求（400/413/422），客户端会自动去掉图片、用纯文本重试一次。
+
+| 环境变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `LLM_VISION_ENABLED` | `true` | 关掉后图片只保留占位文本，不解码也不上传 |
+| `LLM_VISION_MAX_EDGE` | `1024` | 长边像素上限，超过等比缩放 |
+| `LLM_VISION_MAX_BYTES` | `1500000` | 单张图编码后字节上限 |
+| `LLM_VISION_CACHE_DIR` | `data/media` | 解码后的 JPEG 缓存目录 |
+| `LLM_VISION_DECODE_WAIT_MS` | `1500` | 等 `/Decode_Pic` 落盘的最长时间 |
+| `WECHAT_IMAGE_ROOT` | 空 | 微信数据目录；留空自动取 `%USERPROFILE%\Documents\xwechat_files` |
 
 ### 用量统计
 

@@ -41,6 +41,12 @@ public class InboxService {
 
     @Transactional
     public AgentDtos.EventAccepted accept(AgentDtos.AgentEventRequest event) {
+        return accept(event, HookExtras.EMPTY);
+    }
+
+    @Transactional
+    public AgentDtos.EventAccepted accept(AgentDtos.AgentEventRequest event, HookExtras extras) {
+        HookExtras hook = extras == null ? HookExtras.EMPTY : extras;
         String type = event.type() == null || event.type().isBlank() ? "message" : event.type();
         if (!"message".equalsIgnoreCase(type)) {
             return new AgentDtos.EventAccepted("IGNORED", "暂不处理该事件类型", null);
@@ -119,7 +125,14 @@ public class InboxService {
             inbound.setMediaName(event.mediaName());
             inbound.setMediaSize(event.mediaSize());
             inbound.setMediaUrl(event.mediaUrl());
-            inbound.setRawType(event.rawType());
+            inbound.setMediaMd5(hook.mediaMd5());
+            inbound.setMediaAeskey(hook.mediaAeskey());
+        }
+        // 引用消息本质是文本，rawType 仍然记下来便于排查（49 = appmsg）
+        inbound.setRawType(event.rawType());
+        if (hook.hasQuote()) {
+            inbound.setQuoteAuthor(hook.quoteAuthor());
+            inbound.setQuoteText(hook.quoteText());
         }
         inbound = messageRepository.save(inbound);
 

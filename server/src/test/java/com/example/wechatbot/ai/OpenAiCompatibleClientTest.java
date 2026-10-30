@@ -1,6 +1,7 @@
 package com.example.wechatbot.ai;
 
 import com.example.wechatbot.domain.ModelProvider;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
@@ -9,6 +10,7 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -94,6 +96,94 @@ class OpenAiCompatibleClientTest {
         } finally {
             server.stop(0);
         }
+    }
+
+    @Test
+    void sendsImageAsMultimodalContent() throws IOException {
+        List<String> bodies = new CopyOnWriteArrayList<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/chat/completions", exchange -> {
+            bodies.add(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            respond(exchange, 200, "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"看到了，是只猫\"}}]}");
+        });
+        server.start();
+        try {
+            ModelProvider provider = provider(server.getAddress().getPort());
+            LlmReply reply = new OpenAiCompatibleClient(new ObjectMapper()).complete(
+                    provider, "sk-test",
+                    List.of(ChatMessage.userWithImage("这是什么", "data:image/jpeg;base64,AAAA")), 0.7, 100);
+
+            assertThat(reply.content()).isEqualTo("看到了，是只猫");
+            JsonNode content = new ObjectMapper().readTree(bodies.get(0)).get("messages").get(0).get("content");
+            assertThat(content.isArray()).isTrue();
+            assertThat(content.get(0).get("type").asText()).isEqualTo("text");
+            assertThat(content.get(0).get("text").asText()).isEqualTo("这是什么");
+            assertThat(content.get(1).get("type").asText()).isEqualTo("image_url");
+            assertThat(content.get(1).get("image_url").get("url").asText())
+                    .isEqualTo("data:image/jpeg;base64,AAAA");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void keepsContentAsPlainStringWithoutImage() throws IOException {
+        List<String> bodies = new CopyOnWriteArrayList<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/chat/completions", exchange -> {
+            bodies.add(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            respond(exchange, 200, "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"好\"}}]}");
+        });
+        server.start();
+        try {
+            ModelProvider provider = provider(server.getAddress().getPort());
+            new OpenAiCompatibleClient(new ObjectMapper())
+                    .complete(provider, "sk-test", List.of(ChatMessage.user("hi")), 0.7, 100);
+
+            JsonNode content = new ObjectMapper().readTree(bodies.get(0)).get("messages").get(0).get("content");
+            assertThat(content.isTextual()).isTrue();
+            assertThat(content.asText()).isEqualTo("hi");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void retriesWithoutImageWhenModelRejectsIt() throws IOException {
+        List<String> bodies = new CopyOnWriteArrayList<>();
+        AtomicInteger calls = new AtomicInteger();
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/chat/completions", exchange -> {
+            bodies.add(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            if (calls.incrementAndGet() == 1) {
+                respond(exchange, 400, "{\"error\":{\"message\":\"image_url is not supported\"}}");
+            } else {
+                respond(exchange, 200, "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"纯文本回答\"}}]}");
+            }
+        });
+        server.start();
+        try {
+            ModelProvider provider = provider(server.getAddress().getPort());
+            LlmReply reply = new OpenAiCompatibleClient(new ObjectMapper()).complete(
+                    provider, "sk-test",
+                    List.of(ChatMessage.userWithImage("看图", "data:image/jpeg;base64,AAAA")), 0.7, 100);
+
+            assertThat(reply.content()).isEqualTo("纯文本回答");
+            assertThat(calls.get()).isEqualTo(2);
+            JsonNode retried = new ObjectMapper().readTree(bodies.get(1)).get("messages").get(0).get("content");
+            assertThat(retried.isTextual()).isTrue();
+            assertThat(retried.asText()).isEqualTo("看图");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    private void respond(com.sun.net.httpserver.HttpExchange exchange, int status, String body) throws IOException {
+        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().add("Content-Type", "application/json");
+        exchange.sendResponseHeaders(status, bytes.length);
+        exchange.getResponseBody().write(bytes);
+        exchange.close();
     }
 
     private ModelProvider provider(int port) {

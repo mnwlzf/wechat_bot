@@ -131,9 +131,9 @@ public class RuntimeSettingsService {
         return bool(KEY_MEDIA_ENABLED, true);
     }
 
-    /** 媒体消息回复策略：ignore 只记录；ack 固定话术；llm 把占位文本交给模型。 */
+    /** 媒体消息回复策略：ignore 只记录；ack 固定话术；llm 把占位文本（图片则连图）交给模型。 */
     public String mediaReplyMode() {
-        String raw = value(KEY_MEDIA_REPLY_MODE, "ignore");
+        String raw = value(KEY_MEDIA_REPLY_MODE, "llm");
         String mode = raw == null ? "ignore" : raw.trim().toLowerCase(java.util.Locale.ROOT);
         return switch (mode) {
             case "ack", "llm" -> mode;

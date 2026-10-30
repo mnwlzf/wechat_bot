@@ -157,6 +157,23 @@ public class WeChatHookClient {
         }
     }
 
+    /**
+     * 调用 Hook 的 {@code /Decode_Pic} 把本地加密图片（{@code .dat}）解成普通图片文件。
+     *
+     * <p>该接口固定返回 {@code ret=0}，真正结果只能看目标文件有没有生成，因此调用方必须自己校验。</p>
+     */
+    public void decodePicture(String srcPath, String dstPath) {
+        if (srcPath == null || srcPath.isBlank() || dstPath == null || dstPath.isBlank()) {
+            throw new WeChatHookException("拒绝解码图片：路径为空");
+        }
+        Map<String, Object> response = postMap("/Decode_Pic", Map.of("src_path", srcPath, "dst_path", dstPath));
+        int ret = intValue(response.get("ret"), -1);
+        if (ret != 0) {
+            throw new WeChatHookException("Hook 解码图片失败: "
+                    + firstNonBlank(stringValue(response.get("retmsg")), response.toString()));
+        }
+    }
+
     public Protocol protocol() {
         return protocol;
     }

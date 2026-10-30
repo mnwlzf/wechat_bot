@@ -12,6 +12,7 @@ import com.example.wechatbot.repository.ConversationRepository;
 import com.example.wechatbot.repository.MessageLogRepository;
 import com.example.wechatbot.repository.OutboxMessageRepository;
 import com.example.wechatbot.repository.PromptTemplateRepository;
+import com.example.wechatbot.wechat.WeChatImageResolver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
@@ -42,6 +43,7 @@ public class ChatOrchestrator {
     private final AutoReplyService autoReply;
     private final ContentFilterService contentFilter;
     private final PromptTemplateRepository promptTemplateRepository;
+    private final WeChatImageResolver imageResolver;
 
     public ChatOrchestrator(BotConfigRepository botRepository,
                             ConversationRepository conversationRepository,
@@ -53,7 +55,8 @@ public class ChatOrchestrator {
                             DisguiseProperties disguiseProperties,
                             AutoReplyService autoReply,
                             ContentFilterService contentFilter,
-                            PromptTemplateRepository promptTemplateRepository) {
+                            PromptTemplateRepository promptTemplateRepository,
+                            WeChatImageResolver imageResolver) {
         this.botRepository = botRepository;
         this.conversationRepository = conversationRepository;
         this.messageRepository = messageRepository;
@@ -65,6 +68,7 @@ public class ChatOrchestrator {
         this.autoReply = autoReply;
         this.contentFilter = contentFilter;
         this.promptTemplateRepository = promptTemplateRepository;
+        this.imageResolver = imageResolver;
     }
 
     @Async("chatExecutor")
@@ -278,11 +282,18 @@ public class ChatOrchestrator {
             }
             currentIncluded = currentIncluded || item.getId().equals(currentInbound.getId());
             if (item.getDirection() == MessageDirection.INBOUND) {
+                boolean current = item.getId().equals(currentInbound.getId());
                 String content = item.getContent();
                 if (conversation.getChatType() == ChatType.GROUP && item.getSenderName() != null) {
                     content = "[" + item.getSenderName() + "] " + content;
                 }
-                messages.add(ChatMessage.user(content));
+                if (current) {
+                    content = withQuote(item, content);
+                }
+                String image = current ? imageDataUrl(item) : null;
+                messages.add(image == null
+                        ? ChatMessage.user(content)
+                        : ChatMessage.userWithImage(content, image));
             } else if (item.getStatus() == MessageStatus.SUCCESS) {
                 messages.add(ChatMessage.assistant(item.getContent()));
             }
@@ -293,7 +304,8 @@ public class ChatOrchestrator {
         }
 
         String style = disguise.promptSuffix();
-        String searchContext = searchAugmenter.buildContext(bot, currentInbound.getContent());
+        String searchQuery = currentInbound.getMediaKind() == null ? currentInbound.getContent() : "";
+        String searchContext = searchAugmenter.buildContext(bot, searchQuery);
         String systemPrompt = resolveSystemPrompt(bot, conversation);
 
         List<ChatMessage> withStyle = new ArrayList<>(messages.size() + 3);
@@ -306,6 +318,25 @@ public class ChatOrchestrator {
         }
         withStyle.addAll(messages);
         return List.copyOf(withStyle);
+    }
+
+    /** 把引用消息拼成「[引用 张三：原文] + 本次说的话」，让模型知道在回应哪一句。 */
+    private String withQuote(MessageLog item, String content) {
+        String quote = item.getQuoteText();
+        if (quote == null || quote.isBlank()) {
+            return content;
+        }
+        String author = item.getQuoteAuthor();
+        String label = author == null || author.isBlank() ? "引用" : "引用 " + author;
+        return "[" + label + "：" + abbreviate(quote, 200) + "]\n" + content;
+    }
+
+    /** 当前消息是图片时取 data URL；取不到返回 null，模型只看到 [图片] 占位文本。 */
+    private String imageDataUrl(MessageLog item) {
+        if (item.getMediaKind() != MediaKind.IMAGE || item.getMediaMd5() == null) {
+            return null;
+        }
+        return imageResolver.toDataUrl(item.getMediaMd5(), item.getMediaAeskey()).orElse(null);
     }
 
     /** 会话绑定了提示词模板时优先使用模板，否则回退到机器人默认提示词。 */

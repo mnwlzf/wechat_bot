@@ -81,6 +81,14 @@ app:
   llm:
     max-context-messages: 30
     fallback-enabled: ${LLM_FALLBACK_ENABLED:true}   # 运行时可被管理端“运行策略”覆盖
+    # 图片识别（视觉输入）：本地解码成 JPEG 后随消息一起发给模型
+    # 关掉后图片消息只保留 [图片] 占位文本，不解码也不上传
+    vision:
+      enabled: ${LLM_VISION_ENABLED:true}
+      max-edge: ${LLM_VISION_MAX_EDGE:1024}          # 长边像素上限，超过等比缩放
+      max-bytes: ${LLM_VISION_MAX_BYTES:1500000}     # 单张图编码后字节上限
+      cache-dir: ${LLM_VISION_CACHE_DIR:data/media}  # 解码后的 JPEG 缓存目录
+      decode-wait-ms: ${LLM_VISION_DECODE_WAIT_MS:1500}  # 等 Hook 解码落盘的时长
     # DeepSeek 官方联网搜索（POST {base-url}/v1/tools/search）
     search:
       enabled: ${LLM_SEARCH_ENABLED:true}
@@ -175,6 +183,8 @@ app:
       callback-require-loopback: ${WECHAT_CALLBACK_REQUIRE_LOOPBACK:true}
       callback-groups-enabled: ${WECHAT_CALLBACK_GROUPS_ENABLED:false}
       guard-status-file: ${WECHAT_GUARD_STATUS_FILE:logs/guard-status.json}
+      # 微信数据目录；留空自动取 %USERPROFILE%\Documents\xwechat_files
+      image-root: ${WECHAT_IMAGE_ROOT:}
       skip-history: ${WECHAT_HOOK_SKIP_HISTORY:true}
       poll-interval-ms: ${WECHAT_HOOK_POLL_INTERVAL_MS:2000}
       initial-delay-ms: ${WECHAT_HOOK_INITIAL_DELAY_MS:5000}
