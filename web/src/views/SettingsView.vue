@@ -237,19 +237,23 @@ async function runSearch(notify = false) {
 }
 
 function togglePick(chatId: string) {
+  // 整行都可以点：公众号 / 已在白名单的行点不动，避免误选
+  const item = searchResults.value.find((row) => row.chatId === chatId)
+  if (!item || item.blocked || chatForm.allowedChats.includes(chatId)) return
   picked.value = picked.value.includes(chatId)
-    ? picked.value.filter((item) => item !== chatId)
+    ? picked.value.filter((entry) => entry !== chatId)
     : [...picked.value, chatId]
 }
 
-function addPicked() {
+async function addPicked() {
   const existing = new Set(chatForm.allowedChats)
   const added = picked.value.filter((chatId) => !existing.has(chatId))
   chatForm.allowedChats = [...chatForm.allowedChats, ...added]
   picked.value = []
-  if (added.length) {
-    ElMessage.success(`已加入 ${added.length} 个会话，点「保存并生效」后开始按新白名单接收`)
-  }
+  if (!added.length) return
+  const saved = await persistChat(`已加入白名单并立即生效（${added.length} 个会话）`)
+  if (!saved) return
+  await loadNames()
 }
 
 function addManual() {
@@ -281,7 +285,9 @@ function addManual() {
   chatForm.allowedChats = [...chatForm.allowedChats, ...added]
   manualInput.value = ''
   if (added.length) {
-    ElMessage.success(`已加入 ${added.length} 个会话`)
+    void persistChat(`已加入白名单并立即生效（${added.length} 个会话）`).then((saved) => {
+      if (saved) void loadNames()
+    })
   }
   if (rejected.length) {
     ElMessage.warning(`已跳过 ${rejected.join('、')}：公众号 / 机器人 / 系统会话不会回复，或 ID 类型与当前搜索不匹配`)
@@ -326,7 +332,8 @@ async function editAlias(item: ChatCandidate) {
   }
 }
 
-async function saveChat() {
+/** 把白名单 + 两个开关写回后端；加会话、删会话都会自动调它，不用再单独点保存。 */
+async function persistChat(successMessage = '会话策略已生效，无需重启') {
   savingChat.value = true
   try {
     snapshot.value = await adminApi.updateWeChatPolicy({
@@ -334,12 +341,18 @@ async function saveChat() {
       acceptAll: chatForm.acceptAll,
       allowedChats: chatForm.allowedChats,
     })
-    ElMessage.success('会话策略已生效，无需重启')
+    ElMessage.success(successMessage)
+    return true
   } catch (error) {
     ElMessage.error(getErrorMessage(error))
+    return false
   } finally {
     savingChat.value = false
   }
+}
+
+async function saveChat() {
+  await persistChat()
 }
 
 async function saveLlm() {
@@ -423,6 +436,7 @@ async function saveMedia() {
 function removeChat(chatId: string) {
   chatForm.allowedChats = chatForm.allowedChats.filter((item) => item !== chatId)
   picked.value = picked.value.filter((item) => item !== chatId)
+  void persistChat('已移出白名单并立即生效')
 }
 
 function sourceLabel(source?: string) {
@@ -546,17 +560,26 @@ onMounted(async () => {
 
         <div v-if="searchError" class="inline-error">{{ searchError }}</div>
 
+        <div v-if="searchResults.length" class="hint">
+          勾选结果（也可以直接点整行）后点「添加所选」会立刻写入数据库并生效，不需要再点保存。
+        </div>
+
         <ul v-if="searchResults.length" class="candidate-list">
           <li
             v-for="item in searchResults"
             :key="item.chatId"
             class="candidate-item"
-            :class="{ 'is-blocked': item.blocked, 'is-added': chatForm.allowedChats.includes(item.chatId) }"
+            :class="{
+              'is-blocked': item.blocked,
+              'is-added': chatForm.allowedChats.includes(item.chatId),
+              'is-picked': picked.includes(item.chatId),
+            }"
+            @click="togglePick(item.chatId)"
           >
             <el-checkbox
+              class="candidate-check"
               :model-value="picked.includes(item.chatId)"
               :disabled="item.blocked || chatForm.allowedChats.includes(item.chatId)"
-              @change="togglePick(item.chatId)"
             />
             <span class="candidate-copy">
               <strong>{{ item.name }}</strong>
@@ -568,7 +591,7 @@ onMounted(async () => {
             </el-tag>
             <span v-if="item.blocked" class="candidate-note">{{ item.blockedReason }}</span>
             <span v-else-if="chatForm.allowedChats.includes(item.chatId)" class="candidate-note">已在白名单</span>
-            <el-button text size="small" :disabled="item.blocked" @click="editAlias(item)">
+            <el-button text size="small" :disabled="item.blocked" @click.stop="editAlias(item)">
               {{ item.name === item.chatId ? '设备注' : '改备注' }}
             </el-button>
           </li>
@@ -1094,6 +1117,17 @@ onMounted(async () => {
   border: 1px solid var(--line-soft);
   border-radius: var(--radius-sm);
   background: #fff;
+  cursor: pointer;
+}
+
+/* 整行可点选，勾选框只做视觉提示，避免“点了没反应” */
+.candidate-check {
+  pointer-events: none;
+}
+
+.candidate-item.is-picked {
+  border-color: var(--brand);
+  background: #f2f7ff;
 }
 
 .candidate-item.is-added {

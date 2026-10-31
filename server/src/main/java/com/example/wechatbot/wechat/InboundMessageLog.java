@@ -1,5 +1,6 @@
 package com.example.wechatbot.wechat;
 
+import com.example.wechatbot.service.MediaMessageParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -38,15 +39,53 @@ public final class InboundMessageLog {
         String chatId = result != null && result.chatId() != null && !result.chatId().isBlank()
                 ? result.chatId()
                 : (roomId.isBlank() ? wxid : roomId);
-        String content = text(payload.get("content"));
-        if (content.startsWith("<")) {
-            // 图片 / 语音 / 引用等非纯文本，报文是 XML，没必要把整段塞进日志
-            content = "[非文本消息 type=" + text(payload.get("type")) + "]";
-        }
         record(chatId, text(payload.get("sender")),
                 result == null ? "" : result.status(),
                 result == null ? "" : result.reason(),
-                content);
+                describe(payload.get("type"), text(payload.get("content"))));
+    }
+
+    /**
+     * 非纯文本报文的报文是 XML：引用回复要取出“这次说的话”，图片 / 语音等用占位符，
+     * 这样日志里能看到人话，而不是一坨 XML 或一句「非文本消息」。
+     */
+    static String describe(Object typeValue, String raw) {
+        String content = raw == null ? "" : raw.trim();
+        if (!content.startsWith("<")) {
+            return content;
+        }
+        int type = intValue(typeValue);
+        try {
+            MediaMessageParser.Quoted quote = MediaMessageParser.parseQuote(type, content);
+            if (quote != null && quote.text() != null && !quote.text().isBlank()) {
+                String quoted = quote.quoteText() == null ? "" : quote.quoteText().trim();
+                return quoted.isEmpty()
+                        ? quote.text().trim()
+                        : quote.text().trim() + "（引用：" + abbreviate(quoted, 40) + "）";
+            }
+            MediaMessageParser.Parsed media = MediaMessageParser.parse(type, content);
+            if (media != null && media.placeholder() != null && !media.placeholder().isBlank()) {
+                return media.placeholder();
+            }
+        } catch (RuntimeException ex) {
+            // 解析失败就退回占位符，日志永远不能把消息处理搞挂
+        }
+        return "[非文本消息 type=" + (type == 0 ? "-" : type) + "]";
+    }
+
+    private static int intValue(Object value) {
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        try {
+            return Integer.parseInt(text(value));
+        } catch (NumberFormatException ex) {
+            return 0;
+        }
+    }
+
+    private static String abbreviate(String value, int max) {
+        return value.length() <= max ? value : value.substring(0, max) + "…";
     }
 
     /** 轮询路径：已经转换好的事件 + 处理结果。 */

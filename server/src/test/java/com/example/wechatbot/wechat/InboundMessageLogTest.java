@@ -52,12 +52,30 @@ class InboundMessageLogTest {
         payload.put("wxid", "55555@chatroom");
         payload.put("sender", "wxid_rsje67b7hozm22");
         payload.put("type", 3);
-        payload.put("content", "<msg><img aeskey=\"abc\"/></msg>");
+        payload.put("content", "<msg><img aeskey=\"abc\" md5=\"def\"/></msg>");
 
         String line = capture(() -> InboundMessageLog.record(payload,
                 new HookCallbackService.Result("IGNORED", "群聊不在白名单", "55555@chatroom", null)));
 
-        assertThat(line).isEqualTo("群聊 | 55555@chatroom | 发送者 wxid_rsje67b7hozm22 | 忽略：群聊不在白名单 | [非文本消息 type=3]");
+        assertThat(line).isEqualTo("群聊 | 55555@chatroom | 发送者 wxid_rsje67b7hozm22 | 忽略：群聊不在白名单 | [图片]");
+    }
+
+    @Test
+    void quotedMessageLogsTheTypedTextAndTheQuotedOne() {
+        String xml = "<msg><appmsg><title>可以，我十点到</title><type>57</type>"
+                + "<refermsg><displayname>张三</displayname><chatusr>wxid_zhangsan</chatusr>"
+                + "<type>1</type><content>明天上午十点开会</content></refermsg></appmsg></msg>";
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("roomid", "49878296302@chatroom");
+        payload.put("sender", "wxid_rsje67b7hozm22");
+        payload.put("type", 49);
+        payload.put("content", xml);
+
+        String line = capture(() -> InboundMessageLog.record(payload,
+                new HookCallbackService.Result("IGNORED", "未命中群聊唤醒词", "49878296302@chatroom", null)));
+
+        assertThat(line).isEqualTo("群聊 | 49878296302@chatroom | 发送者 wxid_rsje67b7hozm22 | 忽略：未命中群聊唤醒词"
+                + " | 可以，我十点到（引用：明天上午十点开会）");
     }
 
     @Test
