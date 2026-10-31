@@ -155,7 +155,9 @@ public class WeChatHookInboxPoller {
             long rowAnchor = longValue(getIgnoreCase(row, anchor), cursor.getCursorValue());
             Converted converted = convert(chatId, tableRef.database(), row, senderMap, account);
             if (converted != null) {
-                inboxService.accept(converted.event(), converted.extras());
+                AgentDtos.EventAccepted outcome = inboxService.accept(converted.event(), converted.extras());
+                InboundMessageLog.record(chatId, converted.event().senderId(),
+                        outcome.status(), outcome.reason(), converted.event().content());
                 accepted++;
             }
             cursor.setCursorValue(Math.max(cursor.getCursorValue(), rowAnchor));

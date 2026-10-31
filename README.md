@@ -231,6 +231,23 @@ Invoke-RestMethod http://localhost:8080/api/admin/wechat/contacts -Headers $head
 所以「按昵称搜好友」要么接一个能解密的外部 reader（`WECHAT_READER_URL`），要么点「设备注」自己补名字——
 备注存在 `chat_alias` 表里，不依赖微信数据库。
 
+**看日志加白名单（推荐）**：每检测到一条消息，`logs/inbound.log` 都会写一行——被忽略的也写，
+所以哪怕搜不到昵称，照着日志里的群号 / wxid 加白名单就行：
+
+```text
+2026-10-31 14:50:31.521 | 群聊 | 55555@chatroom | 发送者 wxid_rsje67b7hozm22 | 忽略：群聊不在白名单 | 周末爬山有人来吗？
+2026-10-31 14:50:31.660 | 私聊 | wxid_rsje67b7hozm22 | 发送者 wxid_rsje67b7hozm22 | 忽略：未配置私聊白名单且未开启全量接收 | 晚上吃什么
+2026-10-31 14:50:31.677 | 公众号 | gh_62c4ce184e73 | 发送者 gh_62c4ce184e73 | 忽略：公众号 / 机器人 / 企业微信会话不自动回复 | [非文本消息 type=3]
+```
+
+字段固定：`时间 | 会话类型 | 会话 ID | 发送者 | 处理结果 | 内容`。第 3 列直接复制去加白名单；
+第 5 列说明这条为什么回 / 没回（`接收` / `忽略` / `重复` / `限流` / `人工接管`）。
+文件按天滚动、保留 14 天，实时盯着看：
+
+```powershell
+Get-Content .\logs\inbound.log -Tail 20 -Wait -Encoding UTF8
+```
+
 私聊和群聊的准入规则（参考 WeChatAgent 的白名单逻辑）。**只保留两类会话：群聊和真人私聊**，
 其余一律忽略：
 
@@ -355,6 +372,7 @@ recv_url=http://127.0.0.1:8080/api/wechat/hook/callback
 | `WECHAT_CALLBACK_GROUPS_ENABLED` | `false` | 是否处理群消息回调 |
 | `WECHAT_HOOK_SKIP_HISTORY` | `true` | 首次启动是否跳过历史消息 |
 | `WECHAT_READER_URL` | 空 | 可选的外部联系人读取服务（WeChatAgent 的 WeFlow reader 同款 `/api/v1/contacts`），用于白名单按昵称搜索 |
+| `INBOUND_LOG_FILE` | `logs/inbound.log` | 消息检测日志路径（每检测到一条消息写一行，含群号 / wxid） |
 | `WECHAT_HOOK_POLL_INTERVAL_MS` | `2000` | 收件轮询间隔 |
 | `WECHAT_HOOK_OUTBOX_INTERVAL_MS` | `1000` | 发件调度间隔 |
 | `WECHAT_HOOK_BATCH_SIZE` | `100` | 单次读取/发送批量 |

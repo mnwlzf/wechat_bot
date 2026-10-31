@@ -42,7 +42,17 @@ public class HookCallbackService {
         this.inboxService = inboxService;
     }
 
+    /**
+     * 处理一条回调，并且无论走哪个分支都写一行「消息 + 会话 ID」到 {@code logs/inbound.log}：
+     * 微信通讯录读不出名字时，照着日志里的群号 / wxid 加白名单就够了。
+     */
     public Result handle(Map<String, Object> payload) {
+        Result result = handleInternal(payload);
+        InboundMessageLog.record(payload, result);
+        return result;
+    }
+
+    private Result handleInternal(Map<String, Object> payload) {
         if (payload == null || payload.isEmpty()) {
             return Result.ignored("空回调报文", null, null);
         }
