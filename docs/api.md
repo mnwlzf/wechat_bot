@@ -324,7 +324,7 @@ Hook 推来的非文本消息（`type` 不是 `1`）不再丢弃，而是归类�
 
 ### 图片识别
 
-`type=3` 的图片会真正交给模型看（语音、视频、文件仍只有占位文本）。链路：
+`type=3` 的图片会真正交给模型看（语音走下面的「语音转文字」，视频、文件仍只有占位文本）。链路：
 
 1. 从报文里取图片属性：`md5`、`aeskey`（原图）与 `cdnthumbmd5`、`cdnthumbaeskey`（缩略图），分别落库到 `media_md5`、`media_aeskey`、`media_thumb_md5`、`media_thumb_aeskey`；
 2. 按 `md5(会话 id)` 直接算出本地目录 `%USERPROFILE%\Documents\xwechat_files\<wxid>\msg\attach\<md5(会话)>\<yyyy-MM>\Img\`（跨月时也看上一个月份）；
@@ -345,6 +345,45 @@ Hook 推来的非文本消息（`type` 不是 `1`）不再丢弃，而是归类�
 | `LLM_VISION_KVCOMM_DIR` | 空 | 微信本机密钥目录；留空自动取 `%APPDATA%\Tencent\xwechat\net\kvcomm` |
 | `LLM_VISION_MATCH_WINDOW_SECONDS` | `180` | 文件名对不上时的时间窗（秒） |
 | `WECHAT_IMAGE_ROOT` | 空 | 微信数据目录；留空自动取 `%USERPROFILE%\Documents\xwechat_files` |
+
+### 语音转文字
+
+`type=34` 的语音会转成文字再交给模型（对标 `POST /v1/audio/transcriptions`）。链路：
+
+1. 报文里能取到 `md5` 就按文件名在 `msg/attach/**/Voice`、`msg/attach/**/Audio` 下找，对不上再按「消息时间前后 `ASR_VOICE_WINDOW_SECONDS` 秒内写盘的 `.dat` / `.silk`」兜底；
+2. `.dat` 用本机 kvcomm 派生的密钥解 V2 容器（和图片同一套逻辑），只接受解密后是 SILK / WAV 的内容，避免把别的附件当语音；
+3. SILK 交给外部解码命令转 WAV（Java 侧没有 SILK 解码器）——`ASR_SILK_DECODER` 支持两种协议：JSON 进 JSON 出（stdin `{"b64":...}` → stdout `{"b64":...}`，与 WeChatAgent 的 `scripts/decode-wechat-voice.mjs` 一致）和文件模式（命令里带 `{input}`/`{output}`，例如 `ffmpeg -y -i {input} {output}`）；
+4. 以 multipart（字段 `file` + `model`）上传到 `{ASR_BASE_URL}/audio/transcriptions`，取响应里的 `text`；
+5. 转写结果替换占位文本：模型看到 `[语音转写] 明天上午十点开会`，并附带一条「已经转成文字，别再说听不到」的系统提示。
+
+任何一步失败都退回原来的 `[语音 5″]` + 「只能看到时长」说明，不影响回复。
+
+| 环境变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `ASR_ENABLED` | `true` | 关掉后不调接口 |
+| `ASR_BASE_URL` | `https://api.siliconflow.cn/v1` | 兼容 OpenAI transcriptions 的服务地址 |
+| `ASR_API_KEY` | 空 | 服务密钥；留空视为未配置，语音只显示时长 |
+| `ASR_MODEL` | `XingChenAGI/XingChenASR-V3.2-Ultra` | 模型名 |
+| `ASR_TRANSCRIBE_VOICE` | `true` | 是否自动转写收到的语音 |
+| `ASR_SILK_DECODER` | 空 | SILK→WAV 解码命令；留空自动探测 `node` + WeChatAgent 的解码脚本 |
+| `ASR_TIMEOUT` | `90s` | 单次转写超时 |
+| `ASR_MAX_BYTES` | `52428800` | 上传大小上限（接口限制 50MB） |
+| `ASR_VOICE_WINDOW_SECONDS` | `180` | 没有 md5 时按时间窗匹配语音文件 |
+
+两个自测接口：
+
+```powershell
+$h = @{ 'X-Admin-Token' = $env:ADMIN_TOKEN }
+# 状态：密钥打码、模型、解码器是否就绪
+Invoke-RestMethod http://localhost:8080/api/admin/asr -Headers $h
+# 用本机文件跑一遍完整链路（支持 SILK / 加密 .dat）
+Invoke-RestMethod -Method Post http://localhost:8080/api/admin/asr/test -Headers $h -ContentType 'application/json' `
+  -Body '{"path":"D:/wechat_bot/logs/voice.silk"}'
+# 也可以直接上传音频
+curl.exe -s -X POST http://localhost:8080/api/admin/asr/test -H "X-Admin-Token: $env:ADMIN_TOKEN" -F "file=@D:/tmp/a.wav"
+```
+
+响应形如 `{"ok":true,"text":"今天天气不错，我们下午去公园吧。","model":"XingChenAGI/XingChenASR-V3.2-Ultra","latencyMs":2214,"bytes":169134,"silk":false}`；失败时 `{"ok":false,"error":"..."}`，错误一律是可读中文（密钥缺失、接口 4xx/5xx、解码器不可用等）。
 
 ### 用量统计
 

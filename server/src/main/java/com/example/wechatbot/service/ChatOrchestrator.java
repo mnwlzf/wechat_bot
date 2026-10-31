@@ -4,6 +4,7 @@ import com.example.wechatbot.ai.ChatMessage;
 import com.example.wechatbot.ai.LlmGateway;
 import com.example.wechatbot.ai.LlmReply;
 import com.example.wechatbot.ai.SearchAugmenter;
+import com.example.wechatbot.asr.VoiceTranscriber;
 import com.example.wechatbot.disguise.DisguiseProperties;
 import com.example.wechatbot.disguise.DisguiseService;
 import com.example.wechatbot.domain.*;
@@ -44,10 +45,15 @@ public class ChatOrchestrator {
             请把它当成你亲眼看到的内容照实理解并回答：被引用的原文是什么就说是什么，不要回答「看不到具体内容」。\
             只有原文本身是[图片]、[语音]、[文件]这类占位、而你又没有拿到对应附件时，才说明这一条看不到细节。""";
 
-    /** 语音没有转写能力：只能报时长，别猜内容。 */
+    /** 语音没能转写（没配 ASR / 没找到音频文件）：只能报时长，别猜内容。 */
     private static final String VOICE_HINT = """
             对方这次发的是一条语音消息，你只能看到它的时长，听不到内容，也没有转写能力。\
             不要编造语音里说了什么；需要内容就请对方转成文字或重发。""";
+
+    /** 语音已转写成文字：按文字正常回答，不要再说「听不到」。 */
+    private static final String VOICE_TRANSCRIBED_HINT = """
+            对方这次发的是语音，已经转成文字给你了（个别同音字可能不准，按上下文理解就行）。\
+            直接按转写出来的内容回答，不要说「我听不到语音」「我这边只有语音」这类话。""";
 
     /** 图片在本地没找到 / 解密失败：只剩一句 [图片]，此时也不能装作看见了。 */
     private static final String IMAGE_MISSING_HINT = """
@@ -66,6 +72,7 @@ public class ChatOrchestrator {
     private final ContentFilterService contentFilter;
     private final PromptTemplateRepository promptTemplateRepository;
     private final WeChatImageResolver imageResolver;
+    private final VoiceTranscriber voiceTranscriber;
 
     public ChatOrchestrator(BotConfigRepository botRepository,
                             ConversationRepository conversationRepository,
@@ -78,7 +85,8 @@ public class ChatOrchestrator {
                             AutoReplyService autoReply,
                             ContentFilterService contentFilter,
                             PromptTemplateRepository promptTemplateRepository,
-                            WeChatImageResolver imageResolver) {
+                            WeChatImageResolver imageResolver,
+                            VoiceTranscriber voiceTranscriber) {
         this.botRepository = botRepository;
         this.conversationRepository = conversationRepository;
         this.messageRepository = messageRepository;
@@ -91,6 +99,7 @@ public class ChatOrchestrator {
         this.contentFilter = contentFilter;
         this.promptTemplateRepository = promptTemplateRepository;
         this.imageResolver = imageResolver;
+        this.voiceTranscriber = voiceTranscriber;
     }
 
     @Async("chatExecutor")
@@ -299,6 +308,7 @@ public class ChatOrchestrator {
         List<ChatMessage> messages = new ArrayList<>();
         boolean currentIncluded = false;
         boolean currentImageAttached = false;
+        boolean currentVoiceTranscribed = false;
         for (MessageLog item : recent) {
             if (item.getContent() == null || item.getContent().isBlank()) {
                 continue;
@@ -306,9 +316,17 @@ public class ChatOrchestrator {
             currentIncluded = currentIncluded || item.getId().equals(currentInbound.getId());
             if (item.getDirection() == MessageDirection.INBOUND) {
                 boolean current = item.getId().equals(currentInbound.getId());
-                String content = item.getContent();
-                if (conversation.getChatType() == ChatType.GROUP && item.getSenderName() != null) {
-                    content = "[" + item.getSenderName() + "] " + content;
+                String prefix = conversation.getChatType() == ChatType.GROUP && item.getSenderName() != null
+                        ? "[" + item.getSenderName() + "] "
+                        : "";
+                String content = prefix + item.getContent();
+                // 语音在本地转成文字后，用转写结果替换「[语音 3″]」占位，模型就能读懂说了什么
+                if (current && item.getMediaKind() == MediaKind.VOICE) {
+                    String voiceText = voiceTranscript(item);
+                    if (!voiceText.isBlank()) {
+                        content = prefix + "[语音转写] " + voiceText;
+                        currentVoiceTranscribed = true;
+                    }
                 }
                 WeChatImageResolver.Attachment image = current
                         ? imageAttachment(conversation.getChatId(), item)
@@ -352,7 +370,7 @@ public class ChatOrchestrator {
         if (hasQuote(currentInbound)) {
             withStyle.add(ChatMessage.system(QUOTE_HINT));
         }
-        String mediaHint = mediaHint(currentInbound, currentImageAttached);
+        String mediaHint = mediaHint(currentInbound, currentImageAttached, currentVoiceTranscribed);
         if (mediaHint != null) {
             withStyle.add(ChatMessage.system(mediaHint));
         }
@@ -366,18 +384,27 @@ public class ChatOrchestrator {
     /**
      * 当前消息是「看得到但读不出内容」的类型时，明确告诉模型边界，别让它编。
      *
-     * <p>语音只能给时长（Hook 不提供转写），图片取不到本地文件时也只剩一句 {@code [图片]}。
-     * 这两种情况模型最容易硬猜，所以在系统提示里点名说清楚。</p>
+     * <p>语音转写成功时改成「已经转成文字给你了」；没配 ASR 或没找到音频文件时仍然只说时长。
+     * 图片取不到本地文件时也只剩一句 {@code [图片]}。这两种情况模型最容易硬猜，
+     * 所以在系统提示里点名说清楚。</p>
      */
-    private static String mediaHint(MessageLog item, boolean imageAttached) {
+    private static String mediaHint(MessageLog item, boolean imageAttached, boolean voiceTranscribed) {
         if (item == null || item.getMediaKind() == null) {
             return null;
         }
         return switch (item.getMediaKind()) {
-            case VOICE -> VOICE_HINT;
+            case VOICE -> voiceTranscribed ? VOICE_TRANSCRIBED_HINT : VOICE_HINT;
             case IMAGE -> imageAttached ? null : IMAGE_MISSING_HINT;
             default -> null;
         };
+    }
+
+    /** 语音消息 → 文字；转写不可用或失败时返回空串，行为退回「只能看到时长」。 */
+    private String voiceTranscript(MessageLog item) {
+        if (item.getMediaKind() != MediaKind.VOICE) {
+            return "";
+        }
+        return voiceTranscriber.transcribe(item.getMediaMd5(), item.getCreatedAt()).orElse("");
     }
 
     /**

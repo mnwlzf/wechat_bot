@@ -457,8 +457,10 @@ LLM_SEARCH_TIMEOUT_SECONDS=20
 - **类型覆盖**：文本、图片、语音、视频、表情、文件、链接、位置、名片、小程序、合并转发、视频号、转账、红包、通话、系统消息、引用回复都有对应渲染规则，完整表格见 [docs/messages.md](docs/messages.md)。
 - **引用消息**：`type=49` 且带 `<refermsg>` 时按文本处理，`content` 是本次说的话，`quote_author`/`quote_text` 记录被引用的发送者与内容；被引用的对象可能是文本、图片、语音、表情、文件或链接，统一渲染成可读文本（`[图片]`、`[语音 4″]`、`[文件] 报价单.pdf · 1.5 MB` …）。送给模型时当前消息会排成「【引用的消息｜来自 张三】原文」+「【我这次说的话】本次说的话」两段；被引用的是图片时，还会顺着它自己的 md5 与发送时间把那张图也发给模型看。
 - **图片识别**：`type=3` 的图片会真的交给模型看——按 `md5(会话 id)` 定位微信数据目录里的本地 `.dat`（文件名用的是报文里某个 md5，原图/缩略图两套都试，都对不上再按消息时间窗兜底），用**本机 kvcomm 派生的密钥**做 V2 解密（报文里的 `aeskey` 只用于 CDN 下载，解不了本地文件），所有能解出来的副本都试一遍、取像素最多的那份（含 `cache/**/Bubble/*_b.dat`，实测比缩略图大得多），缩放到长边 1024 内、转 JPEG 后以多段 content（`text` + `image_url`）发送。高清副本常是微信自有的 `wxgf`(HEVC) 容器，JDK 解不了，此时落到气泡副本或 `_t.dat` 缩略图；只有缩略图时会明确告诉模型「画面受限」。任一步失败都退化为 `[图片]` 占位文本，不影响回复；上游拒绝带图请求时自动改纯文本重试。
-- **语音不转写**：Hook 不提供语音转文字，语音只会渲染成 `[语音 5″]`，同时给模型注入一条「听不到内容，别编」的说明。
-- 相关环境变量：`LLM_VISION_ENABLED`、`LLM_VISION_MAX_EDGE`、`LLM_VISION_MAX_BYTES`、`LLM_VISION_CACHE_DIR`、`LLM_VISION_KVCOMM_DIR`、`LLM_VISION_MATCH_WINDOW_SECONDS`、`WECHAT_IMAGE_ROOT`，详见 [docs/api.md](docs/api.md#图片识别)。
+- **语音转文字**：`type=34` 的语音会在本地找回音频、转成文字再交给模型。链路是「报文里的 `md5`（有就按文件名找，没有就按消息时间窗兜底）→ `msg/attach/**/Voice` 下的 `.dat`/`.silk` → 用 kvcomm 派生的密钥解 V2 加密 → SILK 转 WAV → `POST {ASR_BASE_URL}/audio/transcriptions`」。转写成功后模型看到的是 `[语音转写] 明天上午十点开会`，并附带一句「已经转成文字，别再说听不到」；没配 ASR、没找到音频或接口失败时**自动退回** `[语音 5″]` + 「只能看到时长」的说明，不影响回复。
+  - 微信语音是 SILK 编码，而 ASR 接口只收 wav/mp3，所以中间要一个解码器：`ASR_SILK_DECODER`（JSON 进 JSON 出的 `node ...\decode-wechat-voice.mjs`，或带 `{input}`/`{output}` 占位的 `ffmpeg` 之类）。留空时自动探测 `node` + WeChatAgent 的解码脚本。
+  - 自测：`GET /api/admin/asr` 看状态与解码器，`POST /api/admin/asr/test`（JSON `{"path":"D:/.../voice.silk"}` 或直接 multipart 上传 `file`）能验证「密钥对不对、模型名对不对、SILK 解码通不通」。
+- 相关环境变量：`LLM_VISION_ENABLED`、`LLM_VISION_MAX_EDGE`、`LLM_VISION_MAX_BYTES`、`LLM_VISION_CACHE_DIR`、`LLM_VISION_KVCOMM_DIR`、`LLM_VISION_MATCH_WINDOW_SECONDS`、`WECHAT_IMAGE_ROOT`、`ASR_ENABLED`、`ASR_BASE_URL`、`ASR_API_KEY`、`ASR_MODEL`、`ASR_TRANSCRIBE_VOICE`、`ASR_SILK_DECODER`，详见 [docs/api.md](docs/api.md#语音转文字)。
 
 ```powershell
 # 只保留主链路 + 双 Key 兜底，不再切换下一个 Provider

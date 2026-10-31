@@ -181,14 +181,16 @@ public final class MediaMessageParser {
                 blankToNull(first(IMG_THUMB_MD5, raw)), blankToNull(first(IMG_THUMB_AESKEY, raw)));
     }
 
-    /** 语音只能给出时长：Hook 不提供转写能力，模型侧另有「听不到」的说明。 */
+    /**
+     * 语音：时长给模型看，{@code md5} 用来在本地找语音文件做转写（报文里有就带出来）。
+     */
     private static Parsed voice(String raw) {
         Long millis = number(VOICE_LENGTH, raw);
         String text = millis == null || millis <= 0
                 ? "[语音]"
                 : "[语音 " + Math.max(1, Math.round(millis / 1000.0)) + "″]";
         Long size = number(IMG_LENGTH, raw);
-        return new Parsed(MediaKind.VOICE, text, null, size, null, null, null);
+        return new Parsed(MediaKind.VOICE, text, null, size, null, blankToNull(first(IMG_MD5, raw)), null);
     }
 
     private static Parsed video(String raw) {
