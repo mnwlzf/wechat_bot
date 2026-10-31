@@ -404,7 +404,7 @@ public class ChatOrchestrator {
         if (item.getMediaKind() != MediaKind.VOICE) {
             return "";
         }
-        return voiceTranscriber.transcribe(item.getMediaMd5(), item.getCreatedAt()).orElse("");
+        return voiceTranscriber.transcribe(item.getMediaMd5(), item.getCreatedAt(), item.getMediaUrl()).orElse("");
     }
 
     /**

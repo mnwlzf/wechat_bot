@@ -8,8 +8,13 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -30,11 +35,14 @@ import java.util.stream.Stream;
 @Component
 public class VoiceFileResolver {
     private static final Logger log = LoggerFactory.getLogger(VoiceFileResolver.class);
-    private static final List<String> VOICE_DIRS = List.of("voice", "audio");
     private static final int MAX_FILES = 4000;
 
     private final WeChatHookProperties hookProperties;
     private final AsrProperties asrProperties;
+    private final HttpClient httpClient = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(5))
+            .followRedirects(HttpClient.Redirect.NORMAL)
+            .build();
     private final Map<String, List<WeChatDatDecoder.Key>> keyCache = new HashMap<>();
 
     public VoiceFileResolver(WeChatHookProperties hookProperties, AsrProperties asrProperties) {
@@ -45,7 +53,11 @@ public class VoiceFileResolver {
     /** @param bytes 解密后的音频（SILK 或 WAV 原始字节） */
     public record Voice(byte[] bytes, Path path) {}
 
-    public Optional<Voice> resolve(String md5, OffsetDateTime sentAt) {
+    public Optional<Voice> resolve(String md5, OffsetDateTime sentAt, String url) {
+        Optional<Voice> remote = download(url);
+        if (remote.isPresent()) {
+            return remote;
+        }
         for (Location location : locations()) {
             for (Path dir : voiceDirs(location.root())) {
                 Optional<Voice> hit = pick(dir, location.accountWxid(), md5, sentAt);
@@ -53,6 +65,34 @@ public class VoiceFileResolver {
                     return hit;
                 }
             }
+        }
+        return Optional.empty();
+    }
+
+    /** 报文里带 {@code voiceurl} 时先试着直接下：能下到就没必要翻本地目录了。 */
+    private Optional<Voice> download(String url) {
+        if (url == null || url.isBlank()) {
+            return Optional.empty();
+        }
+        try {
+            HttpRequest request = HttpRequest.newBuilder(URI.create(url.trim()))
+                    .timeout(Duration.ofSeconds(15))
+                    .header("User-Agent", "MicroMessenger")
+                    .GET()
+                    .build();
+            HttpResponse<byte[]> response = httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
+            byte[] body = response.body();
+            if (response.statusCode() / 100 == 2 && body != null
+                    && (SilkDecoder.isSilk(body) || SilkDecoder.isWav(body))) {
+                log.info("语音音频已从报文里的 voiceurl 下载成功: {} 字节", body.length);
+                return Optional.of(new Voice(body, null));
+            }
+            log.info("voiceurl 下载到的不是 SILK/WAV（HTTP {}，{} 字节），改走本地目录", response.statusCode(),
+                    body == null ? 0 : body.length);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+        } catch (IOException | RuntimeException ex) {
+            log.info("voiceurl 下载失败（{}），改走本地目录", ex.getMessage());
         }
         return Optional.empty();
     }
@@ -67,7 +107,8 @@ public class VoiceFileResolver {
             }
             try (Stream<Path> children = Files.list(root)) {
                 children.filter(Files::isDirectory)
-                        .filter(path -> Files.isDirectory(path.resolve("msg")))
+                        .filter(path -> Files.isDirectory(path.resolve("msg"))
+                                || Files.isDirectory(path.resolve("cache")))
                         .forEach(path -> locations.add(new Location(path, path.getFileName().toString())));
             } catch (IOException ex) {
                 log.debug("扫描微信目录失败: {} ({})", root, ex.getMessage());
@@ -90,21 +131,28 @@ public class VoiceFileResolver {
                 Path.of(home, "Documents", "WeChat Files"));
     }
 
-    /** {@code msg/attach/...} 下所有叫 Voice / Audio 的目录。 */
+    /** {@code msg} 与 {@code cache} 下所有像语音目录的文件夹（Voice / VoiceTemp / Audio / Sound）。 */
     private List<Path> voiceDirs(Path accountDir) {
-        Path attach = accountDir.resolve("msg").resolve("attach");
-        if (!Files.isDirectory(attach)) {
-            return List.of();
-        }
         List<Path> dirs = new ArrayList<>();
-        try (Stream<Path> walk = Files.walk(attach, 6)) {
-            walk.filter(Files::isDirectory)
-                    .filter(path -> VOICE_DIRS.contains(path.getFileName().toString().toLowerCase(Locale.ROOT)))
-                    .forEach(dirs::add);
-        } catch (IOException ex) {
-            log.debug("遍历语音目录失败: {} ({})", attach, ex.getMessage());
+        for (String sub : List.of("msg", "cache")) {
+            Path base = accountDir.resolve(sub);
+            if (!Files.isDirectory(base)) {
+                continue;
+            }
+            try (Stream<Path> walk = Files.walk(base, 8)) {
+                walk.filter(Files::isDirectory)
+                        .filter(VoiceFileResolver::looksLikeVoiceDir)
+                        .forEach(dirs::add);
+            } catch (IOException ex) {
+                log.debug("遍历语音目录失败: {} ({})", base, ex.getMessage());
+            }
         }
         return dirs;
+    }
+
+    private static boolean looksLikeVoiceDir(Path dir) {
+        String name = dir.getFileName().toString().toLowerCase(Locale.ROOT);
+        return name.startsWith("voice") || name.equals("audio") || name.equals("sound");
     }
 
     private Optional<Voice> pick(Path dir, String accountWxid, String md5, OffsetDateTime sentAt) {

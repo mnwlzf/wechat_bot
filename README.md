@@ -479,6 +479,14 @@ Invoke-RestMethod http://localhost:8080/api/admin/wechat/hook -Headers $headers
 
 返回 `connected=true`、`version=4.1.10.27` 即表示 Hook、登录状态和原生查询均可用。接口说明见 [docs/api.md](docs/api.md)，架构细节见 [docs/architecture.md](docs/architecture.md)。
 
+每条回调的**原始报文**（含图片/语音 XML）另有一份 `logs/hook-raw.log`，排查「语音为什么拿不到音频」「图片 md5 长什么样」时直接搜关键字：
+
+```powershell
+Select-String -Path .\logs\hook-raw.log -Pattern 'voicemsg' | Select-Object -Last 3
+```
+
+路径可用 `HOOK_RAW_LOG_FILE` 改，日志级别跟随 `wechat.hook.raw`。
+
 ## 9. 测试
 
 ```powershell

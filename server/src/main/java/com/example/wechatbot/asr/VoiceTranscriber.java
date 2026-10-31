@@ -41,15 +41,16 @@ public class VoiceTranscriber {
         return asrService.transcribe(wav, filename);
     }
 
-    /** 按消息定位本地语音文件并转写；拿不到音频或转写失败都返回空。 */
-    public Optional<String> transcribe(String md5, OffsetDateTime sentAt) {
+    /** 按消息定位本地语音文件（或下载 voiceurl）并转写；拿不到音频或转写失败都返回空。 */
+    public Optional<String> transcribe(String md5, OffsetDateTime sentAt, String url) {
         if (!enabled()) {
             return Optional.empty();
         }
         try {
-            Optional<VoiceFileResolver.Voice> voice = resolver.resolve(md5, sentAt);
+            Optional<VoiceFileResolver.Voice> voice = resolver.resolve(md5, sentAt, url);
             if (voice.isEmpty()) {
-                log.info("语音消息没找到本地音频文件，保持「只能看到时长」: md5={} sentAt={}", md5, sentAt);
+                log.info("语音消息没找到本地音频文件，保持「只能看到时长」: md5={} voiceurl={} sentAt={}",
+                        md5, url == null || url.isBlank() ? "无" : url, sentAt);
                 return Optional.empty();
             }
             AsrService.Transcription result = transcribeAudio(voice.get().bytes());

@@ -47,6 +47,7 @@ public class HookCallbackService {
      * 微信通讯录读不出名字时，照着日志里的群号 / wxid 加白名单就够了。
      */
     public Result handle(Map<String, Object> payload) {
+        HookRawPayloadLog.record(payload);
         Result result = handleInternal(payload);
         InboundMessageLog.record(payload, result);
         return result;

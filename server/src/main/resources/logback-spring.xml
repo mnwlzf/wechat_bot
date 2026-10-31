@@ -26,6 +26,28 @@
         <appender-ref ref="INBOUND_FILE"/>
     </logger>
 
+    <!--
+      原始回调报文：每条回调一行原文（含图片/语音 XML），排查语音为什么拿不到音频、
+      图片 md5 长什么样这类问题用；不用时把 WECHAT_HOOK_RAW_LOG 设成 false 即可。
+    -->
+    <property name="HOOK_RAW_LOG_FILE" value="${HOOK_RAW_LOG_FILE:-logs/hook-raw.log}"/>
+
+    <appender name="HOOK_RAW_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${HOOK_RAW_LOG_FILE}</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>${HOOK_RAW_LOG_FILE}.%d{yyyy-MM-dd}</fileNamePattern>
+            <maxHistory>7</maxHistory>
+        </rollingPolicy>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} | %msg%n</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <logger name="wechat.hook.raw" level="INFO" additivity="false">
+        <appender-ref ref="HOOK_RAW_FILE"/>
+    </logger>
+
     <root level="INFO">
         <appender-ref ref="CONSOLE"/>
     </root>

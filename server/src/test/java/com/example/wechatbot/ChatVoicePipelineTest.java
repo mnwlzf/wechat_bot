@@ -122,7 +122,7 @@ class ChatVoicePipelineTest {
     @Test
     @DisplayName("转写成功：占位文本被替换成 [语音转写]，并告诉模型别再说听不到")
     void usesTranscriptAsContent() {
-        when(voiceTranscriber.transcribe(any(), any())).thenReturn(Optional.of("明天上午十点开会"));
+        when(voiceTranscriber.transcribe(any(), any(), any())).thenReturn(Optional.of("明天上午十点开会"));
 
         voiceInbound("[语音 3″]");
 
@@ -134,7 +134,7 @@ class ChatVoicePipelineTest {
     @Test
     @DisplayName("没转写成功：仍然只给时长，并明确告诉模型看不到内容")
     void keepsDurationOnlyWhenTranscriptMissing() {
-        when(voiceTranscriber.transcribe(any(), any())).thenReturn(Optional.empty());
+        when(voiceTranscriber.transcribe(any(), any(), any())).thenReturn(Optional.empty());
 
         voiceInbound("[语音 3″]");
 

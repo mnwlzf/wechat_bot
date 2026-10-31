@@ -61,6 +61,8 @@ public final class MediaMessageParser {
     private static final Pattern URL = Pattern.compile("<url>(.*?)</url>", Pattern.DOTALL);
     private static final Pattern TOTAL_LEN = Pattern.compile("<totallen>(\\d+)</totallen>");
     private static final Pattern VOICE_LENGTH = Pattern.compile("voicelength=\"(\\d+)\"");
+    /** 语音下载地址：部分版本的 {@code <voicemsg>} 会带，能下就直接转写。 */
+    private static final Pattern VOICE_URL = Pattern.compile("voiceurl=\"([^\"]+)\"");
     private static final Pattern FILE_EXT = Pattern.compile("<fileext>(.*?)</fileext>", Pattern.DOTALL);
     /** 同 {@link #IMG_MD5}：必须挡住 {@code cdnthumblength} 这类同后缀属性。 */
     private static final Pattern IMG_LENGTH = Pattern.compile("(?<![A-Za-z0-9_])length=\"(\\d+)\"");
@@ -182,7 +184,7 @@ public final class MediaMessageParser {
     }
 
     /**
-     * 语音：时长给模型看，{@code md5} 用来在本地找语音文件做转写（报文里有就带出来）。
+     * 语音：时长给模型看，{@code md5} / {@code voiceurl} 用来找音频做转写（报文里有就带出来）。
      */
     private static Parsed voice(String raw) {
         Long millis = number(VOICE_LENGTH, raw);
@@ -190,7 +192,8 @@ public final class MediaMessageParser {
                 ? "[语音]"
                 : "[语音 " + Math.max(1, Math.round(millis / 1000.0)) + "″]";
         Long size = number(IMG_LENGTH, raw);
-        return new Parsed(MediaKind.VOICE, text, null, size, null, blankToNull(first(IMG_MD5, raw)), null);
+        return new Parsed(MediaKind.VOICE, text, null, size, sanitizeUrl(first(VOICE_URL, raw)),
+                blankToNull(first(IMG_MD5, raw)), null);
     }
 
     private static Parsed video(String raw) {

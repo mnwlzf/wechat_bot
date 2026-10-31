@@ -43,12 +43,12 @@ class VoiceTranscriberTest {
     @Test
     @DisplayName("找到 WAV 就直接转写，不再走 SILK 解码")
     void transcribesPlainWav() {
-        when(resolver.resolve(any(), any())).thenReturn(
+        when(resolver.resolve(any(), any(), any())).thenReturn(
                 Optional.of(new VoiceFileResolver.Voice(wav(), null)));
         when(asrService.transcribe(any(), eq("voice.wav")))
                 .thenReturn(new AsrService.Transcription("明天上午十点开会", "m", 100, 16));
 
-        Optional<String> text = transcriber.transcribe(null, OffsetDateTime.now());
+        Optional<String> text = transcriber.transcribe(null, OffsetDateTime.now(), null);
 
         assertThat(text).contains("明天上午十点开会");
         verify(silkDecoder, never()).toWav(any());
@@ -58,44 +58,44 @@ class VoiceTranscriberTest {
     @DisplayName("找到的是 SILK 时先解码再转写")
     void decodesSilkBeforeTranscribing() {
         byte[] silk = "#!SILK_V3payload".getBytes(StandardCharsets.US_ASCII);
-        when(resolver.resolve(any(), any())).thenReturn(
+        when(resolver.resolve(any(), any(), any())).thenReturn(
                 Optional.of(new VoiceFileResolver.Voice(silk, null)));
         when(silkDecoder.toWav(silk)).thenReturn(wav());
         when(asrService.transcribe(any(), eq("voice.wav")))
                 .thenReturn(new AsrService.Transcription("收到", "m", 90, 16));
 
-        assertThat(transcriber.transcribe(null, OffsetDateTime.now())).contains("收到");
+        assertThat(transcriber.transcribe(null, OffsetDateTime.now(), null)).contains("收到");
         verify(silkDecoder).toWav(silk);
     }
 
     @Test
     @DisplayName("本地没找到语音文件时返回空，不调用 ASR")
     void emptyWhenAudioMissing() {
-        when(resolver.resolve(any(), any())).thenReturn(Optional.empty());
+        when(resolver.resolve(any(), any(), any())).thenReturn(Optional.empty());
 
-        assertThat(transcriber.transcribe(null, OffsetDateTime.now())).isEmpty();
+        assertThat(transcriber.transcribe(null, OffsetDateTime.now(), null)).isEmpty();
         verify(asrService, never()).transcribe(any(), any());
     }
 
     @Test
     @DisplayName("转写结果为空（没人声）时返回空，不把空串塞给模型")
     void emptyWhenTranscriptBlank() {
-        when(resolver.resolve(any(), any())).thenReturn(
+        when(resolver.resolve(any(), any(), any())).thenReturn(
                 Optional.of(new VoiceFileResolver.Voice(wav(), null)));
         when(asrService.transcribe(any(), any()))
                 .thenReturn(new AsrService.Transcription("   ", "m", 10, 16));
 
-        assertThat(transcriber.transcribe(null, OffsetDateTime.now())).isEmpty();
+        assertThat(transcriber.transcribe(null, OffsetDateTime.now(), null)).isEmpty();
     }
 
     @Test
     @DisplayName("ASR 报错时吞掉异常返回空，不影响正常回复")
     void swallowsAsrFailure() {
-        when(resolver.resolve(any(), any())).thenReturn(
+        when(resolver.resolve(any(), any(), any())).thenReturn(
                 Optional.of(new VoiceFileResolver.Voice(wav(), null)));
         when(asrService.transcribe(any(), any())).thenThrow(new AsrException("接口返回 500"));
 
-        assertThat(transcriber.transcribe(null, OffsetDateTime.now())).isEmpty();
+        assertThat(transcriber.transcribe(null, OffsetDateTime.now(), null)).isEmpty();
     }
 
     @Test
