@@ -25,6 +25,35 @@ const activeBotId = ref('')
 const input = ref('')
 const chatBody = ref<HTMLElement>()
 const messages = ref<DebugMessage[]>([])
+// 模拟微信侧的消息形态：媒体类型决定模型看到 [图片]/[语音 5″] 时的额外说明，引用用来复现引用回复
+const mediaKind = ref('')
+const quoteOn = ref(false)
+const quoteAuthor = ref('张三')
+const quoteText = ref('')
+
+const mediaOptions = [
+  { label: '纯文本', value: '', sample: '' },
+  { label: '图片', value: 'IMAGE', sample: '[图片]' },
+  { label: '语音', value: 'VOICE', sample: '[语音 5″]' },
+  { label: '表情', value: 'STICKER', sample: '[表情]' },
+  { label: '视频', value: 'VIDEO', sample: '[视频 12″]' },
+  { label: '文件', value: 'FILE', sample: '[文件] 报价单.pdf · 1.5 MB' },
+  { label: '链接', value: 'LINK', sample: '[链接] 春季新品发布' },
+  { label: '位置', value: 'LOCATION', sample: '[位置] 中关村 · 北京市海淀区中关村大街1号' },
+  { label: '名片', value: 'CARD', sample: '[名片] 张三' },
+  { label: '小程序', value: 'MINIAPP', sample: '[小程序] 滴滴出行' },
+  { label: '聊天记录', value: 'RECORD', sample: '[聊天记录] 群聊的聊天记录' },
+  { label: '转账', value: 'TRANSFER', sample: '[转账] ¥520.00' },
+  { label: '红包', value: 'REDPACKET', sample: '[红包] 恭喜发财，大吉大利' },
+  { label: '视频号', value: 'CHANNEL', sample: '[视频号] 今天的日落' },
+]
+
+/** 切到某个媒体类型时，如果输入框还是空的（或还是上一个示例），顺手填个示例方便直接发。 */
+function onMediaKindChange(value: string) {
+  const sample = mediaOptions.find((item) => item.value === value)?.sample || ''
+  const isSample = !input.value.trim() || mediaOptions.some((item) => item.sample && item.sample === input.value.trim())
+  if (isSample) input.value = sample
+}
 
 const activeBot = computed(() => bots.value.find((bot) => bot.id === activeBotId.value))
 const provider = computed(() => providers.value.find((item) => item.id === activeBot.value?.modelProviderId))
@@ -64,11 +93,17 @@ async function send() {
   }
 
   messages.value.push({ id: crypto.randomUUID(), role: 'user', content })
+  const extra: { quoteAuthor?: string; quoteText?: string; mediaKind?: string } = {}
+  if (mediaKind.value) extra.mediaKind = mediaKind.value
+  if (quoteOn.value && quoteText.value.trim()) {
+    extra.quoteAuthor = quoteAuthor.value.trim() || '张三'
+    extra.quoteText = quoteText.value.trim()
+  }
   input.value = ''
   sending.value = true
   await scrollToBottom()
   try {
-    const result = await adminApi.debugChat(activeBot.value.id, content)
+    const result = await adminApi.debugChat(activeBot.value.id, content, extra)
     messages.value.push({
       id: crypto.randomUUID(),
       role: 'assistant',
@@ -177,6 +212,23 @@ onMounted(load)
             placeholder="输入测试消息，Enter 发送，Shift + Enter 换行"
             @keydown.enter.exact.prevent="send"
           />
+          <div class="composer-tools">
+            <el-select
+              v-model="mediaKind"
+              size="small"
+              style="width: 118px"
+              placeholder="消息类型"
+              @change="onMediaKindChange"
+            >
+              <el-option v-for="option in mediaOptions" :key="option.value" :label="option.label" :value="option.value" />
+            </el-select>
+            <el-checkbox v-model="quoteOn" size="small">引用一条消息</el-checkbox>
+            <span class="composer-hint">模拟微信消息形态，只影响模型看到的内容</span>
+          </div>
+          <div v-if="quoteOn" class="quote-fields">
+            <el-input v-model="quoteAuthor" size="small" maxlength="180" placeholder="被引用的人（如 张三）" style="width: 170px" />
+            <el-input v-model="quoteText" size="small" maxlength="1000" placeholder="被引用的原文，例如 6 或 [图片]" />
+          </div>
           <div class="composer-foot">
             <span>{{ input.length }} / 10000</span>
             <el-button type="primary" :icon="Promotion" :loading="sending" :disabled="!input.trim() || !canChat" @click="send">
@@ -286,6 +338,10 @@ onMounted(load)
 
 .composer { padding: 10px 12px 12px; border-top: 1px solid var(--line-soft); background: #fff; }
 .composer :deep(.el-textarea__inner) { padding: 8px 10px; border-radius: 7px; box-shadow: 0 0 0 1px var(--line) inset; }
+.composer-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 7px; }
+.composer-tools :deep(.el-checkbox__label) { font-size: var(--fs-xs); }
+.composer-hint { color: var(--muted-soft); font-size: 10px; }
+.quote-fields { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .composer-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 6px; }
 .composer-foot span { color: var(--muted-soft); font-size: 10px; }
 

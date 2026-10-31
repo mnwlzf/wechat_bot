@@ -2,7 +2,23 @@
 import { onMounted, ref } from 'vue'
 import dayjs from 'dayjs'
 import { ElMessage } from 'element-plus'
-import { ChatDotRound, Document, Link, Microphone, Picture, Refresh, Search, Star, VideoCamera } from '@element-plus/icons-vue'
+import {
+  ChatDotRound,
+  Document,
+  Link,
+  Location,
+  Microphone,
+  Money,
+  Picture,
+  Postcard,
+  Present,
+  Refresh,
+  Search,
+  Star,
+  Tickets,
+  VideoCamera,
+  VideoPlay,
+} from '@element-plus/icons-vue'
 import { adminApi } from '@/api'
 import type { Conversation, MediaKind, Message, PageResult, PromptTemplate } from '@/api/types'
 import { getErrorMessage } from '@/api/client'
@@ -79,6 +95,14 @@ const mediaMeta: Record<MediaKind, { label: string; icon: unknown }> = {
   FILE: { label: '文件', icon: Document },
   LINK: { label: '链接', icon: Link },
   STICKER: { label: '表情', icon: Star },
+  LOCATION: { label: '位置', icon: Location },
+  CARD: { label: '名片', icon: Postcard },
+  MINIAPP: { label: '小程序', icon: Present },
+  RECORD: { label: '聊天记录', icon: Tickets },
+  CHANNEL: { label: '视频号', icon: VideoPlay },
+  TRANSFER: { label: '转账', icon: Money },
+  REDPACKET: { label: '红包', icon: Money },
+  CALL: { label: '通话', icon: ChatDotRound },
   SYSTEM: { label: '系统', icon: ChatDotRound },
   OTHER: { label: '消息', icon: ChatDotRound },
 }

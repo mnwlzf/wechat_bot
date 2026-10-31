@@ -189,7 +189,25 @@ public final class AdminDtos {
             List<MessageView> recentMessages
     ) {}
 
-    public record DebugRequest(@NotNull UUID botId, @NotBlank @Size(max = 10000) String content) {}
+    /**
+     * 在线调试请求。
+     *
+     * <p>{@code quoteAuthor} / {@code quoteText} 可选：填了就按「引用回复」来构造上下文，
+     * 用来复现「引用一条消息再问」的场景，不用真的去微信里发一遍。</p>
+     *
+     * <p>{@code mediaKind} 可选：模拟语音 / 图片等媒体消息（例如传 {@code VOICE} + 内容
+     * {@code [语音 5″]}），用来确认「听不到语音」这类说明确实生效。</p>
+     */
+    public record DebugRequest(@NotNull UUID botId,
+                               @NotBlank @Size(max = 10000) String content,
+                               @Size(max = 180) String quoteAuthor,
+                               @Size(max = 1000) String quoteText,
+                               @Size(max = 20) String mediaKind) {
+
+        public DebugRequest(UUID botId, String content) {
+            this(botId, content, null, null, null);
+        }
+    }
 
     public record DebugResponse(String reply, String provider, String model, long latencyMs) {}
 
@@ -202,6 +220,16 @@ public final class AdminDtos {
                                      int usedKeyIndex, long latencyMs) {}
 
     public record WeChatPolicyUpdate(boolean groupsEnabled, boolean acceptAll, List<String> allowedChats) {}
+
+    /**
+     * 白名单候选会话（按昵称 / 备注 / 群名称搜索得到）。
+     *
+     * @param kind          PRIVATE / GROUP / OFFICIAL / SYSTEM
+     * @param blocked       公众号、机器人、系统会话：永远不回复，不允许加进白名单
+     * @param blockedReason 不可添加的原因，直接展示给用户
+     */
+    public record ChatCandidateView(String chatId, String name, String kind, boolean group,
+                                    boolean blocked, String blockedReason, String source) {}
 
     public record LlmPolicyUpdate(boolean fallbackEnabled) {}
 

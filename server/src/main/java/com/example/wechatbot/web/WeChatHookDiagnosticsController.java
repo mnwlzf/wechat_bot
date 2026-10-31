@@ -1,6 +1,7 @@
 package com.example.wechatbot.web;
 
 import com.example.wechatbot.config.WeChatHookProperties;
+import com.example.wechatbot.service.RuntimeSettingsService;
 import com.example.wechatbot.wechat.HookCallbackBuffer;
 import com.example.wechatbot.wechat.HookCallbackStats;
 import com.example.wechatbot.wechat.WeChatHookClient;
@@ -13,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -26,17 +28,20 @@ public class WeChatHookDiagnosticsController {
     private final WeChatHookClient client;
     private final HookCallbackStats stats;
     private final HookCallbackBuffer buffer;
+    private final RuntimeSettingsService settings;
     private final ObjectMapper objectMapper;
 
     public WeChatHookDiagnosticsController(WeChatHookProperties properties,
                                            WeChatHookClient client,
                                            HookCallbackStats stats,
                                            HookCallbackBuffer buffer,
+                                           RuntimeSettingsService settings,
                                            ObjectMapper objectMapper) {
         this.properties = properties;
         this.client = client;
         this.stats = stats;
         this.buffer = buffer;
+        this.settings = settings;
         this.objectMapper = objectMapper;
     }
 
@@ -52,8 +57,21 @@ public class WeChatHookDiagnosticsController {
         result.put("hook", probeHook());
         result.put("callback", callback());
         result.put("guard", guardStatus());
-        result.put("allowedChats", properties.allowedChatIds());
+        result.put("allowedChats", settings.allowedChats());
+        result.put("chatPolicy", chatPolicy());
         return result;
+    }
+
+    /** 当前生效的会话策略，排查“为什么没回复”时先看这里。 */
+    private Map<String, Object> chatPolicy() {
+        Map<String, Object> view = new LinkedHashMap<>();
+        view.put("kinds", List.of("GROUP", "PRIVATE"));
+        view.put("acceptAllPrivate", settings.acceptAll());
+        view.put("groupsEnabled", settings.groupsEnabled());
+        view.put("allowedPrivateChats", settings.allowedPrivateChats());
+        view.put("allowedGroupChats", settings.allowedGroupChats());
+        view.put("note", "只处理群聊和真人私聊；公众号、机器人、系统会话永远不自动回复，群聊必须逐个加入白名单");
+        return view;
     }
 
     private Map<String, Object> probeHook() {
@@ -99,8 +117,8 @@ public class WeChatHookDiagnosticsController {
         HookCallbackStats.Snapshot snapshot = stats.snapshot();
         Map<String, Object> view = new LinkedHashMap<>();
         view.put("enabled", properties.isCallbackEnabled());
-        view.put("acceptAll", properties.isCallbackAcceptAll());
-        view.put("groupsEnabled", properties.isCallbackGroupsEnabled());
+        view.put("acceptAll", settings.acceptAll());
+        view.put("groupsEnabled", settings.groupsEnabled());
         view.put("requireLoopback", properties.isCallbackRequireLoopback());
         view.put("selfWxid", properties.getSelfWxid());
         view.put("total", snapshot.total());

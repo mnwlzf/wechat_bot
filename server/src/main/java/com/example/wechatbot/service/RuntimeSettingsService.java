@@ -4,6 +4,7 @@ import com.example.wechatbot.config.AppProperties;
 import com.example.wechatbot.config.WeChatHookProperties;
 import com.example.wechatbot.domain.AppSetting;
 import com.example.wechatbot.repository.AppSettingRepository;
+import com.example.wechatbot.wechat.ChatIdentity;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -67,6 +68,20 @@ public class RuntimeSettingsService {
     public List<String> allowedChats() {
         String raw = value(KEY_ALLOWED_CHATS, String.join(",", hookProperties.allowedChatIds()));
         return parseList(raw);
+    }
+
+    /** 白名单里的私聊（不含 @chatroom）；公众号 / 系统会话不算私聊。 */
+    public List<String> allowedPrivateChats() {
+        return allowedChats().stream()
+                .filter(id -> ChatIdentity.kindOf(id) == ChatIdentity.Kind.PRIVATE)
+                .toList();
+    }
+
+    /** 白名单里的群聊；群聊只认这一份名单，不受「全量接收私聊」影响。 */
+    public List<String> allowedGroupChats() {
+        return allowedChats().stream()
+                .filter(ChatIdentity::isGroup)
+                .toList();
     }
 
     public boolean acceptAll() {
@@ -168,6 +183,9 @@ public class RuntimeSettingsService {
     public Map<String, Object> snapshot() {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("allowedChats", view(KEY_ALLOWED_CHATS, allowedChats()));
+        // 管理端按私聊 / 群聊分开展示，底层仍是同一份白名单（群聊以 @chatroom 区分）
+        result.put("allowedPrivateChats", view(KEY_ALLOWED_CHATS, allowedPrivateChats()));
+        result.put("allowedGroupChats", view(KEY_ALLOWED_CHATS, allowedGroupChats()));
         result.put("acceptAll", view(KEY_ACCEPT_ALL, acceptAll()));
         result.put("groupsEnabled", view(KEY_GROUPS_ENABLED, groupsEnabled()));
         result.put("fallbackEnabled", view(KEY_LLM_FALLBACK, llmFallbackEnabled()));

@@ -78,6 +78,17 @@ class RuntimeSettingsServiceTest {
     }
 
     @Test
+    void splitsWhitelistIntoPrivateAndGroups() {
+        service.updateChatPolicy(List.of("wxid_a", "123@chatroom", "gh_62c4ce184e73", "wxid_b"),
+                true, true);
+
+        // 公众号不是「私聊」：写进白名单也不会被当成好友回复
+        assertThat(service.allowedPrivateChats()).containsExactly("wxid_a", "wxid_b");
+        assertThat(service.allowedGroupChats()).containsExactly("123@chatroom");
+        assertThat(service.allowedChats()).containsExactly("wxid_a", "123@chatroom", "gh_62c4ce184e73", "wxid_b");
+    }
+
+    @Test
     void snapshotReportsSource() {
         Map<String, Object> before = service.snapshot();
         assertThat(source(before, "allowedChats")).isEqualTo("env");

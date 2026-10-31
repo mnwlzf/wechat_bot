@@ -16,6 +16,10 @@ export interface RuntimeSetting<T> {
 
 export interface SettingsSnapshot {
   allowedChats: RuntimeSetting<string[]>
+  /** 白名单里的真人私聊（不含 @chatroom） */
+  allowedPrivateChats: RuntimeSetting<string[]>
+  /** 白名单里的群聊；群聊只认这份名单，不受「全量接收私聊」影响 */
+  allowedGroupChats: RuntimeSetting<string[]>
   acceptAll: RuntimeSetting<boolean>
   groupsEnabled: RuntimeSetting<boolean>
   fallbackEnabled: RuntimeSetting<boolean>
@@ -30,7 +34,23 @@ export interface SettingsSnapshot {
 
 export type MediaReplyMode = 'ignore' | 'ack' | 'llm'
 
-export type MediaKind = 'IMAGE' | 'VOICE' | 'VIDEO' | 'FILE' | 'LINK' | 'STICKER' | 'SYSTEM' | 'OTHER'
+export type MediaKind =
+  | 'IMAGE'
+  | 'VOICE'
+  | 'VIDEO'
+  | 'FILE'
+  | 'LINK'
+  | 'STICKER'
+  | 'LOCATION'
+  | 'CARD'
+  | 'MINIAPP'
+  | 'RECORD'
+  | 'CHANNEL'
+  | 'TRANSFER'
+  | 'REDPACKET'
+  | 'CALL'
+  | 'SYSTEM'
+  | 'OTHER'
 
 export interface MediaPolicyInput {
   enabled: boolean
@@ -164,11 +184,19 @@ export interface HookContact {
   alias?: string
 }
 
+/** 微信会话身份：公众号 / 机器人和系统会话永远不回复 */
+export type ChatKind = 'PRIVATE' | 'GROUP' | 'OFFICIAL' | 'SYSTEM'
+
+/** 白名单候选：按昵称 / 备注 / 群名称搜索得到 */
 export interface ChatCandidate {
   chatId: string
   name: string
+  kind: ChatKind
   group: boolean
-  source: 'conversation' | 'session' | 'contact'
+  /** 公众号、机器人、系统会话：不可加入白名单 */
+  blocked: boolean
+  blockedReason: string
+  source: 'contact' | 'conversation' | 'session'
 }
 
 export interface LlmPolicyInput {

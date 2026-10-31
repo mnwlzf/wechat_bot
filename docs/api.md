@@ -47,6 +47,38 @@ $headers = @{ Authorization = "Bearer dev-admin-token" }
 
 通过 `contact.db` 返回联系人，用于核对显示名和会话 ID。
 
+### GET `/api/admin/wechat/chats?kind=private|groups&keyword=&limit=200`
+
+白名单候选搜索：按昵称 / 备注 / 群名称 / ID 片段匹配，返回可直接加入白名单的会话。
+数据按可信度合并微信联系人（`contact.db`）、本地会话库、微信会话列表（`session.db`），
+预编译 Hook 的 `QueryDB` 不可用时自动退化为只用本地会话库。
+
+```json
+[
+  {
+    "chatId": "wxid_rsje67b7hozm22",
+    "name": "张三",
+    "kind": "PRIVATE",
+    "group": false,
+    "blocked": false,
+    "blockedReason": "",
+    "source": "contact"
+  },
+  {
+    "chatId": "gh_62c4ce184e73",
+    "name": "某某服务号",
+    "kind": "OFFICIAL",
+    "group": false,
+    "blocked": true,
+    "blockedReason": "公众号 / 机器人 / 企业微信会话不自动回复",
+    "source": "contact"
+  }
+]
+```
+
+`kind` 取值 `PRIVATE` / `GROUP` / `OFFICIAL` / `SYSTEM`；`blocked=true` 表示该会话永远不会被自动回复，
+管理端应置灰不可选。搜索结果的名称优先级：备注 → 昵称 → 微信号。
+
 > 官方预编译 DLL 的 `session.db` / `contact.db` 只有在微信登录并完成本地同步后才存在。
 
 ## 3. 管理 API
@@ -61,7 +93,7 @@ $headers = @{ Authorization = "Bearer dev-admin-token" }
 | GET | `/api/admin/providers/bootstrap` | 本次启动的环境变量引导结果（密钥掩码） |
 | POST | `/api/admin/providers/{id}/test` | 模型连通测试（主 Key 失败会自动用备用 Key） |
 | POST | `/api/admin/providers/{id}/search?q=` | 兼容接口；实际使用独立的联网搜索配置 |
-| GET | `/api/admin/settings` | 运行时策略快照（值 + 来源 db/env） |
+| GET | `/api/admin/settings` | 运行时策略快照（值 + 来源 db/env；含 `allowedPrivateChats` / `allowedGroupChats` 拆分视图） |
 | PUT | `/api/admin/settings/wechat` | 会话白名单 / 全量接收 / 群聊开关，立即生效 |
 | PUT | `/api/admin/settings/llm` | 模型备用链路开关，立即生效 |
 | PUT | `/api/admin/settings/filter` | 敏感词词表与过滤模式（off / rewrite / block），立即生效 |
@@ -82,7 +114,7 @@ $headers = @{ Authorization = "Bearer dev-admin-token" }
 | GET | `/api/admin/usage?days=7` | 用量统计：收发量、token、耗时、模型分布 |
 | GET | `/api/admin/bots` | 机器人配置 |
 | PUT | `/api/admin/bots/{id}` | 更新机器人配置 |
-| POST | `/api/admin/debug/chat` | 在线调试（不发送微信） |
+| POST | `/api/admin/debug/chat` | 在线调试（不发送微信）。可选 `quoteAuthor` / `quoteText` 模拟引用、`mediaKind` 模拟语音/图片等媒体消息 |
 | GET | `/api/admin/disguise` | 伪装层状态、配额、最近决策 |
 | POST | `/api/admin/disguise/preview` | 预览文风清洗、分条与延迟（不占配额） |
 

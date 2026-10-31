@@ -1,8 +1,11 @@
 package com.example.wechatbot.web;
 
 import com.example.wechatbot.config.WeChatHookProperties;
+import com.example.wechatbot.service.ChatDirectoryService;
+import com.example.wechatbot.service.RuntimeSettingsService;
 import com.example.wechatbot.wechat.WeChatHookClient;
 import com.example.wechatbot.wechat.WeChatHookException;
+import com.example.wechatbot.web.dto.AdminDtos;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -10,7 +13,6 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -20,15 +22,20 @@ import java.util.Map;
 public class WeChatHookController {
     private final WeChatHookProperties properties;
     private final WeChatHookClient client;
+    private final RuntimeSettingsService settings;
+    private final ChatDirectoryService directory;
 
-    public WeChatHookController(WeChatHookProperties properties, WeChatHookClient client) {
+    public WeChatHookController(WeChatHookProperties properties, WeChatHookClient client,
+                                RuntimeSettingsService settings, ChatDirectoryService directory) {
         this.properties = properties;
         this.client = client;
+        this.settings = settings;
+        this.directory = directory;
     }
 
     @GetMapping("/hook")
     public HookStatusView hookStatus() {
-        List<String> chats = properties.allowedChatIds();
+        List<String> chats = settings.allowedChats();
         if (!properties.isEnabled()) {
             return new HookStatusView(false, false, false, "", "", "", "", chats, "Hook 集成已关闭", Instant.now());
         }
@@ -42,7 +49,24 @@ public class WeChatHookController {
         }
     }
 
-@GetMapping("/sessions")
+    /**
+     * 按昵称 / 备注 / 群名称搜索可加入白名单的会话。
+     *
+     * <p>{@code kind=private} 只返回真人私聊，{@code kind=groups} 只返回群聊；
+     * 公众号、机器人、系统会话会带 {@code blocked=true} 返回，前端置灰不可选。</p>
+     */
+    @GetMapping("/chats")
+    public List<AdminDtos.ChatCandidateView> chats(@RequestParam(defaultValue = "") String kind,
+                                                   @RequestParam(defaultValue = "") String keyword,
+                                                   @RequestParam(defaultValue = "200") int limit) {
+        return directory.search(kind, keyword, limit).stream()
+                .map(item -> new AdminDtos.ChatCandidateView(
+                        item.chatId(), item.name(), item.kind(), item.group(),
+                        item.blocked(), item.blockedReason(), item.source()))
+                .toList();
+    }
+
+    @GetMapping("/sessions")
     public List<Map<String, Object>> sessions(@RequestParam(defaultValue = "200") int limit) {
         client.verify(true);
         String sessionDb = findDatabase("session.db");
@@ -128,7 +152,3 @@ public class WeChatHookController {
             Instant checkedAt
     ) {}
 }
-
-
-
-

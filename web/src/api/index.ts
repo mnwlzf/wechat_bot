@@ -5,6 +5,7 @@ import type {
   AwayBlocksInput,
   Bot,
   BotInput,
+  ChatCandidate,
   Conversation,
   Dashboard,
   DiagnosticsPayload,
@@ -101,6 +102,11 @@ export const adminApi = {
     const { data } = await http.get<HookContact[]>('/api/admin/wechat/contacts', { params: { limit } })
     return data
   },
+  /** 按昵称 / 备注 / 群名称搜索可加入白名单的会话（公众号与系统会话会标记 blocked）。 */
+  async searchChats(params: { kind: 'private' | 'groups'; keyword?: string; limit?: number }) {
+    const { data } = await http.get<ChatCandidate[]>('/api/admin/wechat/chats', { params })
+    return data
+  },
   async messages(conversationId: string, page = 0, size = 200) {
     const { data } = await http.get<PageResult<Message>>(
       `/api/admin/conversations/${conversationId}/messages`,
@@ -108,8 +114,9 @@ export const adminApi = {
     )
     return data
   },
-  async debugChat(botId: string, content: string) {
-    const { data } = await http.post<DebugResult>('/api/admin/debug/chat', { botId, content })
+  /** 可选 quoteAuthor/quoteText 模拟引用回复，mediaKind 模拟语音、图片等媒体消息。 */
+  async debugChat(botId: string, content: string, extra?: { quoteAuthor?: string; quoteText?: string; mediaKind?: string }) {
+    const { data } = await http.post<DebugResult>('/api/admin/debug/chat', { botId, content, ...extra })
     return data
   },
   async autoReplies() {

@@ -5,7 +5,6 @@ import com.example.wechatbot.domain.ChatType;
 import com.example.wechatbot.service.HookExtras;
 import com.example.wechatbot.service.InboxService;
 import com.example.wechatbot.service.MediaMessageParser;
-import com.example.wechatbot.service.RuntimeSettingsService;
 import com.example.wechatbot.web.dto.AgentDtos;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,7 +15,6 @@ import java.security.MessageDigest;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
-import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
@@ -33,13 +31,14 @@ public class HookCallbackService {
     static final int EVENT_MESSAGE = 1001;
 
     private final WeChatHookProperties properties;
-    private final RuntimeSettingsService settings;
+    private final ChatAccessPolicy accessPolicy;
     private final InboxService inboxService;
 
-    public HookCallbackService(WeChatHookProperties properties, RuntimeSettingsService settings,
+    public HookCallbackService(WeChatHookProperties properties,
+                               ChatAccessPolicy accessPolicy,
                                InboxService inboxService) {
         this.properties = properties;
-        this.settings = settings;
+        this.accessPolicy = accessPolicy;
         this.inboxService = inboxService;
     }
 
@@ -72,6 +71,10 @@ public class HookCallbackService {
                 log.info("图片消息原文: md5={} thumbMd5={} aeskey={} thumbAeskey={} raw={}",
                         media.md5(), media.thumbMd5(), media.aeskey(), media.thumbAeskey(),
                         truncate(rawContent, 900));
+            } else if (media.kind() == com.example.wechatbot.domain.MediaKind.OTHER) {
+                // 认不出来的类型只可能是微信又加了新格式，留一条 INFO 方便照着补解析
+                log.info("未识别的消息类型: type={} placeholder={} raw={}", type,
+                        media.placeholder(), truncate(rawContent, 600));
             } else {
                 log.debug("媒体消息: type={} kind={} raw={}", type, media.kind(),
                         truncate(rawContent, 400));
@@ -97,18 +100,12 @@ public class HookCallbackService {
             return Result.ignored("忽略账号自身消息", chatId, null);
         }
 
-        boolean group = chatId.endsWith("@chatroom");
-        if (group && !settings.groupsEnabled()) {
-            return Result.ignored("群聊回调未启用", chatId, null);
+        // 群聊 / 私聊 / 公众号 / 系统会话统一走准入策略：公众号和机器人永远不回复
+        ChatAccessPolicy.Decision decision = accessPolicy.decide(chatId);
+        if (!decision.allowed()) {
+            return Result.ignored(decision.reason(), chatId, null);
         }
-        List<String> allowed = settings.allowedChats();
-        if (!allowed.isEmpty() && !allowed.contains(chatId)) {
-            return Result.ignored("会话不在白名单", chatId, null);
-        }
-        if (allowed.isEmpty() && !settings.acceptAll()) {
-            return Result.ignored("未配置会话白名单且未开启全量接收", chatId, null);
-        }
-
+        boolean group = decision.kind() == ChatIdentity.Kind.GROUP;
         String eventId = eventId(payload, chatId);
         AgentDtos.AgentEventRequest event = new AgentDtos.AgentEventRequest(
                 eventId,

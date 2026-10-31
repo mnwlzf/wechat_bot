@@ -7,6 +7,7 @@ import com.example.wechatbot.domain.Conversation;
 import com.example.wechatbot.domain.MessageDirection;
 import com.example.wechatbot.domain.MessageLog;
 import com.example.wechatbot.domain.MessageStatus;
+import com.example.wechatbot.domain.MediaKind;
 import com.example.wechatbot.repository.BotConfigRepository;
 import com.example.wechatbot.repository.ConversationRepository;
 import com.example.wechatbot.repository.MessageLogRepository;
@@ -59,6 +60,16 @@ public class DebugChatService {
         inbound.setSenderName("管理员");
         inbound.setContent(request.content());
         inbound.setStatus(MessageStatus.RECEIVED);
+        // 带上引用信息就能在调试页复现「引用一条消息再说话」，走的是与真实消息相同的上下文拼装
+        if (request.quoteText() != null && !request.quoteText().isBlank()) {
+            inbound.setQuoteAuthor(request.quoteAuthor());
+            inbound.setQuoteText(request.quoteText());
+        }
+        // 指定媒体类型就能复现「对方发来一条语音/图片」时的说明，不用真的去微信里发
+        MediaKind mediaKind = mediaKindOf(request.mediaKind());
+        if (mediaKind != null) {
+            inbound.setMediaKind(mediaKind);
+        }
         inbound = messageRepository.save(inbound);
 
         try {
@@ -75,6 +86,18 @@ public class DebugChatService {
             current = current.getCause();
         }
         return current.getMessage() == null ? current.getClass().getSimpleName() : current.getMessage();
+    }
+
+    /** 调试页传进来的媒体类型：认不出来就当纯文本，不因为写错一个枚举值就 500。 */
+    private static MediaKind mediaKindOf(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return MediaKind.valueOf(value.trim().toUpperCase(java.util.Locale.ROOT));
+        } catch (IllegalArgumentException ex) {
+            return null;
+        }
     }
 }
 

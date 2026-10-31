@@ -32,6 +32,28 @@ import java.util.UUID;
 public class ChatOrchestrator {
     private static final Logger log = LoggerFactory.getLogger(ChatOrchestrator.class);
 
+    /**
+     * 用户「引用一条消息再说话」时的约定说明。
+     *
+     * <p>只在这条消息确实带引用时注入，避免平时白占 token。没有这句说明时，模型会把
+     * 「【引用的消息｜来自 X】」当成系统标记而不是内容，于是回「我看不到具体内容」。</p>
+     */
+    private static final String QUOTE_HINT = """
+            用户这次发的是「引用回复」。消息里【引用的消息｜来自 某人】下面那一段，就是被引用那条消息的\
+            真实原文（可能很短，比如就一个字、一个表情或[图片]占位），不是编号、不是占位符，也不是让你去别处取的内容。
+            请把它当成你亲眼看到的内容照实理解并回答：被引用的原文是什么就说是什么，不要回答「看不到具体内容」。\
+            只有原文本身是[图片]、[语音]、[文件]这类占位、而你又没有拿到对应附件时，才说明这一条看不到细节。""";
+
+    /** 语音没有转写能力：只能报时长，别猜内容。 */
+    private static final String VOICE_HINT = """
+            对方这次发的是一条语音消息，你只能看到它的时长，听不到内容，也没有转写能力。\
+            不要编造语音里说了什么；需要内容就请对方转成文字或重发。""";
+
+    /** 图片在本地没找到 / 解密失败：只剩一句 [图片]，此时也不能装作看见了。 */
+    private static final String IMAGE_MISSING_HINT = """
+            对方这次发的是一张图片，但本地没能取到画面（文件没找到或解密失败），你看不到图里的内容。\
+            不要编造画面细节；可以请对方重新发一次，或者把图里的文字打出来。""";
+
     private final BotConfigRepository botRepository;
     private final ConversationRepository conversationRepository;
     private final MessageLogRepository messageRepository;
@@ -276,6 +298,7 @@ public class ChatOrchestrator {
 
         List<ChatMessage> messages = new ArrayList<>();
         boolean currentIncluded = false;
+        boolean currentImageAttached = false;
         for (MessageLog item : recent) {
             if (item.getContent() == null || item.getContent().isBlank()) {
                 continue;
@@ -287,19 +310,26 @@ public class ChatOrchestrator {
                 if (conversation.getChatType() == ChatType.GROUP && item.getSenderName() != null) {
                     content = "[" + item.getSenderName() + "] " + content;
                 }
-                if (current) {
-                    content = withQuote(item, content);
-                }
                 WeChatImageResolver.Attachment image = current
                         ? imageAttachment(conversation.getChatId(), item)
                         : null;
+                // 本条没有自己的图时，看看被引用的那条是不是图片：能解出来就让模型直接看画面
+                WeChatImageResolver.Attachment quotedImage =
+                        current && image == null ? quotedImageAttachment(conversation.getChatId(), item) : null;
+                if (current) {
+                    content = withQuote(item, content, quotedImage != null);
+                    currentImageAttached = image != null || quotedImage != null;
+                }
                 if (image != null && image.thumbnail()) {
                     // 本地只有缩略图时明确告诉模型画面受限，避免它假装看清了小字
                     content = content + "\n（这张图只有缩略图，分辨率有限，细节可能看不清）";
+                } else if (quotedImage != null && quotedImage.thumbnail()) {
+                    content = content + "\n（被引用那张图只有缩略图，分辨率有限，细节可能看不清）";
                 }
-                messages.add(image == null
+                WeChatImageResolver.Attachment attached = image != null ? image : quotedImage;
+                messages.add(attached == null
                         ? ChatMessage.user(content)
-                        : ChatMessage.userWithImage(content, image.dataUrl()));
+                        : ChatMessage.userWithImage(content, attached.dataUrl()));
             } else if (item.getStatus() == MessageStatus.SUCCESS) {
                 messages.add(ChatMessage.assistant(item.getContent()));
             }
@@ -314,10 +344,17 @@ public class ChatOrchestrator {
         String searchContext = searchAugmenter.buildContext(bot, searchQuery);
         String systemPrompt = resolveSystemPrompt(bot, conversation);
 
-        List<ChatMessage> withStyle = new ArrayList<>(messages.size() + 3);
+        List<ChatMessage> withStyle = new ArrayList<>(messages.size() + 5);
         withStyle.add(ChatMessage.system(systemPrompt));
         if (!style.isBlank()) {
             withStyle.add(ChatMessage.system(style));
+        }
+        if (hasQuote(currentInbound)) {
+            withStyle.add(ChatMessage.system(QUOTE_HINT));
+        }
+        String mediaHint = mediaHint(currentInbound, currentImageAttached);
+        if (mediaHint != null) {
+            withStyle.add(ChatMessage.system(mediaHint));
         }
         if (searchContext != null && !searchContext.isBlank()) {
             withStyle.add(ChatMessage.system(searchContext));
@@ -326,15 +363,52 @@ public class ChatOrchestrator {
         return List.copyOf(withStyle);
     }
 
-    /** 把引用消息拼成「[引用 张三：原文] + 本次说的话」，让模型知道在回应哪一句。 */
-    private String withQuote(MessageLog item, String content) {
+    /**
+     * 当前消息是「看得到但读不出内容」的类型时，明确告诉模型边界，别让它编。
+     *
+     * <p>语音只能给时长（Hook 不提供转写），图片取不到本地文件时也只剩一句 {@code [图片]}。
+     * 这两种情况模型最容易硬猜，所以在系统提示里点名说清楚。</p>
+     */
+    private static String mediaHint(MessageLog item, boolean imageAttached) {
+        if (item == null || item.getMediaKind() == null) {
+            return null;
+        }
+        return switch (item.getMediaKind()) {
+            case VOICE -> VOICE_HINT;
+            case IMAGE -> imageAttached ? null : IMAGE_MISSING_HINT;
+            default -> null;
+        };
+    }
+
+    /**
+     * 把引用消息拼成「被引用的原文」+「这次说的话」两块，让模型知道在回应哪一句。
+     *
+     * <p>早先的写法是单行 {@code [引用 张三：原文]}，模型经常把它当成一个它读不懂的标记，
+     * 于是回答「我这边只显示一条引用，看不到具体内容」——明明原文就在括号里。改成独立两段
+     * 并加上「原文就是这些字」的说明后，模型会照实复述被引用的内容。</p>
+     */
+    private String withQuote(MessageLog item, String content, boolean imageAttached) {
         String quote = item.getQuoteText();
         if (quote == null || quote.isBlank()) {
             return content;
         }
-        String author = item.getQuoteAuthor();
-        String label = author == null || author.isBlank() ? "引用" : "引用 " + author;
-        return "[" + label + "：" + abbreviate(quote, 200) + "]\n" + content;
+        return quoteBlock(item.getQuoteAuthor(), quote, content, imageAttached);
+    }
+
+    /** 引用块的实际排版；单独抽出来便于单测覆盖（模型对这段话的排版很敏感）。 */
+    static String quoteBlock(String author, String quote, String content, boolean imageAttached) {
+        String who = author == null || author.isBlank() ? "对方" : author.trim();
+        StringBuilder text = new StringBuilder()
+                .append("【引用的消息｜来自 ").append(who).append("】\n")
+                .append(abbreviate(quote, 800));
+        if (imageAttached) {
+            text.append("\n（被引用的是一张图片，已附在本条消息里，可以直接看画面）");
+        }
+        return text.append("\n【我这次说的话】\n").append(content).toString();
+    }
+
+    private static boolean hasQuote(MessageLog item) {
+        return item != null && item.getQuoteText() != null && !item.getQuoteText().isBlank();
     }
 
     /** 当前消息是图片时取附件；取不到返回 null，模型只看到 [图片] 占位文本。 */
@@ -349,6 +423,22 @@ public class ChatOrchestrator {
             return null;
         }
         return imageResolver.toDataUrl(chatId, item.getCreatedAt(), md5Candidates).orElse(null);
+    }
+
+    /**
+     * 被引用的那条消息是图片时取它的附件。
+     *
+     * <p>时间要用「被引用消息自己的发送时间」，不能用本条回复的时间：被引用的图可能是
+     * 几天前发的，按回复时间去找月份目录会直接落空。</p>
+     */
+    private WeChatImageResolver.Attachment quotedImageAttachment(String chatId, MessageLog item) {
+        List<String> md5Candidates = new ArrayList<>(2);
+        addIfPresent(md5Candidates, item.getQuoteMd5());
+        addIfPresent(md5Candidates, item.getQuoteThumbMd5());
+        if (md5Candidates.isEmpty()) {
+            return null;
+        }
+        return imageResolver.toDataUrl(chatId, item.getQuoteMediaAt(), md5Candidates).orElse(null);
     }
 
     private static void addIfPresent(List<String> values, String value) {
@@ -378,7 +468,7 @@ public class ChatOrchestrator {
         }
     }
 
-    private String abbreviate(String text, int max) {
+    private static String abbreviate(String text, int max) {
         if (text == null) {
             return "";
         }

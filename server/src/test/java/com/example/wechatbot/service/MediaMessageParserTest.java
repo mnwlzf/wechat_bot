@@ -28,7 +28,8 @@ class MediaMessageParserTest {
                 + "<appattach><totallen>524288</totallen><fileext>pdf</fileext></appattach></appmsg></msg>";
         MediaMessageParser.Parsed parsed = MediaMessageParser.parse(49, xml);
         assertThat(parsed.kind()).isEqualTo(MediaKind.FILE);
-        assertThat(parsed.placeholder()).isEqualTo("[文件] 报价单.pdf");
+        // 文件带上大小，模型才知道「这是个大文件」而不是一句光秃秃的文件名
+        assertThat(parsed.placeholder()).isEqualTo("[文件] 报价单.pdf · 512.0 KB");
         assertThat(parsed.name()).isEqualTo("报价单.pdf");
         assertThat(parsed.size()).isEqualTo(524288L);
     }
@@ -39,7 +40,9 @@ class MediaMessageParserTest {
                 + "<url>https://example.com/a?b=1&amp;c=2</url><type>5</type></appmsg></msg>";
         MediaMessageParser.Parsed parsed = MediaMessageParser.parse(49, xml);
         assertThat(parsed.kind()).isEqualTo(MediaKind.LINK);
-        assertThat(parsed.placeholder()).isEqualTo("[链接] 春季新品发布");
+        assertThat(parsed.placeholder())
+                .startsWith("[链接] 春季新品发布")
+                .contains("https://example.com/a?b=1&c=2");
         assertThat(parsed.url()).isEqualTo("https://example.com/a?b=1&c=2");
     }
 
@@ -51,9 +54,9 @@ class MediaMessageParserTest {
 
     @Test
     void unknownTypeFallsBackToPlaceholder() {
-        MediaMessageParser.Parsed parsed = MediaMessageParser.parse(48, "");
+        MediaMessageParser.Parsed parsed = MediaMessageParser.parse(9999, "");
         assertThat(parsed.kind()).isEqualTo(MediaKind.OTHER);
-        assertThat(parsed.placeholder()).isEqualTo("[消息 type=48]");
+        assertThat(parsed.placeholder()).isEqualTo("[消息 type=9999]");
     }
 
     @Test
@@ -91,13 +94,16 @@ class MediaMessageParserTest {
     }
 
     @Test
-    void quoteWouldOtherwiseLookLikeALink() {
+    void quoteCardWithoutTextIsNotMistakenForALink() {
         String xml = "<msg><appmsg><title>可以，我十点到</title><type>57</type>"
                 + "<refermsg><displayname>张三</displayname><content>明天上午十点开会</content></refermsg>"
                 + "</appmsg></msg>";
 
-        // 没有 <refermsg> 识别时会被当成链接，这正是要先用 parseQuote 的原因
-        assertThat(MediaMessageParser.parse(49, xml).kind()).isEqualTo(MediaKind.LINK);
+        // 子类型 57 是引用卡片：没走 parseQuote 时只会退化成一句 [卡片]，不会把原话当链接标题
+        assertThat(MediaMessageParser.parse(49, xml).kind()).isEqualTo(MediaKind.OTHER);
+        assertThat(MediaMessageParser.parse(49, xml).placeholder()).startsWith("[卡片]");
+        // 原文仍然要靠 parseQuote 才拿得到
+        assertThat(MediaMessageParser.parseQuote(49, xml).quoteText()).isEqualTo("明天上午十点开会");
     }
 
     @Test
@@ -214,16 +220,64 @@ class MediaMessageParserTest {
         MediaMessageParser.Quoted quote = quoteOf("这个价格对吗", 49, inner);
 
         assertThat(quote).isNotNull();
-        assertThat(quote.quoteText()).isEqualTo("[文件] 报价单.pdf");
+        assertThat(quote.quoteText()).isEqualTo("[文件] 报价单.pdf · 512.0 KB");
+    }
+
+    /**
+     * 微信实际报文把 {@code <type>} 排在 {@code <content>} 之后（图片引用就是这样）。
+     * 旧逻辑只看 {@code <content>} 之前的部分，于是把类型判成「文字」，把被引用图片的
+     * XML 抽成 {@code eyJwaGFzaCI6…} 这样的 base64 垃圾串发给模型。
+     */
+    @Test
+    void quotedImageWithTypeAfterContentIsNotMistakenForText() {
+        String inner = "<?xml version=\"1.0\"?>\n<msg>\n\t<img aeskey=\"cdf424ba4ec560da35a05541e979b22b\""
+                + " cdnthumbmd5=\"df19bbfd253240e3bf95962f27acd3f5\" md5=\"f04e8976d17cb87c510eef2344a4cc67\""
+                + " length=\"376977\" />\n\t<secHashInfoBase64>eyJwaGFzaCI6IjUwMzA1MDcwMDAyMDMwMTAifQ==</secHashInfoBase64>"
+                + "\n</msg>";
+        String xml = "<msg><appmsg><title>@小助手 这个图片的内容是什么</title><type>57</type><refermsg>"
+                + "<content>" + escape(inner) + "</content>"
+                + "<createtime>1793346721</createtime>"
+                + "<displayname> 陌年</displayname><fromusr>wxid_rsje67b7hozm22</fromusr>"
+                + "<svrid>5434531821355315196</svrid>"
+                + "<type>3</type><chatusr>wxid_rsje67b7hozm22</chatusr></refermsg></appmsg></msg>";
+
+        MediaMessageParser.Quoted quote = MediaMessageParser.parseQuote(49, xml);
+
+        assertThat(quote).isNotNull();
+        assertThat(quote.quoteAuthor()).isEqualTo("陌年");
+        assertThat(quote.quoteText()).isEqualTo("[图片]");
+        assertThat(quote.hasQuotedImage()).isTrue();
+        assertThat(quote.media().md5()).isEqualTo("f04e8976d17cb87c510eef2344a4cc67");
+        assertThat(quote.media().thumbMd5()).isEqualTo("df19bbfd253240e3bf95962f27acd3f5");
+        assertThat(quote.quoteEpochSeconds()).isEqualTo(1793346721L);
+    }
+
+    @Test
+    void quotedVoiceWithTypeAfterContentKeepsDuration() {
+        String inner = "wxid_5piziuygqi7c22:\n<msg><voicemsg voicelength=\"2159\" /></msg>";
+        String xml = "<msg><appmsg><title>@小助手 这个语音说的什么</title><type>57</type><refermsg>"
+                + "<content>" + escape(inner) + "</content><createtime>1793330890</createtime>"
+                + "<displayname>Cold</displayname><type>34</type>"
+                + "<chatusr>wxid_5piziuygqi7c22</chatusr></refermsg></appmsg></msg>";
+
+        MediaMessageParser.Quoted quote = MediaMessageParser.parseQuote(49, xml);
+
+        assertThat(quote).isNotNull();
+        assertThat(quote.quoteAuthor()).isEqualTo("Cold");
+        assertThat(quote.quoteText()).isEqualTo("[语音 2″]");
+        assertThat(quote.hasQuotedImage()).isFalse();
     }
 
     /** 拼一条「引用 type 类型消息再回复」的报文；被引用内容按微信习惯做 XML 转义。 */
     private static MediaMessageParser.Quoted quoteOf(String replyText, int quotedType, String quotedInner) {
-        String escaped = quotedInner.replace("<", "&lt;").replace(">", "&gt;");
         String xml = "<msg><appmsg><title>" + replyText + "</title><type>57</type>"
                 + "<refermsg><displayname>张三</displayname><chatusr>wxid_zhangsan</chatusr>"
-                + "<type>" + quotedType + "</type><content>" + escaped + "</content></refermsg>"
+                + "<type>" + quotedType + "</type><content>" + escape(quotedInner) + "</content></refermsg>"
                 + "</appmsg></msg>";
         return MediaMessageParser.parseQuote(49, xml);
+    }
+
+    private static String escape(String xml) {
+        return xml.replace("<", "&lt;").replace(">", "&gt;");
     }
 }

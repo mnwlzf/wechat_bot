@@ -85,6 +85,18 @@ public class MessageLog {
     @Column(name = "quote_text", length = 1000)
     private String quoteText;
 
+    /** 被引用的是一条图片时，它的原图 md5（用于让模型看到被引用的画面）。 */
+    @Column(name = "quote_md5", length = 64)
+    private String quoteMd5;
+
+    /** 被引用的图片缩略图 md5。 */
+    @Column(name = "quote_thumb_md5", length = 64)
+    private String quoteThumbMd5;
+
+    /** 被引用消息的发送时间，定位本地图片文件时用（不是本条回复的时间）。 */
+    @Column(name = "quote_media_at")
+    private OffsetDateTime quoteMediaAt;
+
     @Column(name = "prompt_tokens")
     private Integer promptTokens;
 

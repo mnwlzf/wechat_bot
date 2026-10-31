@@ -4,6 +4,7 @@ import com.example.wechatbot.domain.*;
 import com.example.wechatbot.repository.BotConfigRepository;
 import com.example.wechatbot.repository.ConversationRepository;
 import com.example.wechatbot.repository.MessageLogRepository;
+import com.example.wechatbot.wechat.ChatIdentity;
 import com.example.wechatbot.web.dto.AgentDtos;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -53,6 +54,10 @@ public class InboxService {
         }
         if (event.fromSelf()) {
             return new AgentDtos.EventAccepted("IGNORED", "忽略机器人自身消息", null);
+        }
+        // 最后一道防线：公众号 / 机器人 / 微信系统会话永远不自动回复（回调、轮询、Agent 接口都走这里）
+        if (ChatIdentity.isNeverReply(event.chatId())) {
+            return new AgentDtos.EventAccepted("IGNORED", ChatIdentity.rejectReason(event.chatId()), null);
         }
 
         BotConfig bot = event.botId() == null
@@ -135,6 +140,12 @@ public class InboxService {
         if (hook.hasQuote()) {
             inbound.setQuoteAuthor(hook.quoteAuthor());
             inbound.setQuoteText(hook.quoteText());
+            // 被引用的可能是图片：把定位本地文件要用的 md5 与它自己的发送时间一起存下来
+            if (hook.hasQuotedImage()) {
+                inbound.setQuoteMd5(hook.quoteMd5());
+                inbound.setQuoteThumbMd5(hook.quoteThumbMd5());
+                inbound.setQuoteMediaAt(hook.quoteAt());
+            }
         }
         inbound = messageRepository.save(inbound);
 

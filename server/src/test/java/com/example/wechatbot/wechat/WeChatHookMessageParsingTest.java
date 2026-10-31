@@ -16,7 +16,8 @@ class WeChatHookMessageParsingTest {
             new WeChatHookProperties(),
             mock(WeChatHookClient.class),
             mock(WeChatHookCursorRepository.class),
-            mock(InboxService.class));
+            mock(InboxService.class),
+            mock(com.example.wechatbot.service.RuntimeSettingsService.class));
 
     @Test
     void recoversAndStripsGroupSenderPrefixWithoutName2IdMapping() {

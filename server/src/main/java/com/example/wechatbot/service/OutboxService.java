@@ -109,6 +109,25 @@ public class OutboxService {
         repository.save(message);
     }
 
+    /**
+     * 直接作废：给非真人会话（公众号 / 机器人 / 系统号）用。
+     *
+     * <p>这类会话永远不该收到回复，入队前已经拦过一次，这里是投递前的最后一道防线：
+     * 直接标记 FAILED 并写明原因，不重试，免得同一条消息反复排队。</p>
+     */
+    @Transactional
+    public void cancel(UUID id, String reason) {
+        OutboxMessage message = repository.findById(id)
+                .orElseThrow(() -> ApiException.notFound("回复消息不存在"));
+        if (message.getStatus() == OutboxStatus.SENT) {
+            return;
+        }
+        message.setStatus(OutboxStatus.FAILED);
+        message.setLeaseUntil(null);
+        message.setLastError(abbreviate(reason == null ? "已作废" : reason, 1000));
+        repository.save(message);
+    }
+
     private String abbreviate(String text, int max) {
         return text.length() <= max ? text : text.substring(0, max);
     }

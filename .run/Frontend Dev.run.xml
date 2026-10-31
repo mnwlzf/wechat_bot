@@ -1,11 +1,12 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="Frontend Dev" type="js.build_tools.npm" factoryName="npm">
+  <configuration default="false" name="Frontend Dev" type="js.build_tools.npm">
     <package-json value="$PROJECT_DIR$/web/package.json" />
     <command value="run" />
     <scripts>
       <script value="dev" />
     </scripts>
     <node-interpreter value="project" />
+    <package-manager value="C:\Users\zf\AppData\Local\nvm\v22.22.0\npm.cmd" />
     <envs />
     <method v="2" />
   </configuration>

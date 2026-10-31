@@ -3,11 +3,17 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { ChatDotRound, Refresh, User } from '@element-plus/icons-vue'
 import { adminApi } from '@/api'
-import type { ChatCandidate, SearchSettings, SearchSettingsInput, SearchTestResult, SettingsSnapshot } from '@/api/types'
+import type {
+  ChatCandidate,
+  ChatKind,
+  SearchSettings,
+  SearchSettingsInput,
+  SearchTestResult,
+  SettingsSnapshot,
+} from '@/api/types'
 import { getErrorMessage } from '@/api/client'
 
 const loading = ref(false)
-const loadingCandidates = ref(false)
 const savingChat = ref(false)
 const savingLlm = ref(false)
 const savingSearch = ref(false)
@@ -16,8 +22,18 @@ const searchSnapshot = ref<SearchSettings | null>(null)
 const searchTestResult = ref<SearchTestResult | null>(null)
 const searchTestQuery = ref('今天有哪些重要新闻')
 const snapshot = ref<SettingsSnapshot | null>(null)
-const candidates = ref<ChatCandidate[]>([])
-const candidateHint = ref('')
+
+/** 白名单搜索：按好友昵称 / 备注、或群名称搜索，再勾选加入 */
+const searchKind = ref<'private' | 'groups'>('private')
+const searchKeyword = ref('')
+const searchResults = ref<ChatCandidate[]>([])
+const searchLoading = ref(false)
+const searchError = ref('')
+const searched = ref(false)
+const picked = ref<string[]>([])
+const manualInput = ref('')
+/** chatId → 名称，搜索到过的会话都记下来，白名单列表里就能显示中文名 */
+const chatNames = ref<Record<string, string>>({})
 
 const chatForm = reactive({
   allowedChats: [] as string[],
@@ -113,20 +129,47 @@ const searchDirty = computed(() => {
   )
 })
 
-const selectedRows = computed(() =>
-  chatForm.allowedChats.map((chatId) => {
-    const known = candidates.value.find((item) => item.chatId === chatId)
-    return {
-      chatId,
-      name: known?.name || chatId,
-      group: known ? known.group : chatId.endsWith('@chatroom'),
-      unknown: !known,
-    }
-  }),
+const privateChats = computed(() =>
+  chatForm.allowedChats.filter((chatId) => !isGroupChat(chatId) && !looksNonHuman(chatId)),
 )
+const groupChats = computed(() => chatForm.allowedChats.filter(isGroupChat))
+/** 历史白名单里可能残留公众号 / 机器人：后端不会回复，这里单独列出来方便清理 */
+const staleChats = computed(() => chatForm.allowedChats.filter(looksNonHuman))
 
-const groupOptions = computed(() => candidates.value.filter((item) => item.group))
-const privateOptions = computed(() => candidates.value.filter((item) => !item.group))
+function isGroupChat(chatId: string) {
+  return chatId.endsWith('@chatroom')
+}
+
+function nameOf(chatId: string) {
+  return chatNames.value[chatId] || chatId
+}
+
+function kindLabel(kind: ChatKind) {
+  switch (kind) {
+    case 'GROUP':
+      return '群聊'
+    case 'PRIVATE':
+      return '私聊'
+    case 'OFFICIAL':
+      return '公众号 / 机器人'
+    default:
+      return '系统会话'
+  }
+}
+
+/** 公众号 / 机器人 / 系统会话永远不回复：前端先挡一道，后端还有同样的判断 */
+function looksNonHuman(chatId: string) {
+  const id = chatId.trim().toLowerCase()
+  return (
+    id.startsWith('gh_') ||
+    id.startsWith('wxid_wi_') ||
+    id.endsWith('@weclaw') ||
+    id.endsWith('@openim') ||
+    id.endsWith('@kf') ||
+    id.endsWith('_officialaccounts') ||
+    ['filehelper', 'weixin', 'fmessage', 'medianote', 'newsapp', 'qqmail', 'qmessage', 'tmessage', 'notifymessage'].includes(id)
+  )
+}
 
 function applySearchSnapshot(value: SearchSettings) {
   searchSnapshot.value = value
@@ -167,61 +210,94 @@ async function load() {
     loading.value = false
   }
 }
-/** 会话候选：历史会话（后端库）+ 微信当前会话 + 联系人，任一来源可用即可。 */
-async function loadCandidates(notify = false) {
-  loadingCandidates.value = true
-  const merged = new Map<string, ChatCandidate>()
-
-  const push = (chatId: string, name: string, source: ChatCandidate['source']) => {
-    if (!chatId) return
-    const group = chatId.endsWith('@chatroom')
-    const existing = merged.get(chatId)
-    if (!existing) {
-      merged.set(chatId, { chatId, name: name || chatId, group, source })
-      return
-    }
-    if ((!existing.name || existing.name === chatId) && name) {
-      existing.name = name
-    }
-    if (source === 'contact') existing.source = 'contact'
-  }
-
+/** 按昵称 / 备注 / 群名称搜索可加入白名单的会话。 */
+async function runSearch(notify = false) {
+  searchLoading.value = true
+  searchError.value = ''
   try {
-    const conversations = await adminApi.conversations({ page: 0, size: 200 })
-    conversations.content.forEach((item) => push(item.chatId, item.chatName, 'conversation'))
-  } catch {
-    /* 后端会话库为空时忽略 */
-  }
-
-  let hookWarning = ''
-  try {
-    const sessions = await adminApi.sessions(200)
-    sessions.forEach((row) => push(row.username || '', row.username || '', 'session'))
-  } catch (error) {
-    hookWarning = getErrorMessage(error)
-  }
-  try {
-    const contacts = await adminApi.contacts(200)
-    contacts.forEach((row) => {
-      const name = row.remark || row.nick_name || row.alias || row.username || ''
-      push(row.username || '', name, 'contact')
+    const rows = await adminApi.searchChats({
+      kind: searchKind.value,
+      keyword: searchKeyword.value.trim(),
+      limit: 200,
     })
+    searchResults.value = rows
+    searched.value = true
+    rows.forEach((row) => {
+      chatNames.value[row.chatId] = row.name
+    })
+    if (notify) {
+      ElMessage.success(rows.length ? `找到 ${rows.length} 个会话` : '没有找到匹配的会话')
+    }
   } catch (error) {
-    hookWarning = hookWarning || getErrorMessage(error)
+    searchResults.value = []
+    searchError.value = getErrorMessage(error)
+  } finally {
+    searchLoading.value = false
   }
+}
 
-  candidates.value = [...merged.values()].sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN'))
-  loadingCandidates.value = false
+function togglePick(chatId: string) {
+  picked.value = picked.value.includes(chatId)
+    ? picked.value.filter((item) => item !== chatId)
+    : [...picked.value, chatId]
+}
 
-  candidateHint.value = hookWarning
-    ? `已载入 ${candidates.value.length} 个历史会话；微信实时会话不可用（${hookWarning}）`
-    : `来自历史会话 ${candidates.value.length} 个`
+function addPicked() {
+  const existing = new Set(chatForm.allowedChats)
+  const added = picked.value.filter((chatId) => !existing.has(chatId))
+  chatForm.allowedChats = [...chatForm.allowedChats, ...added]
+  picked.value = []
+  if (added.length) {
+    ElMessage.success(`已加入 ${added.length} 个会话，点「保存并生效」后开始按新白名单接收`)
+  }
+}
 
-  if (notify) {
-    if (candidates.value.length) {
-      ElMessage.success(`已载入 ${candidates.value.length} 个候选会话`)
-    } else {
-      ElMessage.warning('没有拿到会话列表，可直接输入 wxid 或 @chatroom 后回车')
+function addManual() {
+  const parts = manualInput.value
+    .split(/[,，\s]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+  if (!parts.length) return
+  const existing = new Set(chatForm.allowedChats)
+  const added: string[] = []
+  const rejected: string[] = []
+  for (const chatId of parts) {
+    if (looksNonHuman(chatId)) {
+      rejected.push(chatId)
+      continue
+    }
+    if (searchKind.value === 'groups' && !isGroupChat(chatId)) {
+      rejected.push(chatId)
+      continue
+    }
+    if (searchKind.value === 'private' && isGroupChat(chatId)) {
+      rejected.push(chatId)
+      continue
+    }
+    if (existing.has(chatId)) continue
+    existing.add(chatId)
+    added.push(chatId)
+  }
+  chatForm.allowedChats = [...chatForm.allowedChats, ...added]
+  manualInput.value = ''
+  if (added.length) {
+    ElMessage.success(`已加入 ${added.length} 个会话`)
+  }
+  if (rejected.length) {
+    ElMessage.warning(`已跳过 ${rejected.join('、')}：公众号 / 机器人 / 系统会话不会回复，或 ID 类型与当前搜索不匹配`)
+  }
+}
+
+/** 载入两类会话的名称，让已有白名单条目也能显示中文名；Hook 不可用时后端会退回本地会话库。 */
+async function loadNames() {
+  for (const kind of ['private', 'groups'] as const) {
+    try {
+      const rows = await adminApi.searchChats({ kind, keyword: '', limit: 500 })
+      rows.forEach((row) => {
+        chatNames.value[row.chatId] = row.name
+      })
+    } catch {
+      /* 名称只用于展示，失败不影响白名单编辑 */
     }
   }
 }
@@ -322,6 +398,7 @@ async function saveMedia() {
 
 function removeChat(chatId: string) {
   chatForm.allowedChats = chatForm.allowedChats.filter((item) => item !== chatId)
+  picked.value = picked.value.filter((item) => item !== chatId)
 }
 
 function sourceLabel(source?: string) {
@@ -330,7 +407,7 @@ function sourceLabel(source?: string) {
 
 onMounted(async () => {
   await load()
-  await loadCandidates()
+  await loadNames()
 })
 </script>
 
@@ -351,87 +428,142 @@ onMounted(async () => {
       <div class="surface-card__head">
         <div>
           <h2>会话白名单</h2>
-          <p class="head-desc">只有名单内的会话才会被回复。留空且开启「全量接收」时，所有私聊都会被回复。</p>
+          <p class="head-desc">
+            只处理两类会话：<strong>群聊</strong>和<strong>真人私聊</strong>。
+            其它（公众号 / 订阅号 / 机器人 / 系统会话）一律忽略。
+            按昵称 / 备注搜好友、按群名称搜群聊，勾选后加入。
+          </p>
         </div>
         <span class="count-badge">{{ snapshot ? sourceLabel(snapshot.allowedChats.source) : '—' }}</span>
       </div>
 
       <div class="surface-card__body">
-        <div class="picker-head">
-          <span class="hint">{{ candidateHint || '从会话列表选择，或直接粘贴 wxid / @chatroom 后回车' }}</span>
-          <el-button
-            size="small"
-            :loading="loadingCandidates"
-            :icon="Refresh"
-            @click="loadCandidates(true)"
-          >
-            载入微信会话
+        <div class="policy-note">
+          只保留<strong>群聊</strong>和<strong>真人私聊</strong>两种会话：微信系统号、公众号（服务号 / 订阅号）、
+          机器人（如微信 AI 助手）<strong>一律忽略</strong>，即使写进白名单也不会回复。
+        </div>
+
+        <div class="policy-split">
+          <section class="policy-panel">
+            <header class="policy-panel__head">
+              <h3>私聊白名单 <span class="count-badge">{{ privateChats.length }}</span></h3>
+              <small>{{ privateChats.length ? '只回复名单内的好友' : '名单为空，按「全量接收私聊」开关处理' }}</small>
+            </header>
+            <ul v-if="privateChats.length" class="chat-list">
+              <li v-for="chatId in privateChats" :key="chatId" class="chat-item">
+                <span class="chat-icon">
+                  <el-icon><User /></el-icon>
+                </span>
+                <span class="chat-copy">
+                  <strong>{{ nameOf(chatId) }}</strong>
+                  <span v-if="nameOf(chatId) !== chatId" class="mono chat-id">{{ chatId }}</span>
+                </span>
+                <el-button text type="danger" size="small" @click="removeChat(chatId)">移除</el-button>
+              </li>
+            </ul>
+            <div v-else class="chat-empty hint">还没有私聊白名单</div>
+          </section>
+
+          <section class="policy-panel">
+            <header class="policy-panel__head">
+              <h3>群聊白名单 <span class="count-badge">{{ groupChats.length }}</span></h3>
+              <small>{{ groupChats.length ? '名单内的群，命中唤醒词才回复' : '群聊不做全量接收，为空即不回复任何群' }}</small>
+            </header>
+            <ul v-if="groupChats.length" class="chat-list">
+              <li v-for="chatId in groupChats" :key="chatId" class="chat-item">
+                <span class="chat-icon">
+                  <el-icon><ChatDotRound /></el-icon>
+                </span>
+                <span class="chat-copy">
+                  <strong>{{ nameOf(chatId) }}</strong>
+                  <span v-if="nameOf(chatId) !== chatId" class="mono chat-id">{{ chatId }}</span>
+                </span>
+                <el-button text type="danger" size="small" @click="removeChat(chatId)">移除</el-button>
+              </li>
+            </ul>
+            <div v-else class="chat-empty hint">还没有群聊白名单</div>
+          </section>
+        </div>
+
+        <div v-if="staleChats.length" class="stale-block">
+          <div class="stale-block__head">
+            <strong>白名单里有 {{ staleChats.length }} 个不会回复的会话</strong>
+            <small>公众号、机器人、系统会话永远不会自动回复，建议移除以保持名单干净。</small>
+          </div>
+          <ul class="chat-list">
+            <li v-for="chatId in staleChats" :key="chatId" class="chat-item">
+              <span class="chat-copy">
+                <strong>{{ nameOf(chatId) }}</strong>
+                <span v-if="nameOf(chatId) !== chatId" class="mono chat-id">{{ chatId }}</span>
+              </span>
+              <el-tag type="danger" effect="plain" size="small">不会回复</el-tag>
+              <el-button text type="danger" size="small" @click="removeChat(chatId)">移除</el-button>
+            </li>
+          </ul>
+        </div>
+
+        <div class="chat-search">
+          <el-radio-group v-model="searchKind" size="small">
+            <el-radio-button label="private">搜好友</el-radio-button>
+            <el-radio-button label="groups">搜群聊</el-radio-button>
+          </el-radio-group>
+          <el-input
+            v-model="searchKeyword"
+            class="chat-search__input"
+            clearable
+            :placeholder="searchKind === 'groups' ? '输入群名称，例如：项目群' : '输入昵称或备注，例如：张三'"
+            @keyup.enter="runSearch(true)"
+          />
+          <el-button :loading="searchLoading" :icon="Refresh" @click="runSearch(true)">搜索</el-button>
+          <el-button type="primary" :disabled="!picked.length" @click="addPicked">
+            添加所选{{ picked.length ? `（${picked.length}）` : '' }}
           </el-button>
         </div>
 
-        <el-select
-          v-model="chatForm.allowedChats"
-          class="picker"
-          multiple
-          filterable
-          allow-create
-          default-first-option
-          collapse-tags
-          collapse-tags-tooltip
-          :reserve-keyword="false"
-          placeholder="搜索昵称、备注或 wxid"
-        >
-          <el-option-group v-if="groupOptions.length" label="群聊">
-            <el-option
-              v-for="item in groupOptions"
-              :key="item.chatId"
-              :label="item.name"
-              :value="item.chatId"
-            >
-              <div class="option-row">
-                <span class="option-name">{{ item.name }}</span>
-                <span v-if="item.name !== item.chatId" class="option-id mono">{{ item.chatId }}</span>
-              </div>
-            </el-option>
-          </el-option-group>
-          <el-option-group v-if="privateOptions.length" label="好友与私聊">
-            <el-option
-              v-for="item in privateOptions"
-              :key="item.chatId"
-              :label="item.name"
-              :value="item.chatId"
-            >
-              <div class="option-row">
-                <span class="option-name">{{ item.name }}</span>
-                <span v-if="item.name !== item.chatId" class="option-id mono">{{ item.chatId }}</span>
-              </div>
-            </el-option>
-          </el-option-group>
-        </el-select>
+        <div v-if="searchError" class="inline-error">{{ searchError }}</div>
 
-        <ul v-if="selectedRows.length" class="chat-list">
-          <li v-for="row in selectedRows" :key="row.chatId" class="chat-item">
-            <span class="chat-icon">
-              <el-icon><component :is="row.group ? ChatDotRound : User" /></el-icon>
+        <ul v-if="searchResults.length" class="candidate-list">
+          <li
+            v-for="item in searchResults"
+            :key="item.chatId"
+            class="candidate-item"
+            :class="{ 'is-blocked': item.blocked, 'is-added': chatForm.allowedChats.includes(item.chatId) }"
+          >
+            <el-checkbox
+              :model-value="picked.includes(item.chatId)"
+              :disabled="item.blocked || chatForm.allowedChats.includes(item.chatId)"
+              @change="togglePick(item.chatId)"
+            />
+            <span class="candidate-copy">
+              <strong>{{ item.name }}</strong>
+              <span v-if="item.name !== item.chatId" class="mono chat-id">{{ item.chatId }}</span>
             </span>
-            <span class="chat-copy">
-              <strong>{{ row.name }}</strong>
-              <span v-if="row.name !== row.chatId" class="mono chat-id">{{ row.chatId }}</span>
-            </span>
-            <el-tag :type="row.group ? 'warning' : 'info'" effect="plain" size="small">
-              {{ row.group ? '群聊' : '私聊' }}
+            <el-tag :type="item.group ? 'warning' : 'info'" effect="plain" size="small">
+              {{ kindLabel(item.kind) }}
             </el-tag>
-            <el-tag v-if="row.unknown" type="info" effect="plain" size="small">未识别</el-tag>
-            <el-button text type="danger" size="small" @click="removeChat(row.chatId)">移除</el-button>
+            <span v-if="item.blocked" class="candidate-note">{{ item.blockedReason }}</span>
+            <span v-else-if="chatForm.allowedChats.includes(item.chatId)" class="candidate-note">已在白名单</span>
           </li>
         </ul>
-        <div v-else class="chat-empty hint">还没有白名单条目</div>
+        <div v-else-if="searched && !searchLoading" class="chat-empty hint">
+          没有找到匹配的{{ searchKind === 'groups' ? '群聊' : '好友' }}，换一个关键词试试。
+        </div>
+
+        <div class="manual-add">
+          <el-input
+            v-model="manualInput"
+            class="chat-search__input"
+            :placeholder="searchKind === 'groups' ? '也可以粘贴群 ID（@chatroom 结尾），多个用逗号分隔' : '也可以粘贴 wxid，多个用逗号分隔'"
+            @keyup.enter="addManual"
+          />
+          <el-button @click="addManual">手动添加</el-button>
+        </div>
 
         <div class="settings-block">
           <div class="setting-row">
             <div>
               <strong>全量接收私聊</strong>
-              <small>白名单为空时，是否接收所有私聊消息</small>
+              <small>私聊白名单为空时，是否接收所有私聊（公众号 / 机器人 / 系统会话除外）</small>
             </div>
             <div class="setting-row__control">
               <el-switch v-model="chatForm.acceptAll" />
@@ -440,7 +572,7 @@ onMounted(async () => {
           <div class="setting-row">
             <div>
               <strong>处理群聊消息</strong>
-              <small>关闭时群消息直接忽略；开启后还要命中唤醒词才会回复</small>
+              <small>关闭时群消息直接忽略；开启后只有群聊白名单里的群、且命中唤醒词才会回复</small>
             </div>
             <div class="setting-row__control">
               <el-switch v-model="chatForm.groupsEnabled" />
@@ -798,33 +930,161 @@ onMounted(async () => {
   color: #b91c1c;
   background: #fef2f2;
 }
-.picker-head {
+.policy-note {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border: 1px solid #fde68a;
+  border-radius: var(--radius-sm);
+  color: #92400e;
+  background: #fffbeb;
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+}
+
+.policy-note strong {
+  color: #b45309;
+}
+
+.policy-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+}
+
+.policy-panel {
+  padding: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  background: #fbfcfe;
+}
+
+.policy-panel__head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.policy-panel__head h3 {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 6px;
+  margin: 0;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.policy-panel__head small {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.stale-block {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid #fecaca;
+  border-radius: var(--radius-sm);
+  background: #fef2f2;
+}
+
+.stale-block__head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stale-block__head strong {
+  color: #b91c1c;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.stale-block__head small {
+  color: #b91c1c;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.chat-search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
-  margin-bottom: 8px;
+  margin-top: 12px;
 }
 
-.picker {
-  width: 100%;
+.chat-search__input {
+  flex: 1;
+  min-width: 180px;
 }
 
-.option-row {
+.manual-add {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  gap: 8px;
+  margin-top: 8px;
 }
 
-.option-name {
+.inline-error {
+  margin-top: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  color: #b91c1c;
+  background: #fef2f2;
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.candidate-list {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.candidate-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  background: #fff;
+}
+
+.candidate-item.is-added {
+  background: #f8fafc;
+}
+
+.candidate-item.is-blocked {
+  background: #f8fafc;
+  opacity: 0.75;
+}
+
+.candidate-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.candidate-copy strong {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: var(--fs-sm);
+  font-weight: 600;
+  color: var(--ink);
 }
 
-.option-id {
-  color: var(--muted-soft);
+.candidate-note {
+  color: var(--muted);
   font-size: 10px;
 }
 
@@ -844,7 +1104,7 @@ onMounted(async () => {
   padding: 7px 10px;
   border: 1px solid var(--line-soft);
   border-radius: var(--radius-sm);
-  background: #fbfcfe;
+  background: #fff;
 }
 
 .chat-icon {
@@ -916,80 +1176,25 @@ onMounted(async () => {
   .settings-grid {
     grid-template-columns: 1fr;
   }
+
+  .policy-split {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 680px) {
-  .search-config-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
-  gap: 12px;
-  margin-top: 8px;
-}
-
-.search-form {
-  padding: 10px 12px;
-  border: 1px solid var(--line-soft);
-  border-radius: var(--radius-sm);
-  background: #fbfcfe;
-}
-
-.search-form :deep(.el-form-item) {
-  margin-bottom: 10px;
-}
-
-.search-key-status {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 18px;
-  color: var(--muted);
-  font-size: 10px;
-}
-
-.search-key-status span {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.search-key-status code {
-  color: var(--ink-soft);
-  font-size: 10px;
-}
-
-.search-key-status b {
-  color: var(--muted-soft);
-  font-weight: 500;
-}
-
-.search-test-row {
-  display: flex;
-  gap: 8px;
-  margin-top: 2px;
-}
-
-.search-test-row .el-input {
-  flex: 1;
-}
-
-.search-test-result {
-  margin-top: 6px;
-  padding: 6px 8px;
-  border-radius: 4px;
-  color: #15803d;
-  background: #f0fdf4;
-  font-size: 10px;
-}
-
-.search-test-result.failed {
-  color: #b91c1c;
-  background: #fef2f2;
-}
-.picker-head {
-    align-items: flex-start;
+  .chat-search,
+  .manual-add {
     flex-direction: column;
+    align-items: stretch;
   }
 
-  .chat-item {
+  .chat-search__input {
+    width: 100%;
+  }
+
+  .chat-item,
+  .candidate-item {
     flex-wrap: wrap;
   }
 

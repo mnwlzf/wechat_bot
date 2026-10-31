@@ -2,8 +2,7 @@ package com.example.wechatbot.wechat;
 
 import com.example.wechatbot.config.WeChatHookProperties;
 import com.example.wechatbot.service.OutboxService;
-import com.example.wechatbot.web.dto.AgentDtos;
-import org.slf4j.Logger;
+import com.example.wechatbot.web.dto.AgentDtos;import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -40,6 +39,12 @@ public class WeChatHookOutboxDispatcher {
             int batch = Math.max(1, Math.min(properties.getBatchSize(), 20));
             List<AgentDtos.OutboxView> messages = outboxService.lease(batch);
             for (AgentDtos.OutboxView message : messages) {
+                // 最后一道防线：只允许群聊和真人私聊，公众号 / 机器人 / 系统号一律不投递
+                if (ChatIdentity.isNeverReply(message.chatId())) {
+                    outboxService.cancel(message.id(), ChatIdentity.rejectReason(message.chatId()));
+                    log.info("丢弃发往非真人会话的回复，outbox={} chat={}", message.id(), message.chatId());
+                    continue;
+                }
                 try {
                     pause(ThreadLocalRandom.current().nextLong(0, 350));
                     client.sendText(message.chatId(), message.content());

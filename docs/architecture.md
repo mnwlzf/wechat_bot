@@ -165,7 +165,8 @@ Redis 只承担可重建的协调状态：事件去重和分钟级限流。核�
 
 - `WECHAT_HOOK_URL` 只接受回环地址
 - 官方预编译 DLL 没有 token，必须配合 Windows 防火墙
-- 仅处理 `WECHAT_ALLOWED_CHATS` 白名单会话
+- 仅处理白名单会话：私聊按私聊白名单（为空时才看「全量接收私聊」），群聊必须逐个加群白名单
+- 公众号（`gh_*`）、机器人（`*@weclaw`、`*@openim`）与微信系统会话（`filehelper`、`weixin` 等）永不自动回复
 - 不执行任意写 SQL，不修改微信消息数据库
 - DLL 安装前校验固定 SHA-256，并备份已有的 `version.dll`
 - 不随仓库分发微信客户端或腾讯 DLL

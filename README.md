@@ -207,16 +207,35 @@ Invoke-RestMethod http://localhost:8080/api/admin/wechat/contacts -Headers $head
 **白名单在管理端「运行策略」里改，写完立即生效，不用重启、不用碰 `.env`**：
 
 ```text
-运行策略 → 会话白名单：每行一个 wxid 或 @chatroom
-          全量接收：白名单为空时是否接收所有私聊
-          处理群聊消息：关闭则群消息直接忽略
+运行策略 → 会话白名单：
+  1. 选「搜好友」或「搜群聊」，输入昵称 / 备注 / 群名称，点搜索；
+  2. 勾选要允许的会话，点「添加所选」（也可以直接粘贴 wxid / @chatroom）；
+  3. 点「保存并生效」。
+  私聊和群聊分两栏展示，可以分别移除。
+  全量接收私聊：私聊白名单为空时是否接收所有私聊
+  处理群聊消息：关闭则群消息直接忽略
 ```
+
+私聊和群聊的准入规则（参考 WeChatAgent 的白名单逻辑）。**只保留两类会话：群聊和真人私聊**，
+其余一律忽略：
+
+| 会话类型 | 什么时候回复 |
+|---|---|
+| 私聊（真人，`wxid_*` 等） | 私聊白名单非空时只回名单内的；为空时由「全量接收私聊」决定 |
+| 群聊（`*@chatroom`） | 必须打开「处理群聊消息」，**并且**群 ID 在群聊白名单里；群聊不做全量接收 |
+| 公众号（`gh_*`，服务号 / 订阅号） | 永远不回复（连发件都拦：投递前会作废） |
+| 机器人（如 `*@weclaw`、`*@openim`） | 永远不回复（连发件都拦：投递前会作废） |
+| 系统会话（`filehelper`、`weixin`、`service_officialaccounts` 等） | 永远不回复（连发件都拦：投递前会作废） |
+
+即使把这些非真人会话写进白名单也不会回复，管理端会单独标红提示，建议直接移除。
 
 对应接口：
 
 ```powershell
 $h = @{ Authorization = "Bearer $env:ADMIN_TOKEN"; "Content-Type" = "application/json" }
 Invoke-RestMethod http://localhost:8080/api/admin/settings -Headers $h
+# 按昵称 / 备注 / 群名称搜索候选（kind=private|groups）
+Invoke-RestMethod "http://localhost:8080/api/admin/wechat/chats?kind=private&keyword=张" -Headers $h
 Invoke-RestMethod -Method Put http://localhost:8080/api/admin/settings/wechat -Headers $h `
   -Body (@{ groupsEnabled = $false; acceptAll = $true; allowedChats = @("wxid_friend") } | ConvertTo-Json)
 ```
@@ -310,10 +329,10 @@ recv_url=http://127.0.0.1:8080/api/wechat/hook/callback
 | `WECHAT_HOOK_OUTBOX_ENABLED` | `true` | 是否由 Java 直接消费 outbox |
 | `WECHAT_HOOK_URL` | `http://127.0.0.1:30001` | 仅允许回环 HTTP 地址 |
 | `WECHAT_ACCOUNT` | 空 | 账号目录或 wxid；官方 DLL 可自动识别 |
-| `WECHAT_ALLOWED_CHATS` | 空 | 逗号分隔的允许会话 ID |
+| `WECHAT_ALLOWED_CHATS` | 空 | 逗号分隔的允许会话 ID（私聊 wxid / 群 `@chatroom`） |
 | `WECHAT_SELF_WXID` | 空 | 本账号 wxid，用于丢弃自己发出的消息 |
 | `WECHAT_HOOK_CALLBACK_ENABLED` | `false` | 打开 `CallBackURL` 回调接收（此时 DB 轮询自动停用） |
-| `WECHAT_CALLBACK_ACCEPT_ALL` | `true` | 白名单为空时是否接收全部会话 |
+| `WECHAT_CALLBACK_ACCEPT_ALL` | `true` | 私聊白名单为空时是否接收全部私聊（不含公众号 / 机器人 / 系统会话） |
 | `WECHAT_CALLBACK_REQUIRE_LOOPBACK` | `true` | 回调端点是否只接受 127.0.0.1/::1 |
 | `WECHAT_CALLBACK_GROUPS_ENABLED` | `false` | 是否处理群消息回调 |
 | `WECHAT_HOOK_SKIP_HISTORY` | `true` | 首次启动是否跳过历史消息 |
@@ -390,16 +409,18 @@ LLM_SEARCH_TIMEOUT_SECONDS=20
 
 | 策略项 | 作用 | 覆盖的环境变量 |
 |---|---|---|
-| `wechat.allowedChats` | 允许回复的会话（私聊 wxid / 群 `@chatroom`） | `WECHAT_ALLOWED_CHATS` |
-| `wechat.acceptAll` | 白名单为空时是否接收全部私聊 | `WECHAT_CALLBACK_ACCEPT_ALL` |
-| `wechat.groupsEnabled` | 是否处理群消息 | `WECHAT_CALLBACK_GROUPS_ENABLED` |
+| `wechat.allowedChats` | 允许回复的会话（私聊 wxid / 群 `@chatroom`）；群聊只认这份名单，私聊为空时才看 `acceptAll` | `WECHAT_ALLOWED_CHATS` |
+| `wechat.acceptAll` | 私聊白名单为空时是否接收全部私聊（公众号 / 机器人 / 系统会话始终不回复） | `WECHAT_CALLBACK_ACCEPT_ALL` |
+| `wechat.groupsEnabled` | 是否处理群消息；开启后仍需群 ID 在群聊白名单内 | `WECHAT_CALLBACK_GROUPS_ENABLED` |
 | `llm.fallbackEnabled` | 是否启用备用链路（多 Provider 回退）。关闭后只走主 Provider 的主/备双 Key | `LLM_FALLBACK_ENABLED` |
 | `media.enabled` / `media.replyMode` / `media.ackText` | 媒体消息开关与回复策略（`ignore` / `ack` / `llm`） | — |
 
-### 7.4 引用消息与图片识别
+### 7.4 各类消息的处理与引用回复
 
-- **引用消息**：`type=49` 且带 `<refermsg>` 时按文本处理，`content` 是本次说的话，`quote_author`/`quote_text` 记录被引用的发送者与内容；被引用的对象可能是文本、图片、语音、表情、文件或链接，统一渲染成占位文本（`[图片]`、`[语音 4″]`、`[文件] 报价单.pdf` …）。送给模型时当前消息会拼成 `[引用 张三：原文]` + 本次说的话。
+- **类型覆盖**：文本、图片、语音、视频、表情、文件、链接、位置、名片、小程序、合并转发、视频号、转账、红包、通话、系统消息、引用回复都有对应渲染规则，完整表格见 [docs/messages.md](docs/messages.md)。
+- **引用消息**：`type=49` 且带 `<refermsg>` 时按文本处理，`content` 是本次说的话，`quote_author`/`quote_text` 记录被引用的发送者与内容；被引用的对象可能是文本、图片、语音、表情、文件或链接，统一渲染成可读文本（`[图片]`、`[语音 4″]`、`[文件] 报价单.pdf · 1.5 MB` …）。送给模型时当前消息会排成「【引用的消息｜来自 张三】原文」+「【我这次说的话】本次说的话」两段；被引用的是图片时，还会顺着它自己的 md5 与发送时间把那张图也发给模型看。
 - **图片识别**：`type=3` 的图片会真的交给模型看——按 `md5(会话 id)` 定位微信数据目录里的本地 `.dat`（文件名用的是报文里某个 md5，原图/缩略图两套都试，都对不上再按消息时间窗兜底），用**本机 kvcomm 派生的密钥**做 V2 解密（报文里的 `aeskey` 只用于 CDN 下载，解不了本地文件），所有能解出来的副本都试一遍、取像素最多的那份（含 `cache/**/Bubble/*_b.dat`，实测比缩略图大得多），缩放到长边 1024 内、转 JPEG 后以多段 content（`text` + `image_url`）发送。高清副本常是微信自有的 `wxgf`(HEVC) 容器，JDK 解不了，此时落到气泡副本或 `_t.dat` 缩略图；只有缩略图时会明确告诉模型「画面受限」。任一步失败都退化为 `[图片]` 占位文本，不影响回复；上游拒绝带图请求时自动改纯文本重试。
+- **语音不转写**：Hook 不提供语音转文字，语音只会渲染成 `[语音 5″]`，同时给模型注入一条「听不到内容，别编」的说明。
 - 相关环境变量：`LLM_VISION_ENABLED`、`LLM_VISION_MAX_EDGE`、`LLM_VISION_MAX_BYTES`、`LLM_VISION_CACHE_DIR`、`LLM_VISION_KVCOMM_DIR`、`LLM_VISION_MATCH_WINDOW_SECONDS`、`WECHAT_IMAGE_ROOT`，详见 [docs/api.md](docs/api.md#图片识别)。
 
 ```powershell

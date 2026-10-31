@@ -1,9 +1,12 @@
 package com.example.wechatbot.wechat;
 
+import com.example.wechatbot.config.AppProperties;
 import com.example.wechatbot.config.WeChatHookProperties;
 import com.example.wechatbot.domain.WeChatHookCursor;
+import com.example.wechatbot.repository.AppSettingRepository;
 import com.example.wechatbot.repository.WeChatHookCursorRepository;
 import com.example.wechatbot.service.InboxService;
+import com.example.wechatbot.service.RuntimeSettingsService;
 import com.example.wechatbot.web.dto.AgentDtos;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
@@ -66,7 +69,13 @@ class WeChatHookInboxPollerTest {
         when(inboxService.accept(any(), any())).thenReturn(new AgentDtos.EventAccepted("ACCEPTED", "ok", null));
 
         WeChatHookClient client = new WeChatHookClient(properties);
-        WeChatHookInboxPoller poller = new WeChatHookInboxPoller(properties, client, cursorRepository, inboxService);
+        AppSettingRepository settingRepository = mock(AppSettingRepository.class);
+        when(settingRepository.findAll()).thenReturn(List.of());
+        RuntimeSettingsService settings =
+                new RuntimeSettingsService(settingRepository, properties, new AppProperties());
+        settings.reload();
+        WeChatHookInboxPoller poller =
+                new WeChatHookInboxPoller(properties, client, cursorRepository, inboxService, settings);
 
         poller.poll();
         assertThat(cursors.get("wxid_me|" + chatId).getCursorValue()).isEqualTo(5);

@@ -76,4 +76,17 @@ class ApiSmokeTest {
                 .andExpect(jsonPath("$.providers").isArray())
                 .andExpect(jsonPath("$.warnings").isArray());
     }
+
+    @Test
+    void exposesChatCandidatesAndSplitWhitelist() throws Exception {
+        mockMvc.perform(get("/api/admin/wechat/chats").param("kind", "private")
+                        .header("Authorization", "Bearer test-admin"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$").isArray());
+
+        mockMvc.perform(get("/api/admin/settings").header("Authorization", "Bearer test-admin"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.allowedPrivateChats.value").isArray())
+                .andExpect(jsonPath("$.allowedGroupChats.value").isArray());
+    }
 }

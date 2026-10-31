@@ -7,6 +7,7 @@ import com.example.wechatbot.repository.WeChatHookCursorRepository;
 import com.example.wechatbot.service.InboxService;
 import com.example.wechatbot.service.HookExtras;
 import com.example.wechatbot.service.MediaMessageParser;
+import com.example.wechatbot.service.RuntimeSettingsService;
 import com.example.wechatbot.web.dto.AgentDtos;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,6 +46,7 @@ public class WeChatHookInboxPoller {
     private final WeChatHookClient client;
     private final WeChatHookCursorRepository cursorRepository;
     private final InboxService inboxService;
+    private final RuntimeSettingsService settings;
     private final AtomicBoolean running = new AtomicBoolean(false);
 
     private volatile List<String> shards = List.of();
@@ -62,11 +64,13 @@ public class WeChatHookInboxPoller {
     public WeChatHookInboxPoller(WeChatHookProperties properties,
                                  WeChatHookClient client,
                                  WeChatHookCursorRepository cursorRepository,
-                                 InboxService inboxService) {
+                                 InboxService inboxService,
+                                 RuntimeSettingsService settings) {
         this.properties = properties;
         this.client = client;
         this.cursorRepository = cursorRepository;
         this.inboxService = inboxService;
+        this.settings = settings;
     }
 
     @Scheduled(fixedDelayString = "${app.wechat.hook.poll-interval-ms:2000}",
@@ -80,15 +84,22 @@ public class WeChatHookInboxPoller {
                 // 回调模式由 HookCallbackController 接收消息，避免与数据库轮询重复投递
                 return;
             }
-            List<String> allowedChats = properties.allowedChatIds();
+            List<String> allowedChats = settings.allowedChats();
             if (allowedChats.isEmpty()) {
-                logErrorThrottled("WECHAT_ALLOWED_CHATS 未配置，Hook 收消息轮询未启动");
+                logErrorThrottled("会话白名单为空，Hook 收消息轮询未启动");
                 return;
             }
             WeChatHookClient.HookHealth health = client.verify(false);
             refreshDiscoveryIfNeeded();
             refreshContactsIfNeeded();
             for (String chatId : allowedChats) {
+                // 公众号 / 机器人 / 系统会话没有消息表可读，也不该回复
+                if (ChatIdentity.isNeverReply(chatId)) {
+                    continue;
+                }
+                if (ChatIdentity.isGroup(chatId) && !settings.groupsEnabled()) {
+                    continue;
+                }
                 pollChat(chatId, health.account());
             }
             lastError = "";
