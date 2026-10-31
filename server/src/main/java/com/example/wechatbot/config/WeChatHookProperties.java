@@ -27,6 +27,11 @@ public class WeChatHookProperties {
     private String guardStatusFile = "logs/guard-status.json";
     /** 微信数据目录（xwechat_files 的父级）；留空自动取 %USERPROFILE%\Documents\xwechat_files。 */
     private String imageRoot = "";
+    /**
+     * 可选的外部联系人读取服务（WeChatAgent 的 WeFlow reader 那一层），
+     * 例如 {@code http://127.0.0.1:5030}；留空表示不用。
+     */
+    private String readerUrl = "";
     private boolean skipHistory = true;
     private long pollIntervalMs = 2000;
     private long initialDelayMs = 5000;
@@ -63,6 +68,8 @@ public class WeChatHookProperties {
     public void setGuardStatusFile(String guardStatusFile) { this.guardStatusFile = guardStatusFile; }
     public String getImageRoot() { return imageRoot; }
     public void setImageRoot(String imageRoot) { this.imageRoot = imageRoot; }
+    public String getReaderUrl() { return readerUrl; }
+    public void setReaderUrl(String readerUrl) { this.readerUrl = readerUrl; }
     public boolean isSkipHistory() { return skipHistory; }
     public void setSkipHistory(boolean skipHistory) { this.skipHistory = skipHistory; }
     public long getPollIntervalMs() { return pollIntervalMs; }

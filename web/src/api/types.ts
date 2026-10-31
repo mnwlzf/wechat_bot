@@ -196,7 +196,11 @@ export interface ChatCandidate {
   /** 公众号、机器人、系统会话：不可加入白名单 */
   blocked: boolean
   blockedReason: string
-  source: 'contact' | 'conversation' | 'session'
+  /** 名字来源：本机备注、外部读取服务、微信联系人、本地会话、最近回调 */
+  source: 'alias' | 'reader' | 'contact' | 'conversation' | 'session' | 'hook'
+  /** 最近一条消息，用来认出还没有名字的群 */
+  lastMessage: string | null
+  lastActiveAt: string | null
 }
 
 export interface LlmPolicyInput {

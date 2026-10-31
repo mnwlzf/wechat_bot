@@ -7,6 +7,9 @@ import com.example.wechatbot.wechat.WeChatHookClient;
 import com.example.wechatbot.wechat.WeChatHookException;
 import com.example.wechatbot.web.dto.AdminDtos;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -62,8 +65,22 @@ public class WeChatHookController {
         return directory.search(kind, keyword, limit).stream()
                 .map(item -> new AdminDtos.ChatCandidateView(
                         item.chatId(), item.name(), item.kind(), item.group(),
-                        item.blocked(), item.blockedReason(), item.source()))
+                        item.blocked(), item.blockedReason(), item.source(),
+                        item.lastMessage(), item.lastActiveAt()))
                 .toList();
+    }
+
+    /**
+     * 给会话存一个本机备注（名称留空即删除）。
+     *
+     * <p>微信 4.x 的通讯录是加密的，Hook 也读不出联系人，所以名字要允许人工补：
+     * 存过备注之后，搜备注、搜名字、白名单里显示都会用它。</p>
+     */
+    @PutMapping("/chats/{chatId}/alias")
+    public AdminDtos.ChatAliasView saveAlias(@PathVariable String chatId,
+                                             @RequestBody(required = false) AdminDtos.ChatAliasUpdate body) {
+        String name = directory.saveAlias(chatId, body == null ? "" : body.name());
+        return new AdminDtos.ChatAliasView(chatId, name);
     }
 
     @GetMapping("/sessions")

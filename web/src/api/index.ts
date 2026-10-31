@@ -107,6 +107,14 @@ export const adminApi = {
     const { data } = await http.get<ChatCandidate[]>('/api/admin/wechat/chats', { params })
     return data
   },
+  /** 给会话存一个本机备注（名称传空串即删除），之后可按备注搜索。 */
+  async saveChatAlias(chatId: string, name: string) {
+    const { data } = await http.put<{ chatId: string; name: string }>(
+      `/api/admin/wechat/chats/${encodeURIComponent(chatId)}/alias`,
+      { name },
+    )
+    return data
+  },
   async messages(conversationId: string, page = 0, size = 200) {
     const { data } = await http.get<PageResult<Message>>(
       `/api/admin/conversations/${conversationId}/messages`,

@@ -1,15 +1,29 @@
 package com.example.wechatbot.service;
 
 import com.example.wechatbot.config.WeChatHookProperties;
+import com.example.wechatbot.domain.ChatAlias;
 import com.example.wechatbot.domain.Conversation;
+import com.example.wechatbot.repository.ChatAliasRepository;
 import com.example.wechatbot.repository.ConversationRepository;
 import com.example.wechatbot.wechat.ChatIdentity;
+import com.example.wechatbot.wechat.HookCallbackBuffer;
 import com.example.wechatbot.wechat.WeChatHookClient;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.net.URI;
+import java.net.URLEncoder;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -20,13 +34,15 @@ import java.util.Map;
 /**
  * 会话目录：给管理端「会话白名单」提供按昵称 / 备注 / 群名称搜索的能力。
  *
- * <p>参考 WeChatAgent 的添加逻辑：不在会话列表里翻，而是拿微信的联系人目录
- * （{@code contact.db}）按名称搜索，再按私聊 / 群聊过滤，最后把 ID 写进白名单。
- * 三个数据源按可信度合并：</p>
+ * <p>参考 WeChatAgent 的添加逻辑：不在会话列表里翻，而是拿联系人目录按名称搜，再按私聊 / 群聊过滤，
+ * 最后把 ID 写进白名单。数据源按可信度合并，缺一个不影响其它：</p>
  * <ol>
- *   <li>微信联系人（备注 &gt; 昵称 &gt; 微信号），名称最准；</li>
- *   <li>本地会话库（已经聊过的会话），Hook 只读查询不可用时仍能搜；</li>
- *   <li>微信会话列表（{@code session.db}），只用来补齐没有联系人的会话。</li>
+ *   <li>本机会话备注（{@code chat_alias}）：唯一在微信数据库读不出来时也能用的名字来源；</li>
+ *   <li>外部联系人读取服务（可选，{@code WECHAT_READER_URL}）：对齐 WeChatAgent 的
+ *       {@code GET /api/v1/contacts?kind=&keyword=&limit=}，装了 WeFlow 一类 reader 就有真实昵称；</li>
+ *   <li>微信联系人（{@code contact.db}，备注 &gt; 昵称 &gt; 微信号）：需要 Hook 的 QueryDB 可用；</li>
+ *   <li>本地会话库（聊过的会话，带最后一条消息，方便认出是哪个群）；</li>
+ *   <li>最近的 Hook 回调（连没回复的群 / 公众号也算，方便把群加进白名单）。</li>
  * </ol>
  *
  * <p>公众号、机器人、系统会话仍然会出现在结果里，但标记为不可添加，
@@ -41,18 +57,31 @@ public class ChatDirectoryService {
     private final WeChatHookProperties properties;
     private final WeChatHookClient client;
     private final ConversationRepository conversationRepository;
+    private final ChatAliasRepository aliasRepository;
+    private final HookCallbackBuffer callbackBuffer;
+    private final ObjectMapper objectMapper;
+    private final HttpClient httpClient = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(2))
+            .build();
 
     public ChatDirectoryService(WeChatHookProperties properties,
                                 WeChatHookClient client,
-                                ConversationRepository conversationRepository) {
+                                ConversationRepository conversationRepository,
+                                ChatAliasRepository aliasRepository,
+                                HookCallbackBuffer callbackBuffer,
+                                ObjectMapper objectMapper) {
         this.properties = properties;
         this.client = client;
         this.conversationRepository = conversationRepository;
+        this.aliasRepository = aliasRepository;
+        this.callbackBuffer = callbackBuffer;
+        this.objectMapper = objectMapper;
     }
 
     /** 搜索结果；{@code kind} 为 PRIVATE / GROUP / OFFICIAL / SYSTEM。 */
     public record Candidate(String chatId, String name, String kind, boolean group,
-                            boolean blocked, String blockedReason, String source) {}
+                            boolean blocked, String blockedReason, String source,
+                            String lastMessage, OffsetDateTime lastActiveAt) {}
 
     /**
      * @param kind    {@code private} 只看私聊，{@code groups} 只看群聊，其它值返回全部
@@ -65,10 +94,13 @@ public class ChatDirectoryService {
         int safeLimit = Math.max(1, Math.min(limit, 500));
 
         Map<String, Entry> directory = new LinkedHashMap<>();
-        // 顺序即优先级：联系人覆盖会话名，会话名只用来补齐
+        // 顺序即优先级：备注 > 外部 reader > 微信联系人 > 本地会话 > 最近回调
+        loadAliases(directory);
+        loadReader(directory);
         loadContacts(directory);
         loadConversations(directory);
         loadSessions(directory);
+        loadRecentlySeen(directory);
 
         String self = selfWxid();
         List<Candidate> result = new ArrayList<>();
@@ -86,12 +118,15 @@ public class ChatDirectoryService {
                 continue;
             }
             String name = entry.name().isBlank() ? chatId : entry.name();
-            if (!needle.isEmpty() && !matches(chatId, name, entry.alias(), needle)) {
+            // 没有名字的会话（只有 wxid / 群 ID）允许按最近一条消息搜，方便把群认出来
+            String searchableMessage = name.equals(chatId) ? entry.lastMessage() : "";
+            if (!needle.isEmpty() && !matches(chatId, name, entry.alias(), searchableMessage, needle)) {
                 continue;
             }
             boolean blocked = identity == ChatIdentity.Kind.OFFICIAL || identity == ChatIdentity.Kind.SYSTEM;
             result.add(new Candidate(chatId, name, identity.name(), group, blocked,
-                    blocked ? ChatIdentity.rejectReason(chatId) : "", entry.source()));
+                    blocked ? ChatIdentity.rejectReason(chatId) : "", entry.source(),
+                    entry.lastMessage(), entry.lastActiveAt()));
         }
 
         result.sort(Comparator
@@ -101,10 +136,28 @@ public class ChatDirectoryService {
         return result.size() > safeLimit ? List.copyOf(result.subList(0, safeLimit)) : List.copyOf(result);
     }
 
-    private static boolean matches(String chatId, String name, String alias, String needle) {
+    /** 保存（或清除，名称留空时）会话备注。 */
+    @Transactional
+    public String saveAlias(String chatId, String name) {
+        String id = chatId == null ? "" : chatId.trim();
+        if (id.isEmpty()) {
+            throw new IllegalArgumentException("会话 ID 不能为空");
+        }
+        String display = name == null ? "" : name.trim();
+        if (display.isEmpty()) {
+            aliasRepository.deleteById(id);
+            return "";
+        }
+        String clipped = display.length() > 180 ? display.substring(0, 180) : display;
+        aliasRepository.save(new ChatAlias(id, clipped, OffsetDateTime.now()));
+        return clipped;
+    }
+
+    private static boolean matches(String chatId, String name, String alias, String lastMessage, String needle) {
         return chatId.toLowerCase(Locale.ROOT).contains(needle)
                 || name.toLowerCase(Locale.ROOT).contains(needle)
-                || alias.toLowerCase(Locale.ROOT).contains(needle);
+                || alias.toLowerCase(Locale.ROOT).contains(needle)
+                || lastMessage.toLowerCase(Locale.ROOT).contains(needle);
     }
 
     /** 名称 / ID 与关键词完全匹配的排前面，其次是前缀匹配。 */
@@ -121,6 +174,76 @@ public class ChatDirectoryService {
             return 1;
         }
         return 2;
+    }
+
+    private void loadAliases(Map<String, Entry> directory) {
+        try {
+            for (ChatAlias alias : aliasRepository.findAll()) {
+                String chatId = alias.getChatId();
+                if (chatId == null || chatId.isBlank()) {
+                    continue;
+                }
+                directory.put(chatId, new Entry(chatId, alias.getDisplayName(), alias.getDisplayName(),
+                        "alias", null, alias.getUpdatedAt()));
+            }
+        } catch (RuntimeException ex) {
+            log.debug("读取会话备注失败: {}", ex.getMessage());
+        }
+    }
+
+    /**
+     * 可选的外部联系人读取服务，契约对齐 WeChatAgent 的 WeFlow reader：
+     * {@code GET {url}/api/v1/contacts?kind=private|groups&limit=500} →
+     * {@code {"contacts":[{"username":..,"remark":..,"displayName":..,"nickname":..}]}}。
+     */
+    private void loadReader(Map<String, Entry> directory) {
+        String baseUrl = properties.getReaderUrl();
+        if (baseUrl == null || baseUrl.isBlank()) {
+            return;
+        }
+        String root = baseUrl.trim().replaceAll("/+$", "");
+        for (String kind : List.of("private", "groups")) {
+            try {
+                String url = root + "/api/v1/contacts?kind=" + kind + "&keyword=&limit=500";
+                HttpRequest request = HttpRequest.newBuilder(URI.create(url))
+                        .timeout(Duration.ofSeconds(4))
+                        .GET()
+                        .build();
+                HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+                if (response.statusCode() / 100 != 2) {
+                    log.debug("联系人读取服务返回 {}: {}", response.statusCode(), url);
+                    continue;
+                }
+                JsonNode rootNode = objectMapper.readTree(response.body());
+                JsonNode rows = rootNode.path("contacts");
+                if (!rows.isArray()) {
+                    continue;
+                }
+                for (JsonNode row : rows) {
+                    String username = text(row, "username");
+                    if (username.isBlank() || directory.containsKey(username)) {
+                        continue;
+                    }
+                    String name = firstNonBlank(
+                            text(row, "remark"),
+                            text(row, "displayName"),
+                            text(row, "nickname"),
+                            username);
+                    directory.put(username, new Entry(username, name, text(row, "nickname"), "reader", null, null));
+                }
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                return;
+            } catch (Exception ex) {
+                log.debug("联系人读取服务不可用（{}）: {}", root, ex.getMessage());
+                return;
+            }
+        }
+    }
+
+    private static String text(JsonNode row, String field) {
+        JsonNode value = row.get(field);
+        return value == null || value.isNull() ? "" : value.asText("").trim();
     }
 
     private void loadContacts(Map<String, Entry> directory) {
@@ -146,7 +269,7 @@ public class ChatDirectoryService {
                     "SELECT " + quoted(selected) + " FROM \"contact\" LIMIT " + MAX_CONTACTS);
             for (Map<String, Object> row : rows) {
                 String username = stringValue(valueIgnoreCase(row, "username"));
-                if (username.isBlank()) {
+                if (username.isBlank() || directory.containsKey(username)) {
                     continue;
                 }
                 String name = firstNonBlank(
@@ -157,7 +280,7 @@ public class ChatDirectoryService {
                 String alias = firstNonBlank(
                         stringValue(valueIgnoreCase(row, "alias")),
                         stringValue(valueIgnoreCase(row, "nick_name")));
-                directory.put(username, new Entry(username, name, alias, "contact"));
+                directory.put(username, new Entry(username, name, alias, "contact", null, null));
             }
         } catch (RuntimeException ex) {
             // 预编译 Hook 的 QueryDB 常不可用，联系人目录只是“更好的名称来源”，失败就退回本地会话库
@@ -172,12 +295,19 @@ public class ChatDirectoryService {
                     .getContent();
             for (Conversation conversation : rows) {
                 String chatId = conversation.getChatId();
-                if (chatId == null || chatId.isBlank() || directory.containsKey(chatId)) {
+                if (chatId == null || chatId.isBlank()) {
+                    continue;
+                }
+                String lastMessage = conversation.getLastMessage() == null ? "" : conversation.getLastMessage().trim();
+                Entry existing = directory.get(chatId);
+                if (existing != null) {
+                    directory.put(chatId, existing.withActivity(lastMessage, conversation.getLastMessageAt()));
                     continue;
                 }
                 String name = conversation.getChatName();
                 directory.put(chatId, new Entry(chatId,
-                        name == null || name.isBlank() ? chatId : name, "", "conversation"));
+                        name == null || name.isBlank() ? chatId : name, "", "conversation",
+                        lastMessage, conversation.getLastMessageAt()));
             }
         } catch (RuntimeException ex) {
             log.debug("读取本地会话库失败: {}", ex.getMessage());
@@ -202,11 +332,28 @@ public class ChatDirectoryService {
             for (Map<String, Object> row : rows) {
                 String username = stringValue(valueIgnoreCase(row, "username"));
                 if (!username.isBlank() && !directory.containsKey(username)) {
-                    directory.put(username, new Entry(username, username, "", "session"));
+                    directory.put(username, new Entry(username, username, "", "session", null, null));
                 }
             }
         } catch (RuntimeException ex) {
             log.debug("读取微信会话列表失败: {}", ex.getMessage());
+        }
+    }
+
+    /** 最近回调过的会话：没进白名单、被拒的群和公众号也在这里，方便把群加进来。 */
+    private void loadRecentlySeen(Map<String, Entry> directory) {
+        for (Map<String, Object> item : callbackBuffer.recent()) {
+            String chatId = stringValue(item.get("chatId"));
+            if (chatId.isBlank() || directory.containsKey(chatId)) {
+                continue;
+            }
+            Object receivedAt = item.get("receivedAt");
+            OffsetDateTime at = receivedAt instanceof OffsetDateTime time ? time : null;
+            String lastMessage = "";
+            if (item.get("payload") instanceof Map<?, ?> payload && payload.get("content") instanceof String content) {
+                lastMessage = content.trim();
+            }
+            directory.put(chatId, new Entry(chatId, chatId, "", "hook", lastMessage, at));
         }
     }
 
@@ -271,5 +418,12 @@ public class ChatDirectoryService {
         return value == null ? "" : String.valueOf(value).trim();
     }
 
-    private record Entry(String chatId, String name, String alias, String source) {}
+    private record Entry(String chatId, String name, String alias, String source,
+                         String lastMessage, OffsetDateTime lastActiveAt) {
+        Entry withActivity(String message, OffsetDateTime at) {
+            return new Entry(chatId, name, alias, source,
+                    message == null || message.isBlank() ? lastMessage : message,
+                    at == null ? lastActiveAt : at);
+        }
+    }
 }

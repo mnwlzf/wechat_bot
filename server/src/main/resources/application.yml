@@ -187,6 +187,8 @@ app:
       guard-status-file: ${WECHAT_GUARD_STATUS_FILE:logs/guard-status.json}
       # 微信数据目录；留空自动取 %USERPROFILE%\Documents\xwechat_files
       image-root: ${WECHAT_IMAGE_ROOT:}
+      # 可选：外部联系人读取服务（WeChatAgent 的 WeFlow reader 同款接口），留空不用
+      reader-url: ${WECHAT_READER_URL:}
       skip-history: ${WECHAT_HOOK_SKIP_HISTORY:true}
       poll-interval-ms: ${WECHAT_HOOK_POLL_INTERVAL_MS:2000}
       initial-delay-ms: ${WECHAT_HOOK_INITIAL_DELAY_MS:5000}

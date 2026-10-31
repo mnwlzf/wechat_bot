@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { ChatDotRound, Refresh, User } from '@element-plus/icons-vue'
 import { adminApi } from '@/api'
 import type {
@@ -302,6 +302,30 @@ async function loadNames() {
   }
 }
 
+/** 微信通讯录读不出来时（加密库 + Hook 查不了库），让用户自己给会话起名字。 */
+async function editAlias(item: ChatCandidate) {
+  try {
+    const { value } = await ElMessageBox.prompt(
+      '给这个会话起个名字，之后搜名字或备注都能找到它；留空表示删除备注。',
+      item.group ? '设置群备注' : '设置好友备注',
+      {
+        inputValue: item.name === item.chatId ? '' : item.name,
+        inputPlaceholder: item.group ? '例如：家人群' : '例如：张三',
+        confirmButtonText: '保存',
+        cancelButtonText: '取消',
+        inputValidator: (input: string) => (input ?? '').length <= 60 || '名字最多 60 个字',
+      },
+    )
+    const saved = await adminApi.saveChatAlias(item.chatId, (value ?? '').trim())
+    chatNames.value[item.chatId] = saved.name || item.chatId
+    await runSearch()
+    ElMessage.success(saved.name ? '备注已保存' : '备注已删除')
+  } catch (error) {
+    if (error === 'cancel' || error === 'close') return
+    ElMessage.error(getErrorMessage(error))
+  }
+}
+
 async function saveChat() {
   savingChat.value = true
   try {
@@ -537,12 +561,16 @@ onMounted(async () => {
             <span class="candidate-copy">
               <strong>{{ item.name }}</strong>
               <span v-if="item.name !== item.chatId" class="mono chat-id">{{ item.chatId }}</span>
+              <span v-if="item.lastMessage" class="candidate-last">{{ item.lastMessage }}</span>
             </span>
             <el-tag :type="item.group ? 'warning' : 'info'" effect="plain" size="small">
               {{ kindLabel(item.kind) }}
             </el-tag>
             <span v-if="item.blocked" class="candidate-note">{{ item.blockedReason }}</span>
             <span v-else-if="chatForm.allowedChats.includes(item.chatId)" class="candidate-note">已在白名单</span>
+            <el-button text size="small" :disabled="item.blocked" @click="editAlias(item)">
+              {{ item.name === item.chatId ? '设备注' : '改备注' }}
+            </el-button>
           </li>
         </ul>
         <div v-else-if="searched && !searchLoading" class="chat-empty hint">
@@ -1004,6 +1032,17 @@ onMounted(async () => {
   color: #b91c1c;
   font-size: 10px;
   line-height: 1.5;
+}
+
+.candidate-last {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chat-search {

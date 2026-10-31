@@ -50,8 +50,9 @@ $headers = @{ Authorization = "Bearer dev-admin-token" }
 ### GET `/api/admin/wechat/chats?kind=private|groups&keyword=&limit=200`
 
 白名单候选搜索：按昵称 / 备注 / 群名称 / ID 片段匹配，返回可直接加入白名单的会话。
-数据按可信度合并微信联系人（`contact.db`）、本地会话库、微信会话列表（`session.db`），
-预编译 Hook 的 `QueryDB` 不可用时自动退化为只用本地会话库。
+数据按可信度合并本机会话备注（`chat_alias`）、可选的外部读取服务（`WECHAT_READER_URL`，
+对齐 WeChatAgent 的 WeFlow reader）、微信联系人（`contact.db`）、本地会话库、微信会话列表（`session.db`）
+和最近的 Hook 回调。没有名字的会话（只有 wxid / `xxx@chatroom`）还能按最近一条消息匹配。
 
 ```json
 [
@@ -62,7 +63,9 @@ $headers = @{ Authorization = "Bearer dev-admin-token" }
     "group": false,
     "blocked": false,
     "blockedReason": "",
-    "source": "contact"
+    "source": "alias",
+    "lastMessage": "晚上一起吃饭？",
+    "lastActiveAt": "2026-10-31T13:44:46.720111+08:00"
   },
   {
     "chatId": "gh_62c4ce184e73",
@@ -71,15 +74,30 @@ $headers = @{ Authorization = "Bearer dev-admin-token" }
     "group": false,
     "blocked": true,
     "blockedReason": "公众号 / 机器人 / 企业微信会话不自动回复",
-    "source": "contact"
+    "source": "conversation",
+    "lastMessage": "活动通知",
+    "lastActiveAt": "2026-10-30T09:12:00+08:00"
   }
 ]
 ```
 
 `kind` 取值 `PRIVATE` / `GROUP` / `OFFICIAL` / `SYSTEM`；`blocked=true` 表示该会话永远不会被自动回复，
-管理端应置灰不可选。搜索结果的名称优先级：备注 → 昵称 → 微信号。
+管理端应置灰不可选。`source` 取值 `alias` / `reader` / `contact` / `conversation` / `session` / `hook`，
+名称优先级：本机备注 → 外部 reader → 备注/昵称 → 会话名 → ID。
 
-> 官方预编译 DLL 的 `session.db` / `contact.db` 只有在微信登录并完成本地同步后才存在。
+> 微信 4.x 的 `contact.db` 是 SQLCipher 加密的，本仓库预编译 Hook 的 `QueryDB` 拿不到数据
+> （源码里 `g_IsLogin` 恒为 0），所以默认只能列出聊过的 / 回调过的会话，名字靠备注补。
+
+### PUT `/api/admin/wechat/chats/{chatId}/alias`
+
+给会话存一个本机备注（存进 `chat_alias` 表，不依赖微信数据库）。名称留空即删除备注。
+
+```json
+{ "name": "张三" }
+```
+
+响应：`{ "chatId": "wxid_rsje67b7hozm22", "name": "张三" }`
+
 
 ## 3. 管理 API
 

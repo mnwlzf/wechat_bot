@@ -216,6 +216,21 @@ Invoke-RestMethod http://localhost:8080/api/admin/wechat/contacts -Headers $head
   处理群聊消息：关闭则群消息直接忽略
 ```
 
+搜索的名字从哪来（按优先级）：
+
+| 来源 | 说明 |
+|---|---|
+| `alias` | 本机备注：点结果行右侧「设备注」，之后搜名字 / 搜备注都能命中，白名单里也显示这个名字 |
+| `reader` | 可选的外部联系人服务（`WECHAT_READER_URL`，对齐 WeChatAgent 的 WeFlow reader：`GET /api/v1/contacts`） |
+| `contact` | 微信 `contact.db`（需要 Hook 的 `QueryDB` 可用） |
+| `conversation` | 本地会话库：聊过的会话，带最后一条消息，方便认出是哪个群 |
+| `hook` | 最近回调过的会话：连被拒的群、公众号也在，方便把群加进白名单 |
+
+**为什么有时只看到 wxid / `xxx@chatroom` 而没有昵称**：微信 4.x 的 `contact.db` 是 SQLCipher 加密的，
+本仓库自带的预编译 Hook 里 `QueryDB` 又拿不到数据（源码里 `g_IsLogin` 恒为 0，`db_mgr` 直接短路返回空）。
+所以「按昵称搜好友」要么接一个能解密的外部 reader（`WECHAT_READER_URL`），要么点「设备注」自己补名字——
+备注存在 `chat_alias` 表里，不依赖微信数据库。
+
 私聊和群聊的准入规则（参考 WeChatAgent 的白名单逻辑）。**只保留两类会话：群聊和真人私聊**，
 其余一律忽略：
 
@@ -236,6 +251,9 @@ $h = @{ Authorization = "Bearer $env:ADMIN_TOKEN"; "Content-Type" = "application
 Invoke-RestMethod http://localhost:8080/api/admin/settings -Headers $h
 # 按昵称 / 备注 / 群名称搜索候选（kind=private|groups）
 Invoke-RestMethod "http://localhost:8080/api/admin/wechat/chats?kind=private&keyword=张" -Headers $h
+# 给会话存本机备注（名称传空串即删除），之后可按备注搜索
+Invoke-RestMethod -Method Put "http://localhost:8080/api/admin/wechat/chats/wxid_friend/alias" -Headers $h `
+  -Body (@{ name = "张三" } | ConvertTo-Json)
 Invoke-RestMethod -Method Put http://localhost:8080/api/admin/settings/wechat -Headers $h `
   -Body (@{ groupsEnabled = $false; acceptAll = $true; allowedChats = @("wxid_friend") } | ConvertTo-Json)
 ```
@@ -336,6 +354,7 @@ recv_url=http://127.0.0.1:8080/api/wechat/hook/callback
 | `WECHAT_CALLBACK_REQUIRE_LOOPBACK` | `true` | 回调端点是否只接受 127.0.0.1/::1 |
 | `WECHAT_CALLBACK_GROUPS_ENABLED` | `false` | 是否处理群消息回调 |
 | `WECHAT_HOOK_SKIP_HISTORY` | `true` | 首次启动是否跳过历史消息 |
+| `WECHAT_READER_URL` | 空 | 可选的外部联系人读取服务（WeChatAgent 的 WeFlow reader 同款 `/api/v1/contacts`），用于白名单按昵称搜索 |
 | `WECHAT_HOOK_POLL_INTERVAL_MS` | `2000` | 收件轮询间隔 |
 | `WECHAT_HOOK_OUTBOX_INTERVAL_MS` | `1000` | 发件调度间隔 |
 | `WECHAT_HOOK_BATCH_SIZE` | `100` | 单次读取/发送批量 |

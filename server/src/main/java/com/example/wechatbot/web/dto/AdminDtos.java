@@ -227,9 +227,17 @@ public final class AdminDtos {
      * @param kind          PRIVATE / GROUP / OFFICIAL / SYSTEM
      * @param blocked       公众号、机器人、系统会话：永远不回复，不允许加进白名单
      * @param blockedReason 不可添加的原因，直接展示给用户
+     * @param source        名称来源：alias（本机备注）/ reader（外部读取服务）/ contact / conversation / session / hook
+     * @param lastMessage   最近一条消息，用来认出没有名字的群
      */
     public record ChatCandidateView(String chatId, String name, String kind, boolean group,
-                                    boolean blocked, String blockedReason, String source) {}
+                                    boolean blocked, String blockedReason, String source,
+                                    String lastMessage, OffsetDateTime lastActiveAt) {}
+
+    /** 会话备注：名称留空表示删除。 */
+    public record ChatAliasUpdate(@Size(max = 180) String name) {}
+
+    public record ChatAliasView(String chatId, String name) {}
 
     public record LlmPolicyUpdate(boolean fallbackEnabled) {}
 
