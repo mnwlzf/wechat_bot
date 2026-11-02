@@ -137,6 +137,8 @@ public class InboxService {
         }
         // 引用消息本质是文本，rawType 仍然记下来便于排查（49 = appmsg）
         inbound.setRawType(event.rawType());
+        // 每条消息都记下微信服务器消息 ID：语音消息靠它在本地库里精确定位音频
+        inbound.setSvrId(hook.svrId());
         if (hook.hasQuote()) {
             inbound.setQuoteAuthor(hook.quoteAuthor());
             inbound.setQuoteText(hook.quoteText());

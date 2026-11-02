@@ -350,13 +350,26 @@ Hook 推来的非文本消息（`type` 不是 `1`）不再丢弃，而是归类�
 
 `type=34` 的语音会转成文字再交给模型（对标 `POST /v1/audio/transcriptions`）。链路：
 
-1. 报文里能取到 `md5` 就按文件名在 `msg/attach/**/Voice`、`msg/attach/**/Audio` 下找，对不上再按「消息时间前后 `ASR_VOICE_WINDOW_SECONDS` 秒内写盘的 `.dat` / `.silk`」兜底；
-2. `.dat` 用本机 kvcomm 派生的密钥解 V2 容器（和图片同一套逻辑），只接受解密后是 SILK / WAV 的内容，避免把别的附件当语音；
-3. SILK 交给外部解码命令转 WAV（Java 侧没有 SILK 解码器）——`ASR_SILK_DECODER` 支持两种协议：JSON 进 JSON 出（stdin `{"b64":...}` → stdout `{"b64":...}`，与 WeChatAgent 的 `scripts/decode-wechat-voice.mjs` 一致）和文件模式（命令里带 `{input}`/`{output}`，例如 `ffmpeg -y -i {input} {output}`）；
-4. 以 multipart（字段 `file` + `model`）上传到 `{ASR_BASE_URL}/audio/transcriptions`，取响应里的 `text`；
-5. 转写结果替换占位文本：模型看到 `[语音转写] 明天上午十点开会`，并附带一条「已经转成文字，别再说听不到」的系统提示。
+1. **首选：本地语音库**。微信 4.x 收到的语音不落盘，音频只在 `db_storage/message/media_*.db` 的 `VoiceInfo.voice_data`（SILK）。回调报文里的 `msgid` 就是库里的 `svr_id`，按它精确定位（实测一一对应）；报文没有 `msgid` 时按 `create_time` 在 `ASR_VOICE_WINDOW_SECONDS` 秒窗口内兜底。库是 SQLCipher 4 加密的，服务端自己逐页解密，明文不落盘；
+2. 本地库没命中时，报文里能取到 `md5` 就按文件名在 `msg/attach/**/Voice`、`msg/attach/**/Audio` 下找，对不上再按「消息时间前后 `ASR_VOICE_WINDOW_SECONDS` 秒内写盘的 `.dat` / `.silk`」兜底；`.dat` 用本机 kvcomm 派生的密钥解 V2 容器（和图片同一套逻辑），只接受解密后是 SILK / WAV 的内容，避免把别的附件当语音；
+3. 报文里带 `voiceurl` 时也试一下直连下载（能下到 SILK / WAV 才算）；
+4. SILK 交给外部解码命令转 WAV（Java 侧没有 SILK 解码器）——`ASR_SILK_DECODER` 支持两种协议：JSON 进 JSON 出（stdin `{"b64":...}` → stdout `{"b64":...}`，与 WeChatAgent 的 `scripts/decode-wechat-voice.mjs` 一致）和文件模式（命令里带 `{input}`/`{output}`，例如 `ffmpeg -y -i {input} {output}`）；
+5. 以 multipart（字段 `file` + `model`）上传到 `{ASR_BASE_URL}/audio/transcriptions`，取响应里的 `text`；
+6. 转写结果替换占位文本：模型看到 `[语音转写] 明天上午十点开会`，并附带一条「已经转成文字，别再说听不到」的系统提示。
 
 任何一步失败都退回原来的 `[语音 5″]` + 「只能看到时长」说明，不影响回复。
+
+#### 本地语音库的密钥
+
+微信 4.x 的 `media_*.db` 是 SQLCipher 4：`salt` = 页 1 前 16 字节，
+`key = PBKDF2-HMAC-SHA512(passphrase, salt, 256000, 32)`，
+`mac_key = PBKDF2(key, salt ^ 0x3a, 2, 32)`，每页末尾 64 字节是 `HMAC-SHA512(mac_key, cipher‖iv‖页号)`。
+密钥与账号绑定，只在登录那一刻派生，重启/重登可能变，所以取到后写进 `.env` 的 `WECHAT_DB_KEY`，换账号要重新取。
+
+参考实现是 `D:\WeChatAgent-main` 的 `scripts/reader_setup.py`：`capture_key()` 调 `wx_key.dll` 的
+`InitializeHook(pid)` + `PollKeyData()`，在微信登录瞬间截获口令，再用 `verify_passphrase_native` +
+sqlcipher3 验证能打开库；它会把口令用 DPAPI 存进 `state/weflow/WeFlow-config.json`。
+本仓库不依赖那个 DLL：密钥配好后由 `SqlCipherFile` / `SqliteReader` 自己解页、读 B-tree。
 
 | 环境变量 | 默认 | 说明 |
 | --- | --- | --- |
@@ -368,14 +381,20 @@ Hook 推来的非文本消息（`type` 不是 `1`）不再丢弃，而是归类�
 | `ASR_SILK_DECODER` | 空 | SILK→WAV 解码命令；留空自动探测 `node` + WeChatAgent 的解码脚本 |
 | `ASR_TIMEOUT` | `90s` | 单次转写超时 |
 | `ASR_MAX_BYTES` | `52428800` | 上传大小上限（接口限制 50MB） |
-| `ASR_VOICE_WINDOW_SECONDS` | `180` | 没有 md5 时按时间窗匹配语音文件 |
+| `ASR_VOICE_WINDOW_SECONDS` | `180` | 没有 `msgid` / md5 时按时间窗匹配语音 |
+| `WECHAT_DB_ENABLED` | `true` | 是否读本地语音库 |
+| `WECHAT_DB_KEY` | 空 | 本地库密钥（64 位 hex）；留空 = 不读本地库 |
+| `WECHAT_DB_DATA_DIR` | 空 | 微信数据目录；留空自动找 `%USERPROFILE%\Documents\xwechat_files\*\db_storage` |
+| `WECHAT_DB_PAGE_SIZE` | `4096` | SQLCipher 页大小，微信 4.x 固定 4096 |
 
-两个自测接口：
+三个自测接口：
 
 ```powershell
 $h = @{ 'X-Admin-Token' = $env:ADMIN_TOKEN }
-# 状态：密钥打码、模型、解码器是否就绪
+# 状态：密钥打码、模型、解码器是否就绪、本地语音库概况
 Invoke-RestMethod http://localhost:8080/api/admin/asr -Headers $h
+# 只看本地语音库：密钥对不对、找到几个分片、里面有多少条语音
+Invoke-RestMethod http://localhost:8080/api/admin/asr/voice-db -Headers $h
 # 用本机文件跑一遍完整链路（支持 SILK / 加密 .dat）
 Invoke-RestMethod -Method Post http://localhost:8080/api/admin/asr/test -Headers $h -ContentType 'application/json' `
   -Body '{"path":"D:/wechat_bot/logs/voice.silk"}'

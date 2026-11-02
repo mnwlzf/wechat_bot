@@ -22,6 +22,8 @@ import java.util.List;
  * @param mediaAeskey 图片原图解密密钥
  * @param mediaThumbMd5    图片缩略图 md5（本地文件名有时用它）
  * @param mediaThumbAeskey 图片缩略图密钥
+ * @param svrId       微信服务器消息 ID（报文里的 {@code msgid}）；语音靠它在
+ *                    {@code VoiceInfo.svr_id} 里精确定位到音频
  */
 public record HookExtras(String quoteAuthor,
                          String quoteText,
@@ -31,9 +33,10 @@ public record HookExtras(String quoteAuthor,
                          String mediaMd5,
                          String mediaAeskey,
                          String mediaThumbMd5,
-                         String mediaThumbAeskey) {
+                         String mediaThumbAeskey,
+                         Long svrId) {
     public static final HookExtras EMPTY =
-            new HookExtras(null, null, null, null, null, null, null, null, null);
+            new HookExtras(null, null, null, null, null, null, null, null, null, null);
 
     public boolean hasQuote() {
         return quoteText != null && !quoteText.isBlank();
@@ -51,6 +54,10 @@ public record HookExtras(String quoteAuthor,
     }
 
     public static HookExtras of(MediaMessageParser.Quoted quote, MediaMessageParser.Parsed media) {
+        return of(quote, media, null);
+    }
+
+    public static HookExtras of(MediaMessageParser.Quoted quote, MediaMessageParser.Parsed media, Long svrId) {
         MediaMessageParser.Parsed quotedMedia = quote == null ? null : quote.media();
         return new HookExtras(
                 quote == null ? null : quote.quoteAuthor(),
@@ -61,7 +68,8 @@ public record HookExtras(String quoteAuthor,
                 media == null ? null : media.md5(),
                 media == null ? null : media.aeskey(),
                 media == null ? null : media.thumbMd5(),
-                media == null ? null : media.thumbAeskey()
+                media == null ? null : media.thumbAeskey(),
+                svrId
         );
     }
 

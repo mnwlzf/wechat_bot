@@ -137,7 +137,8 @@ public class HookCallbackService {
                 media == null && quote == null ? null : type
         );
 
-        AgentDtos.EventAccepted accepted = inboxService.accept(event, HookExtras.of(quote, media));
+        AgentDtos.EventAccepted accepted = inboxService.accept(event,
+                HookExtras.of(quote, media, svrIdOf(payload)));
         if (!"ACCEPTED".equalsIgnoreCase(accepted.status())) {
             log.debug("Hook 回调事件未进入回复流程: chat={} status={} reason={}",
                     chatId, accepted.status(), accepted.reason());
@@ -146,6 +147,12 @@ public class HookCallbackService {
                     chatId, sender, type, eventId);
         }
         return new Result(accepted.status(), accepted.reason(), chatId, eventId);
+    }
+
+    /** 报文里的 {@code msgid} 就是微信服务器消息 ID：语音靠它去 {@code VoiceInfo.svr_id} 精确定位音频。 */
+    private static Long svrIdOf(Map<String, Object> payload) {
+        long msgId = longValue(payload.get("msgid"));
+        return msgId > 0 ? msgId : null;
     }
 
     private String eventId(Map<String, Object> payload, String chatId) {

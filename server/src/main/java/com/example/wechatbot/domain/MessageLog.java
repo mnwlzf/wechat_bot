@@ -66,6 +66,10 @@ public class MessageLog {
     @Column(name = "media_md5", length = 64)
     private String mediaMd5;
 
+    /** 微信服务器消息 ID（报文里的 {@code msgid}）：语音靠它在本地库里精确取音频。 */
+    @Column(name = "svr_id")
+    private Long svrId;
+
     @Column(name = "media_aeskey", length = 64)
     private String mediaAeskey;
 

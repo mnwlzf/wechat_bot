@@ -5,8 +5,10 @@ import com.example.wechatbot.asr.AsrService;
 import com.example.wechatbot.asr.SilkDecoder;
 import com.example.wechatbot.asr.VoiceTranscriber;
 import com.example.wechatbot.config.AsrProperties;
+import com.example.wechatbot.wechat.db.WeChatVoiceStore;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -19,6 +21,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * 语音转文字（ASR）状态与自测。
@@ -34,13 +37,16 @@ public class AsrController {
     private final AsrService asrService;
     private final SilkDecoder silkDecoder;
     private final VoiceTranscriber voiceTranscriber;
+    private final WeChatVoiceStore voiceStore;
 
     public AsrController(AsrProperties properties, AsrService asrService,
-                         SilkDecoder silkDecoder, VoiceTranscriber voiceTranscriber) {
+                         SilkDecoder silkDecoder, VoiceTranscriber voiceTranscriber,
+                         WeChatVoiceStore voiceStore) {
         this.properties = properties;
         this.asrService = asrService;
         this.silkDecoder = silkDecoder;
         this.voiceTranscriber = voiceTranscriber;
+        this.voiceStore = voiceStore;
     }
 
     @GetMapping
@@ -55,7 +61,39 @@ public class AsrController {
         result.put("silkDecoder", silkDecoder.backend());
         result.put("silkDecoderReady", silkDecoder.available());
         result.put("maxBytes", properties.getMaxBytes());
+        result.put("voiceDb", voiceStore.diagnostics());
         return result;
+    }
+
+    /** 本地语音库（media_*.db）自检：密钥对不对、找到几个分片、里面有多少条语音。 */
+    @GetMapping("/voice-db")
+    public Map<String, Object> voiceDb() {
+        return voiceStore.diagnostics();
+    }
+
+    /** 拿一条具体的语音试试：报文里的 {@code msgid} 填进来，看能不能在本地库里命中。 */
+    @GetMapping("/voice-db/{svrId}")
+    public Map<String, Object> voiceBySvrId(@PathVariable long svrId) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("svrId", svrId);
+        Optional<WeChatVoiceStore.Voice> voice = voiceStore.findBySvrId(svrId);
+        result.put("found", voice.isPresent());
+        voice.ifPresent(hit -> {
+            result.put("bytes", hit.bytes().length);
+            result.put("shard", hit.shard());
+            result.put("head", printable(hit.bytes()));
+        });
+        return result;
+    }
+
+    private static String printable(byte[] bytes) {
+        int length = Math.min(16, bytes.length);
+        StringBuilder builder = new StringBuilder(length);
+        for (int i = 0; i < length; i++) {
+            int value = bytes[i] & 0xff;
+            builder.append(value >= 0x20 && value < 0x7f ? (char) value : '.');
+        }
+        return builder.toString();
     }
 
     /** 上传一段音频直接转写。 */

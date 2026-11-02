@@ -1,6 +1,7 @@
 package com.example.wechatbot.asr;
 
 import com.example.wechatbot.config.AsrProperties;
+import com.example.wechatbot.wechat.db.WeChatVoiceStore;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -23,6 +24,7 @@ class VoiceTranscriberTest {
     private AsrService asrService;
     private SilkDecoder silkDecoder;
     private VoiceFileResolver resolver;
+    private WeChatVoiceStore voiceStore;
     private VoiceTranscriber transcriber;
 
     @BeforeEach
@@ -32,7 +34,8 @@ class VoiceTranscriberTest {
         asrService = Mockito.mock(AsrService.class);
         silkDecoder = Mockito.mock(SilkDecoder.class);
         resolver = Mockito.mock(VoiceFileResolver.class);
-        transcriber = new VoiceTranscriber(properties, asrService, silkDecoder, resolver);
+        voiceStore = Mockito.mock(WeChatVoiceStore.class);
+        transcriber = new VoiceTranscriber(properties, asrService, silkDecoder, resolver, voiceStore);
         when(asrService.enabled()).thenReturn(true);
     }
 
@@ -107,6 +110,47 @@ class VoiceTranscriberTest {
         properties.setApiKey("sk-test");
         properties.setTranscribeVoice(false);
         assertThat(transcriber.enabled()).isFalse();
+    }
+
+    @Test
+    @DisplayName("本地语音库按 svrId 命中时优先用它，不再翻磁盘")
+    void prefersLocalVoiceDatabase() {
+        when(voiceStore.enabled()).thenReturn(true);
+        byte[] silk = "#!SILK_V3payload".getBytes(StandardCharsets.US_ASCII);
+        when(voiceStore.findBySvrId(42L))
+                .thenReturn(Optional.of(new WeChatVoiceStore.Voice(silk, "media_0.db")));
+        when(silkDecoder.toWav(silk)).thenReturn(wav());
+        when(asrService.transcribe(any(), eq("voice.wav")))
+                .thenReturn(new AsrService.Transcription("在的，你说", "m", 12, 16));
+
+        assertThat(transcriber.transcribe(42L, null, OffsetDateTime.now(), null)).contains("在的，你说");
+        verify(resolver, never()).resolve(any(), any(), any());
+    }
+
+    @Test
+    @DisplayName("本地库没命中时退回磁盘/voiceurl 那条老路")
+    void fallsBackToDiskWhenDatabaseMisses() {
+        when(voiceStore.enabled()).thenReturn(true);
+        when(voiceStore.findBySvrId(43L)).thenReturn(Optional.empty());
+        when(voiceStore.findByCreateTime(any(Long.class), any(Integer.class))).thenReturn(Optional.empty());
+        when(resolver.resolve(any(), any(), any())).thenReturn(
+                Optional.of(new VoiceFileResolver.Voice(wav(), null)));
+        when(asrService.transcribe(any(), eq("voice.wav")))
+                .thenReturn(new AsrService.Transcription("磁盘里的", "m", 12, 16));
+
+        assertThat(transcriber.transcribe(43L, null, OffsetDateTime.now(), null)).contains("磁盘里的");
+    }
+
+    @Test
+    @DisplayName("本地语音库没配密钥时不影响老路")
+    void worksWithoutVoiceDatabase() {
+        when(voiceStore.enabled()).thenReturn(false);
+        when(resolver.resolve(any(), any(), any())).thenReturn(
+                Optional.of(new VoiceFileResolver.Voice(wav(), null)));
+        when(asrService.transcribe(any(), any()))
+                .thenReturn(new AsrService.Transcription("照旧", "m", 12, 16));
+
+        assertThat(transcriber.transcribe(7L, null, OffsetDateTime.now(), null)).contains("照旧");
     }
 
     @Test
