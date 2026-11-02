@@ -436,6 +436,58 @@ curl.exe -s -X POST http://localhost:8080/api/admin/asr/test -H "X-Admin-Token: 
 
 响应形如 `{"ok":true,"text":"今天天气不错，我们下午去公园吧。","model":"XingChenAGI/XingChenASR-V3.2-Ultra","latencyMs":2214,"bytes":169134,"silk":false}`；失败时 `{"ok":false,"error":"..."}`，错误一律是可读中文（密钥缺失、接口 4xx/5xx、解码器不可用等）。
 
+### 语音合成（TTS）
+
+模型用阿里云百炼的 **`qwen-audio-3.1-tts-flash`**（Qwen-Audio-TTS），走 WebSocket 双工事件流，
+不是普通的 HTTP 接口。一次合成就一条连接，顺序固定：
+
+```
+客户端 → run-task（模型 / 音色 / 采样率 / 格式）      → 服务端 task-started
+客户端 → continue-task（待合成文本）→ finish-task      → 服务端 二进制音频帧… → task-finished
+```
+
+三个事件的 `task_id` 必须一致（客户端生成 UUID）。音频是**二进制帧**（`pcm` 是裸数据，需要自己补 WAV 头）；
+服务端按句合成，所以帧数不固定。请求头要 `Authorization: bearer <API Key>`，
+域名北京是 `wss://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/api-ws/v1/inference`
+（老域名 `wss://dashscope.aliyuncs.com/api-ws/v1/inference` 也能用）。
+
+实现：`QwenTtsClient`（JDK 自带 `java.net.http.WebSocket`，不加第三方依赖）+ `TtsService`（补 WAV 头、落盘 `data/tts/`、只留最近 50 个）。
+
+**注意**：微信这边的 Hook 只开放了 `/SendTextMsg` 和 `/SendImgMsg`，没有发语音的接口
+（`/SendVoiceMsg`、`/SendAudioMsg`、`/SendFileMsg` 都是 404），所以合成结果目前是
+「文件 + 管理端试听」，要真正发语音得换一个带发语音接口的 Hook。
+
+| 环境变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `TTS_ENABLED` | `true` | 关掉后接口一律拒绝 |
+| `DASHSCOPE_API_KEY` | 空 | 百炼 API Key；留空 = 未配置（`TTS_API_KEY` 也接受） |
+| `TTS_BASE_URL` | `wss://dashscope.aliyuncs.com/api-ws/v1/inference` | 建议换业务空间专属域名 |
+| `TTS_MODEL` | `qwen-audio-3.1-tts-flash` | 模型名 |
+| `TTS_VOICE` | `longanhuan_v3.1` | 音色，见 Qwen-Audio-TTS 音色列表 |
+| `TTS_FORMAT` | `pcm` | `pcm` / `wav` / `mp3` / `opus`；pcm 由本地补头，时长最准 |
+| `TTS_SAMPLE_RATE` | `24000` | 8000 / 16000 / 22050 / 24000 / 44100 / 48000 |
+| `TTS_VOLUME` | `50` | 0–100 |
+| `TTS_RATE` | `1.0` | 语速 0.5–2.0 |
+| `TTS_PITCH` | `1.0` | 音调 0.5–2.0 |
+| `TTS_TIMEOUT` | `60s` | 单次合成超时 |
+| `TTS_MAX_CHARS` | `500` | 单次最大字数（按字数计费） |
+| `TTS_OUTPUT_DIR` | `data/tts` | 合成结果落盘目录 |
+
+```powershell
+$h = @{ 'X-Admin-Token' = $env:ADMIN_TOKEN }
+# 状态：模型 / 音色 / 格式 / 密钥是否配好 / 最近的合成结果
+Invoke-RestMethod http://localhost:8080/api/admin/tts -Headers $h
+# 合成一段话
+Invoke-RestMethod -Method Post http://localhost:8080/api/admin/tts -Headers $h -ContentType 'application/json' `
+  -Body '{"text":"你好，我是小助手","voice":"longanhuan_v3.1","format":"pcm","sampleRate":24000}'
+# 浏览器里直接听（inline，audio/wav）
+Start-Process "http://localhost:8080/api/admin/tts/files/<上一步返回的 file>"
+```
+
+响应形如
+`{"ok":true,"file":"tts-20261102-114210-3f9a1c.wav","url":"/api/admin/tts/files/tts-20261102-114210-3f9a1c.wav","bytes":206444,"format":"wav","sampleRate":24000,"durationMs":4200,"chunks":3,"latencyMs":1180,"model":"qwen-audio-3.1-tts-flash","voice":"longanhuan_v3.1"}`；
+失败时 `{"ok":false,"error":"..."}`（未配 key、文本超长、`task-failed` 带 `error_code`/`error_message` 等）。
+
 ### 用量统计
 
 `GET /api/admin/usage?days=7`（`days` 取值 1–90，超出按 90 计）：

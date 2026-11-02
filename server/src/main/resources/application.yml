@@ -89,6 +89,24 @@ app:
     silk-decoder: ${ASR_SILK_DECODER:}
     # 报文没给 md5 时，按消息时间在本地找语音文件的允许偏差
     voice-match-window-seconds: ${ASR_VOICE_WINDOW_SECONDS:180}
+  # 语音合成：阿里云百炼 qwen-audio-3.1-tts-flash（WebSocket 双工事件流）
+  # 微信 Hook 没有发语音的接口，合成结果先落 data/tts/ 并从管理端试听
+  tts:
+    enabled: ${TTS_ENABLED:true}
+    # 百炼建议换成业务空间专属域名 wss://{WorkspaceId}.cn-beijing.maas.aliyuncs.com/api-ws/v1/inference
+    base-url: ${TTS_BASE_URL:wss://dashscope.aliyuncs.com/api-ws/v1/inference}
+    api-key: ${DASHSCOPE_API_KEY:${TTS_API_KEY:}}
+    model: ${TTS_MODEL:qwen-audio-3.1-tts-flash}
+    voice: ${TTS_VOICE:longanhuan_v3.1}
+    # pcm / wav / mp3 / opus。pcm 由本地补 WAV 头，长度和时间最准
+    format: ${TTS_FORMAT:pcm}
+    sample-rate: ${TTS_SAMPLE_RATE:24000}
+    volume: ${TTS_VOLUME:50}
+    rate: ${TTS_RATE:1.0}
+    pitch: ${TTS_PITCH:1.0}
+    timeout: ${TTS_TIMEOUT:60s}
+    max-chars: ${TTS_MAX_CHARS:500}
+    output-dir: ${TTS_OUTPUT_DIR:data/tts}
   security:
     admin-token: ${ADMIN_TOKEN:change-me-admin-token}
     agent-token: ${AGENT_TOKEN:change-me-agent-token}
