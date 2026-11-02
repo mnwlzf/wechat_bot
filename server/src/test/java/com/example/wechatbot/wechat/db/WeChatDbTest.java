@@ -20,7 +20,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * 用一份自己加密出来的 SQLCipher 库当样本（{@code src/test/resources/wechat}）：
- * 页格式、密钥派生、B-tree 解析、按 {@code svr_id} 取语音都走真实代码路径。
+ * 页格式、密钥派生、B-tree 解析、按 {@code svr_id} 取语音、密钥文件优先级都走真实代码路径。
  */
 class WeChatDbTest {
     private static final String KEY = "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0";
@@ -51,7 +51,18 @@ class WeChatDbTest {
         properties.setEnabled(true);
         properties.setKey(key);
         properties.setDataDir(root.toString());
+        properties.setKeyFile(tempDir.resolve("wechat-db-key.txt").toString());
         return properties;
+    }
+
+    private WeChatDataDirs dirs(WeChatDbProperties properties) {
+        return new WeChatDataDirs(properties);
+    }
+
+    private WeChatVoiceStore store(String key) {
+        WeChatDbProperties properties = properties(key);
+        WeChatDataDirs dirs = dirs(properties);
+        return new WeChatVoiceStore(properties, dirs, new WeChatDbKeyStore(properties, dirs));
     }
 
     @Test
@@ -86,7 +97,7 @@ class WeChatDbTest {
     @Test
     @DisplayName("按 svr_id（= 回调 msgid）精确定位到语音字节")
     void findsVoiceBySvrId() {
-        WeChatVoiceStore store = new WeChatVoiceStore(properties(KEY));
+        WeChatVoiceStore store = store(KEY);
 
         Optional<WeChatVoiceStore.Voice> voice = store.findBySvrId(8007476072464367941L);
 
@@ -99,7 +110,7 @@ class WeChatDbTest {
     @Test
     @DisplayName("找不到 svr_id 时按消息时间在时间窗内兜底")
     void fallsBackToCreateTime() {
-        WeChatVoiceStore store = new WeChatVoiceStore(properties(KEY));
+        WeChatVoiceStore store = store(KEY);
 
         assertThat(store.findBySvrId(1L)).isEmpty();
         assertThat(store.findByCreateTime(1793547648L, 60)).isPresent();
@@ -110,7 +121,7 @@ class WeChatDbTest {
     @Test
     @DisplayName("没配密钥时整体不可用，也不会去读文件")
     void disabledWithoutKey() {
-        WeChatVoiceStore store = new WeChatVoiceStore(properties(""));
+        WeChatVoiceStore store = store("");
 
         assertThat(store.enabled()).isFalse();
         assertThat(store.findBySvrId(8007476072464367941L)).isEmpty();
@@ -120,15 +131,41 @@ class WeChatDbTest {
     @Test
     @DisplayName("自检信息里密钥只露头尾，能看到分片数与语音条数")
     void diagnosticsMasksKey() {
-        WeChatVoiceStore store = new WeChatVoiceStore(properties(KEY));
+        WeChatVoiceStore store = store(KEY);
 
         Map<String, Object> info = store.diagnostics();
 
         assertThat(info.get("configured")).isEqualTo(true);
+        assertThat(info.get("keyValid")).isEqualTo(true);
+        assertThat(info.get("keySource")).isEqualTo("env");
         assertThat(info.get("maskedKey")).isEqualTo("0f1e****e1f0");
         assertThat(info.get("shards")).isEqualTo(1);
         assertThat(info.get("voiceRows")).isEqualTo(3);
         assertThat(info.get("errors")).asList().isEmpty();
+    }
+
+    @Test
+    @DisplayName("密钥文件优先于环境变量：自动截获的新密钥能直接覆盖旧的")
+    void keyFileWinsOverEnv() throws IOException {
+        WeChatDbProperties properties = properties(WRONG_KEY);
+        WeChatDataDirs dirs = dirs(properties);
+        WeChatDbKeyStore keyStore = new WeChatDbKeyStore(properties, dirs);
+
+        assertThat(keyStore.source()).isEqualTo("env");
+        assertThat(keyStore.check().valid()).isFalse();
+
+        keyStore.save(KEY);
+
+        assertThat(keyStore.source()).isEqualTo("file");
+        assertThat(keyStore.key()).isEqualTo(KEY);
+        assertThat(Files.readString(keyStore.keyFile())).contains(KEY);
+        WeChatDbKeyStore.Check check = keyStore.check();
+        assertThat(check.valid()).isTrue();
+        assertThat(check.source()).isEqualTo("file");
+        assertThat(check.maskedKey()).isEqualTo("0f1e****e1f0");
+
+        WeChatVoiceStore store = new WeChatVoiceStore(properties, dirs, keyStore);
+        assertThat(store.findBySvrId(8007476072464367941L)).isPresent();
     }
 
     @Test

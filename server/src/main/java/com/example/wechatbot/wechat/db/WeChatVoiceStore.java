@@ -9,12 +9,11 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.stream.Stream;
 
 /**
  * 从微信 4.x 的 {@code media_*.db} 里按消息取语音字节。
@@ -31,19 +30,23 @@ public class WeChatVoiceStore {
     private static final int MAX_SILK_BYTES = 2 * 1024 * 1024;
 
     private final WeChatDbProperties properties;
+    private final WeChatDataDirs dirs;
+    private final WeChatDbKeyStore keyStore;
     private final Map<String, Cached> cache = new HashMap<>();
 
-    public WeChatVoiceStore(WeChatDbProperties properties) {
+    public WeChatVoiceStore(WeChatDbProperties properties, WeChatDataDirs dirs, WeChatDbKeyStore keyStore) {
         this.properties = properties;
+        this.dirs = dirs;
+        this.keyStore = keyStore;
     }
 
-    private record Cached(long size, long modified, SqlCipherFile file, SqliteReader reader) {}
+    private record Cached(long size, long modified, SqliteReader reader) {}
 
     /** @param bytes SILK 原始字节（可能带前导 0x02） */
     public record Voice(byte[] bytes, String shard) {}
 
     public boolean enabled() {
-        return properties.isConfigured();
+        return properties.isEnabled() && keyStore.configured();
     }
 
     /** 按 {@code svr_id}（= 回调 msgid）取语音。 */
@@ -122,56 +125,12 @@ public class WeChatVoiceStore {
         return Optional.empty();
     }
 
-    /** {@code media_*.db} 分片（按名字排序）。 */
     public List<Path> shards() {
-        List<Path> shards = new ArrayList<>();
-        for (Path dir : messageDirs()) {
-            try (Stream<Path> list = Files.list(dir)) {
-                list.filter(Files::isRegularFile)
-                        .filter(path -> path.getFileName().toString().matches("media_\\d+\\.db"))
-                        .sorted(Comparator.comparing(path -> path.getFileName().toString()))
-                        .forEach(shards::add);
-            } catch (IOException ex) {
-                log.debug("列出语音库失败: {} ({})", dir, ex.getMessage());
-            }
-        }
-        return shards;
+        return dirs.voiceShards();
     }
 
-    /** 所有找到 {@code db_storage/message} 的账号目录。 */
     public List<Path> messageDirs() {
-        List<Path> dirs = new ArrayList<>();
-        for (Path root : roots()) {
-            if (!Files.isDirectory(root)) {
-                continue;
-            }
-            Path direct = root.resolve("db_storage").resolve("message");
-            if (Files.isDirectory(direct)) {
-                dirs.add(direct);
-                continue;
-            }
-            try (Stream<Path> children = Files.list(root)) {
-                children.filter(Files::isDirectory)
-                        .map(child -> child.resolve("db_storage").resolve("message"))
-                        .filter(Files::isDirectory)
-                        .forEach(dirs::add);
-            } catch (IOException ex) {
-                log.debug("扫描微信数据目录失败: {} ({})", root, ex.getMessage());
-            }
-        }
-        return dirs;
-    }
-
-    private List<Path> roots() {
-        String configured = properties.getDataDir();
-        if (configured != null && !configured.isBlank()) {
-            return List.of(Path.of(configured.trim()));
-        }
-        String home = System.getProperty("user.home", "");
-        if (home.isBlank()) {
-            return List.of();
-        }
-        return List.of(Path.of(home, "Documents", "xwechat_files"));
+        return dirs.messageDirs();
     }
 
     private SqliteReader readerOf(Path shard) throws IOException {
@@ -182,36 +141,44 @@ public class WeChatVoiceStore {
         if (cached != null && cached.size() == size && cached.modified() == modified) {
             return cached.reader();
         }
-        SqlCipherFile file = SqlCipherFile.open(shard, properties.getKey(), properties.getPageSize());
+        SqlCipherFile file = SqlCipherFile.open(shard, keyStore.key(), properties.getPageSize());
         SqliteReader reader = new SqliteReader(file);
         if (cache.size() >= MAX_CACHED_FILES) {
             cache.clear();
         }
-        cache.put(key, new Cached(size, modified, file, reader));
+        cache.put(key, new Cached(size, modified, reader));
         return reader;
     }
 
-    /** 管理端自检：配置是否齐全、找到几个分片、里面有几条语音。 */
+    /** 管理端自检：密钥能不能用、找到几个分片、里面有几条语音。 */
     public Map<String, Object> diagnostics() {
-        Map<String, Object> info = new java.util.LinkedHashMap<>();
+        Map<String, Object> info = new LinkedHashMap<>();
+        WeChatDbKeyStore.Check check = keyStore.check();
         info.put("enabled", properties.isEnabled());
-        info.put("configured", properties.isConfigured());
-        info.put("maskedKey", properties.maskedKey());
+        info.put("configured", check.configured());
+        info.put("keyValid", check.valid());
+        info.put("keySource", check.source());
+        info.put("maskedKey", check.maskedKey());
+        info.put("keyFile", keyStore.keyFile().toAbsolutePath().toString());
+        info.put("sampleDatabase", check.sampleDatabase());
+        info.put("keyError", check.error());
         info.put("dataDir", properties.getDataDir() == null || properties.getDataDir().isBlank()
                 ? "(自动)" : properties.getDataDir());
         List<Path> shards = shards();
         info.put("shards", shards.size());
         int voices = 0;
         List<String> errors = new ArrayList<>();
-        for (Path shard : shards) {
-            try {
-                SqliteReader reader = readerOf(shard);
-                if (reader == null) {
-                    continue;
+        if (check.valid()) {
+            for (Path shard : shards) {
+                try {
+                    SqliteReader reader = readerOf(shard);
+                    if (reader == null) {
+                        continue;
+                    }
+                    voices += reader.rows("VoiceInfo").size();
+                } catch (IOException | RuntimeException ex) {
+                    errors.add(shard.getFileName() + ": " + ex.getMessage());
                 }
-                voices += reader.rows("VoiceInfo").size();
-            } catch (IOException | RuntimeException ex) {
-                errors.add(shard.getFileName() + ": " + ex.getMessage());
             }
         }
         info.put("voiceRows", voices);

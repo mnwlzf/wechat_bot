@@ -30,6 +30,61 @@ public class WeChatDbProperties {
     /** SQLCipher 页大小，微信 4.x 固定 4096。 */
     private int pageSize = 4096;
 
+    /** 密钥文件：自动截获到的新密钥写这里，优先于环境变量。 */
+    private String keyFile = "data/wechat-db-key.txt";
+
+    /** 自动截获脚本（内含 P/Invoke wx_key.dll 的 C# 片段）。 */
+    private String captureScript = "scripts/capture-wechat-db-key.ps1";
+
+    /** 截获用的 wx_key.dll（从 WeChatAgent 安装包里取）。 */
+    private String keyDll = "vendor/wxkey/wx_key.dll";
+
+    /** 密钥失效时是否自动重新截获。 */
+    private boolean autoCapture = true;
+
+    /** 单次截获最多等多久（秒）：微信要在登录/开库那一刻才能被截到。 */
+    private int captureTimeoutSeconds = 180;
+
+    public String getKeyFile() {
+        return keyFile;
+    }
+
+    public void setKeyFile(String keyFile) {
+        this.keyFile = keyFile == null ? "" : keyFile.trim();
+    }
+
+    public String getCaptureScript() {
+        return captureScript;
+    }
+
+    public void setCaptureScript(String captureScript) {
+        this.captureScript = captureScript == null ? "" : captureScript.trim();
+    }
+
+    public String getKeyDll() {
+        return keyDll;
+    }
+
+    public void setKeyDll(String keyDll) {
+        this.keyDll = keyDll == null ? "" : keyDll.trim();
+    }
+
+    public boolean isAutoCapture() {
+        return autoCapture;
+    }
+
+    public void setAutoCapture(boolean autoCapture) {
+        this.autoCapture = autoCapture;
+    }
+
+    public int getCaptureTimeoutSeconds() {
+        return captureTimeoutSeconds;
+    }
+
+    public void setCaptureTimeoutSeconds(int captureTimeoutSeconds) {
+        this.captureTimeoutSeconds = captureTimeoutSeconds;
+    }
+
     public boolean isEnabled() {
         return enabled;
     }

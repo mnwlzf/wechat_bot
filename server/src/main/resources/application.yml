@@ -199,6 +199,16 @@ app:
       # 微信数据目录，留空自动找 %USERPROFILE%\Documents\xwechat_files\*\db_storage
       data-dir: ${WECHAT_DB_DATA_DIR:}
       page-size: ${WECHAT_DB_PAGE_SIZE:4096}
+      # 密钥文件：自动截获到的新密钥写这里，优先于环境变量（密钥变了不用改 .env）
+      key-file: ${WECHAT_DB_KEY_FILE:data/wechat-db-key.txt}
+      # 自动截获：调 wx_key.dll 在微信登录/开库那一刻把口令截下来
+      auto-capture: ${WECHAT_DB_AUTO_CAPTURE:true}
+      capture-script: ${WECHAT_DB_CAPTURE_SCRIPT:scripts/capture-wechat-db-key.ps1}
+      key-dll: ${WECHAT_DB_KEY_DLL:vendor/wxkey/wx_key.dll}
+      capture-timeout-seconds: ${WECHAT_DB_CAPTURE_TIMEOUT_SECONDS:180}
+      # 定时体检：密钥还能不能开库，不能就自动重新截获
+      check-interval-ms: ${WECHAT_DB_CHECK_INTERVAL_MS:300000}
+      check-initial-delay-ms: ${WECHAT_DB_CHECK_INITIAL_DELAY_MS:120000}
     hook:
       enabled: ${WECHAT_HOOK_ENABLED:true}
       outbox-enabled: ${WECHAT_HOOK_OUTBOX_ENABLED:true}

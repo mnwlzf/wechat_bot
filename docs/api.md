@@ -364,12 +364,34 @@ Hook 推来的非文本消息（`type` 不是 `1`）不再丢弃，而是归类�
 微信 4.x 的 `media_*.db` 是 SQLCipher 4：`salt` = 页 1 前 16 字节，
 `key = PBKDF2-HMAC-SHA512(passphrase, salt, 256000, 32)`，
 `mac_key = PBKDF2(key, salt ^ 0x3a, 2, 32)`，每页末尾 64 字节是 `HMAC-SHA512(mac_key, cipher‖iv‖页号)`。
-密钥与账号绑定，只在登录那一刻派生，重启/重登可能变，所以取到后写进 `.env` 的 `WECHAT_DB_KEY`，换账号要重新取。
 
-参考实现是 `D:\WeChatAgent-main` 的 `scripts/reader_setup.py`：`capture_key()` 调 `wx_key.dll` 的
-`InitializeHook(pid)` + `PollKeyData()`，在微信登录瞬间截获口令，再用 `verify_passphrase_native` +
-sqlcipher3 验证能打开库；它会把口令用 DPAPI 存进 `state/weflow/WeFlow-config.json`。
-本仓库不依赖那个 DLL：密钥配好后由 `SqlCipherFile` / `SqliteReader` 自己解页、读 B-tree。
+密钥与账号绑定，**一次安装内不变**（换密钥要重加密所有库，微信不会这么干；实测 10-29 建的库今天照样能开）。
+只有换账号、重装微信、清数据这类操作才会变。解页、读 B-tree 都由 `SqlCipherFile` / `SqliteReader` 自己做，
+不依赖第三方 DLL。
+
+密钥的维护是自动的：
+
+1. **来源优先级**：`data/wechat-db-key.txt`（`WECHAT_DB_KEY_FILE`）> `.env` 的 `WECHAT_DB_KEY`。
+   启动后如果只有环境变量里的密钥，会先把它落到文件里；之后一律以文件为准——截获到新密钥只要重写文件就生效，
+   不需要改 `.env`、也不需要重启（按 mtime 热加载）。
+2. **定时体检**：每 5 分钟（`WECHAT_DB_CHECK_INTERVAL_MS`）拿密钥去开一次 `media_*.db`，HMAC 不对就判定失效，
+   随即自动重新截获（`WECHAT_DB_AUTO_CAPTURE`）。
+3. **截获原理**：和 `D:\WeChatAgent-main` 的 `scripts/reader_setup.py` 一样——`wx_key.dll` 的
+   `InitializeHook(pid)` + `PollKeyData()` 在微信**登录/开库那一刻**截口令，再用页 1 的 HMAC 验证，
+   通过才写密钥文件。脚本是 `scripts/capture-wechat-db-key.ps1`（内含 P/Invoke 的 C# 片段，不用给 Java 加 JNA）。
+4. **手动触发**：`POST /api/admin/asr/voice-db/capture`（先在微信里退出登录，点完再登录，默认等 180 秒）。
+5. **完全不用管**：装一次看门狗，之后微信每次启动/重新登录都会自动截获：
+
+   ```powershell
+   powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install-key-watchdog.ps1
+   # 取消：加 -Remove
+   ```
+
+   `key-watchdog.ps1` 用 `-TimeoutSeconds 0`（一直等到密钥出现或微信退出），微信重启后自动重新挂钩。
+
+`wx_key.dll` 是第三方二进制、不进仓库（`vendor/wxkey/*.dll` 已忽略）：
+`powershell -File scripts\extract-wxkey.ps1` 会从 WeChatAgent 安装包（或上次留下的 `logs\key\wx_key.dll`）
+取到 `vendor\wxkey\wx_key.dll`。
 
 | 环境变量 | 默认 | 说明 |
 | --- | --- | --- |
@@ -383,18 +405,28 @@ sqlcipher3 验证能打开库；它会把口令用 DPAPI 存进 `state/weflow/We
 | `ASR_MAX_BYTES` | `52428800` | 上传大小上限（接口限制 50MB） |
 | `ASR_VOICE_WINDOW_SECONDS` | `180` | 没有 `msgid` / md5 时按时间窗匹配语音 |
 | `WECHAT_DB_ENABLED` | `true` | 是否读本地语音库 |
-| `WECHAT_DB_KEY` | 空 | 本地库密钥（64 位 hex）；留空 = 不读本地库 |
+| `WECHAT_DB_KEY` | 空 | 本地库密钥（64 位 hex）；没配 = 不读本地库 |
+| `WECHAT_DB_KEY_FILE` | `data/wechat-db-key.txt` | 密钥文件；自动截获的新密钥写这里，优先于环境变量 |
+| `WECHAT_DB_AUTO_CAPTURE` | `true` | 密钥失效时是否自动重新截获 |
+| `WECHAT_DB_CAPTURE_SCRIPT` | `scripts/capture-wechat-db-key.ps1` | 截获脚本路径 |
+| `WECHAT_DB_KEY_DLL` | `vendor/wxkey/wx_key.dll` | 截获用的 DLL |
+| `WECHAT_DB_CAPTURE_TIMEOUT_SECONDS` | `180` | 单次截获最多等多久 |
+| `WECHAT_DB_CHECK_INTERVAL_MS` | `300000` | 密钥体检间隔 |
 | `WECHAT_DB_DATA_DIR` | 空 | 微信数据目录；留空自动找 `%USERPROFILE%\Documents\xwechat_files\*\db_storage` |
 | `WECHAT_DB_PAGE_SIZE` | `4096` | SQLCipher 页大小，微信 4.x 固定 4096 |
 
-三个自测接口：
+四个自测接口：
 
 ```powershell
 $h = @{ 'X-Admin-Token' = $env:ADMIN_TOKEN }
 # 状态：密钥打码、模型、解码器是否就绪、本地语音库概况
 Invoke-RestMethod http://localhost:8080/api/admin/asr -Headers $h
-# 只看本地语音库：密钥对不对、找到几个分片、里面有多少条语音
+# 只看本地语音库：keyValid / keySource / 分片数 / 语音条数 / 截获能力
 Invoke-RestMethod http://localhost:8080/api/admin/asr/voice-db -Headers $h
+# 某一条语音能不能取到（msgid 就是回调报文里的 msgid）
+Invoke-RestMethod http://localhost:8080/api/admin/asr/voice-db/8007476072464367940 -Headers $h
+# 立刻重新截获一次密钥（先退出微信登录，点完再登录）
+Invoke-RestMethod -Method Post http://localhost:8080/api/admin/asr/voice-db/capture -Headers $h
 # 用本机文件跑一遍完整链路（支持 SILK / 加密 .dat）
 Invoke-RestMethod -Method Post http://localhost:8080/api/admin/asr/test -Headers $h -ContentType 'application/json' `
   -Body '{"path":"D:/wechat_bot/logs/voice.silk"}'

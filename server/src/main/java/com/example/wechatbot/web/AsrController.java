@@ -5,6 +5,10 @@ import com.example.wechatbot.asr.AsrService;
 import com.example.wechatbot.asr.SilkDecoder;
 import com.example.wechatbot.asr.VoiceTranscriber;
 import com.example.wechatbot.config.AsrProperties;
+import com.example.wechatbot.config.WeChatDbProperties;
+import com.example.wechatbot.wechat.db.WeChatDbKeyHealth;
+import com.example.wechatbot.wechat.db.WeChatDbKeyStore;
+import com.example.wechatbot.wechat.db.WeChatKeyCapture;
 import com.example.wechatbot.wechat.db.WeChatVoiceStore;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -12,6 +16,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
@@ -38,15 +43,25 @@ public class AsrController {
     private final SilkDecoder silkDecoder;
     private final VoiceTranscriber voiceTranscriber;
     private final WeChatVoiceStore voiceStore;
+    private final WeChatDbProperties dbProperties;
+    private final WeChatDbKeyStore keyStore;
+    private final WeChatKeyCapture keyCapture;
+    private final WeChatDbKeyHealth keyHealth;
 
     public AsrController(AsrProperties properties, AsrService asrService,
                          SilkDecoder silkDecoder, VoiceTranscriber voiceTranscriber,
-                         WeChatVoiceStore voiceStore) {
+                         WeChatVoiceStore voiceStore, WeChatDbProperties dbProperties,
+                         WeChatDbKeyStore keyStore, WeChatKeyCapture keyCapture,
+                         WeChatDbKeyHealth keyHealth) {
         this.properties = properties;
         this.asrService = asrService;
         this.silkDecoder = silkDecoder;
         this.voiceTranscriber = voiceTranscriber;
         this.voiceStore = voiceStore;
+        this.dbProperties = dbProperties;
+        this.keyStore = keyStore;
+        this.keyCapture = keyCapture;
+        this.keyHealth = keyHealth;
     }
 
     @GetMapping
@@ -68,7 +83,41 @@ public class AsrController {
     /** 本地语音库（media_*.db）自检：密钥对不对、找到几个分片、里面有多少条语音。 */
     @GetMapping("/voice-db")
     public Map<String, Object> voiceDb() {
-        return voiceStore.diagnostics();
+        Map<String, Object> result = new LinkedHashMap<>(voiceStore.diagnostics());
+        result.put("capture", captureInfo());
+        return result;
+    }
+
+    /**
+     * 立刻重新截获一次数据库密钥（换账号、重装微信后用）。
+     *
+     * <p>会阻塞到截获成功/超时：微信必须正在运行，且要能等到「登录 / 开库」那一刻，
+     * 所以通常让用户先退到登录界面再点这个接口。</p>
+     */
+    @PostMapping("/voice-db/capture")
+    public Map<String, Object> capture(@RequestParam(name = "timeoutSeconds", required = false) Integer timeoutSeconds) {
+        int timeout = timeoutSeconds == null
+                ? dbProperties.getCaptureTimeoutSeconds() : Math.max(10, timeoutSeconds);
+        WeChatKeyCapture.Result captured = keyCapture.capture(timeout);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("ok", captured.ok());
+        result.put("maskedKey", captured.maskedKey());
+        result.put("message", captured.message());
+        keyStore.invalidate();
+        result.put("voiceDb", voiceStore.diagnostics());
+        result.put("capture", captureInfo());
+        return result;
+    }
+
+    private Map<String, Object> captureInfo() {
+        Map<String, Object> info = new LinkedHashMap<>();
+        info.put("available", keyCapture.available());
+        info.put("running", keyCapture.running());
+        info.put("autoCapture", dbProperties.isAutoCapture());
+        info.put("script", Path.of(dbProperties.getCaptureScript()).toAbsolutePath().toString());
+        info.put("dll", Path.of(dbProperties.getKeyDll()).toAbsolutePath().toString());
+        info.put("lastResult", keyHealth.lastResult());
+        return info;
     }
 
     /** 拿一条具体的语音试试：报文里的 {@code msgid} 填进来，看能不能在本地库里命中。 */

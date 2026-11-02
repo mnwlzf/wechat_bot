@@ -30,6 +30,8 @@ logs/
 windows-agent/state/
 vendor/WeChat-Hook/
 vendor/wechat-hook.zip
+# 密钥截获用的 wx_key.dll（第三方二进制，从 WeChatAgent 安装包里取，见 scripts/extract-wxkey.ps1）
+vendor/wxkey/*.dll
 
 # 大体积安装包与本地调试工具（不进仓库，避免超过 GitHub 单文件 100MB 限制）
 windows-agent/prebuilt/*.exe
