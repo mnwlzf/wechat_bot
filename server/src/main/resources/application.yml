@@ -107,6 +107,10 @@ app:
     timeout: ${TTS_TIMEOUT:60s}
     max-chars: ${TTS_MAX_CHARS:500}
     output-dir: ${TTS_OUTPUT_DIR:data/tts}
+    # 顺便生成微信语音要的 SILK（等 Hook 支持发语音时直接用）；开了就按 16 kHz 合成
+    silk: ${TTS_SILK:true}
+    silk-encoder: ${TTS_SILK_ENCODER:}
+    silk-sample-rate: ${TTS_SILK_SAMPLE_RATE:16000}
   security:
     admin-token: ${ADMIN_TOKEN:change-me-admin-token}
     agent-token: ${AGENT_TOKEN:change-me-agent-token}

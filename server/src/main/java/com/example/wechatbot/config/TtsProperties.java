@@ -40,6 +40,15 @@ public class TtsProperties {
     private int maxChars = 500;
     /** 合成结果落盘目录。 */
     private String outputDir = "data/tts";
+    /** 是否顺便转成微信语音用的 SILK（等 Hook 能发语音时直接用）。 */
+    private boolean silk = true;
+    /**
+     * WAV→SILK 的编码命令。留空时自动用 {@code node scripts/encode-wechat-voice.mjs}
+     * （node 优先从 {@code ASR_SILK_DECODER} 里借，没配再找 PATH）。
+     */
+    private String silkEncoder = "";
+    /** 微信语音是 16 kHz，所以开了 SILK 就按这个采样率合成，省一次重采样。 */
+    private int silkSampleRate = 16000;
 
     public boolean isConfigured() {
         return enabled && apiKey != null && !apiKey.isBlank();
@@ -80,4 +89,10 @@ public class TtsProperties {
     public void setMaxChars(int maxChars) { this.maxChars = maxChars; }
     public String getOutputDir() { return outputDir; }
     public void setOutputDir(String outputDir) { this.outputDir = outputDir; }
+    public boolean isSilk() { return silk; }
+    public void setSilk(boolean silk) { this.silk = silk; }
+    public String getSilkEncoder() { return silkEncoder; }
+    public void setSilkEncoder(String silkEncoder) { this.silkEncoder = silkEncoder; }
+    public int getSilkSampleRate() { return silkSampleRate; }
+    public void setSilkSampleRate(int silkSampleRate) { this.silkSampleRate = silkSampleRate; }
 }

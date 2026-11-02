@@ -21,8 +21,9 @@ import java.util.stream.Stream;
 /**
  * 语音合成：文本 → 音频文件（落在 {@code data/tts/}），并在列表里保留最近一批。
  *
- * <p>微信这边的 Hook 只开放了文字和图片两个发送接口，没有发语音的接口，所以合成结果目前
- * 是「文件 + 管理端可播放」，给后面的语音回复用（见 {@code docs/api.md}）。</p>
+ * <p>开了 {@code app.tts.silk}（默认开）还会顺手生成一个 {@code .silk}——那是微信语音消息
+ * 真正要发的东西，等 Hook 支持发语音时直接用它。开了 SILK 就按 16 kHz 合成，
+ * 免得再重采样一次。</p>
  */
 @Service
 public class TtsService {
@@ -33,17 +34,21 @@ public class TtsService {
 
     private final TtsProperties properties;
     private final QwenTtsClient client;
+    private final SilkEncoder silkEncoder;
 
-    public TtsService(TtsProperties properties, QwenTtsClient client) {
+    public TtsService(TtsProperties properties, QwenTtsClient client, SilkEncoder silkEncoder) {
         this.properties = properties;
         this.client = client;
+        this.silkEncoder = silkEncoder;
     }
 
     /**
      * @param durationMs PCM 时长；非 PCM 格式为 -1（时长要从容器里读，这里不解析）
+     * @param silkName   SILK 文件名，没生成时为 null
      */
     public record Speech(String name, Path file, int bytes, String format, int sampleRate,
-                         int durationMs, int chunks, long latencyMs, String voice, String model) {}
+                         int durationMs, int chunks, long latencyMs, String voice, String model,
+                         String silkName, int silkBytes, int silkFrames, String silkError) {}
 
     public boolean enabled() {
         return properties.isConfigured();
@@ -57,7 +62,16 @@ public class TtsService {
         if (!enabled()) {
             throw new TtsException("TTS 未配置：请在 .env 里填 DASHSCOPE_API_KEY");
         }
-        QwenTtsClient.Result result = client.synthesize(text, voice, format, sampleRate == null ? 0 : sampleRate);
+        boolean wantSilk = properties.isSilk() && silkEncoder.available();
+        // 要 SILK 就按微信的 16 kHz / 裸 PCM 合成，省一次重采样
+        int rate = sampleRate != null && sampleRate > 0
+                ? sampleRate
+                : (wantSilk ? properties.getSilkSampleRate() : properties.getSampleRate());
+        String requested = format == null || format.isBlank()
+                ? (wantSilk ? "pcm" : properties.getFormat())
+                : format;
+
+        QwenTtsClient.Result result = client.synthesize(text, voice, requested, rate);
         byte[] audio = result.audio();
         String encoding = result.format().toLowerCase(Locale.ROOT);
         int durationMs = -1;
@@ -72,8 +86,9 @@ public class TtsService {
             case "opus", "ogg" -> ".opus";
             default -> "." + encoding;
         };
-        String name = "tts-" + LocalDateTime.now().format(STAMP) + "-"
-                + UUID.randomUUID().toString().substring(0, 6) + extension;
+        String base = "tts-" + LocalDateTime.now().format(STAMP) + "-"
+                + UUID.randomUUID().toString().substring(0, 6);
+        String name = base + extension;
         Path directory = outputDir();
         Path file = directory.resolve(name);
         try {
@@ -82,13 +97,40 @@ public class TtsService {
         } catch (IOException ex) {
             throw new TtsException("写音频文件失败: " + ex.getMessage(), ex);
         }
+
+        String silkName = null;
+        int silkBytes = 0;
+        int silkFrames = 0;
+        String silkError = null;
+        if (wantSilk) {
+            try {
+                SilkEncoder.Encoded encoded = silkEncoder.encode(audio, result.sampleRate());
+                silkName = base + ".silk";
+                Files.write(directory.resolve(silkName), encoded.silk());
+                silkBytes = encoded.silk().length;
+                silkFrames = encoded.frames();
+            } catch (TtsException | IOException ex) {
+                silkError = ex.getMessage();
+                silkName = null;
+                log.warn("生成 SILK 失败（WAV 仍然可用）: {}", ex.getMessage());
+            }
+        }
         prune();
-        log.info("TTS 合成完成: {} ({} 字节, {} ms, voice={})", name, audio.length, durationMs,
-                voice == null || voice.isBlank() ? properties.getVoice() : voice);
+        log.info("TTS 合成完成: {} ({} 字节, {} ms, voice={}){}", name, audio.length, durationMs,
+                voice == null || voice.isBlank() ? properties.getVoice() : voice,
+                silkName == null ? "" : " + " + silkName);
         return new Speech(name, file, audio.length, encoding, result.sampleRate(), durationMs,
                 result.chunks(), result.latencyMs(),
                 voice == null || voice.isBlank() ? properties.getVoice() : voice.trim(),
-                properties.getModel());
+                properties.getModel(), silkName, silkBytes, silkFrames, silkError);
+    }
+
+    public boolean silkAvailable() {
+        return properties.isSilk() && silkEncoder.available();
+    }
+
+    public String silkBackend() {
+        return silkEncoder.backend();
     }
 
     public Path outputDir() {

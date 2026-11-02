@@ -453,9 +453,15 @@ curl.exe -s -X POST http://localhost:8080/api/admin/asr/test -H "X-Admin-Token: 
 
 实现：`QwenTtsClient`（JDK 自带 `java.net.http.WebSocket`，不加第三方依赖）+ `TtsService`（补 WAV 头、落盘 `data/tts/`、只留最近 50 个）。
 
-**注意**：微信这边的 Hook 只开放了 `/SendTextMsg` 和 `/SendImgMsg`，没有发语音的接口
-（`/SendVoiceMsg`、`/SendAudioMsg`、`/SendFileMsg` 都是 404），所以合成结果目前是
-「文件 + 管理端试听」，要真正发语音得换一个带发语音接口的 Hook。
+**SILK**：微信语音消息要的是 16 kHz 单声道 SILK v3，文件以 `0x02` 开头接 `#!SILK_V3`，每帧前置 2 字节小端长度。
+开了 `TTS_SILK`（默认开）就用 `scripts/encode-wechat-voice.mjs`（silk-wasm 的 wasm 编码器）顺手生成一个 `.silk`，
+并且**按 16 kHz 合成**，省一次重采样。注意 WAV 自带采样率——拿 24 kHz 的 WAV 按 16 kHz 编码会让时长变成 1.5 倍，
+脚本里已经改成「WAV 输入就按它自己的采样率编」。
+
+**发语音还不行**：当前 Hook（`version.dll` 4.1.10.27）只开放 `/SendTextMsg` 和 `/SendImgMsg`，
+`/SendVoiceMsg`、`/SendAudioMsg`、`/SendFileMsg`、`/UploadVoice`、`/SendSilk` 全是 404。
+`POST /api/admin/tts/send` 会按约定去试 `/SendVoiceMsg`（`{"wxidorgid":..,"path":"<abs .silk>"}`），
+明确返回 `{"status":"unsupported"}` 而不是假装成功；换到带这个接口的 Hook 后不用改代码。
 
 | 环境变量 | 默认 | 说明 |
 | --- | --- | --- |
@@ -472,21 +478,28 @@ curl.exe -s -X POST http://localhost:8080/api/admin/asr/test -H "X-Admin-Token: 
 | `TTS_TIMEOUT` | `60s` | 单次合成超时 |
 | `TTS_MAX_CHARS` | `500` | 单次最大字数（按字数计费） |
 | `TTS_OUTPUT_DIR` | `data/tts` | 合成结果落盘目录 |
+| `TTS_SILK` | `true` | 是否顺手生成微信语音用的 `.silk` |
+| `TTS_SILK_ENCODER` | 空 | WAV→SILK 命令；留空自动用 `node scripts/encode-wechat-voice.mjs`（node 优先从 `ASR_SILK_DECODER` 借） |
+| `TTS_SILK_SAMPLE_RATE` | `16000` | 生成 SILK 时用的合成采样率（微信是 16k） |
 
 ```powershell
 $h = @{ 'X-Admin-Token' = $env:ADMIN_TOKEN }
-# 状态：模型 / 音色 / 格式 / 密钥是否配好 / 最近的合成结果
+# 状态：模型 / 音色 / 格式 / 密钥 / SILK 编码器 / 最近的合成结果
 Invoke-RestMethod http://localhost:8080/api/admin/tts -Headers $h
-# 合成一段话
+# 合成一段话（同时得到 WAV 和 SILK）
 Invoke-RestMethod -Method Post http://localhost:8080/api/admin/tts -Headers $h -ContentType 'application/json' `
-  -Body '{"text":"你好，我是小助手","voice":"longanhuan_v3.1","format":"pcm","sampleRate":24000}'
+  -Body '{"text":"你好，我是小助手","voice":"longanhuan_v3.1"}'
 # 浏览器里直接听（inline，audio/wav）
 Start-Process "http://localhost:8080/api/admin/tts/files/<上一步返回的 file>"
+# 试着让 Hook 发出去（当前 Hook 会返回 status=unsupported）
+Invoke-RestMethod -Method Post http://localhost:8080/api/admin/tts/send -Headers $h -ContentType 'application/json' `
+  -Body '{"chatId":"wxid_xxx","file":"<上一步返回的 silk>"}'
 ```
 
 响应形如
-`{"ok":true,"file":"tts-20261102-114210-3f9a1c.wav","url":"/api/admin/tts/files/tts-20261102-114210-3f9a1c.wav","bytes":206444,"format":"wav","sampleRate":24000,"durationMs":4200,"chunks":3,"latencyMs":1180,"model":"qwen-audio-3.1-tts-flash","voice":"longanhuan_v3.1"}`；
+`{"ok":true,"file":"tts-20261102-142033-7c1929.wav","url":"/api/admin/tts/files/tts-20261102-142033-7c1929.wav","bytes":93804,"format":"wav","sampleRate":16000,"durationMs":2930,"chunks":7,"latencyMs":572,"model":"qwen-audio-3.1-tts-flash","voice":"longanhuan_v3.1","silk":"tts-20261102-142033-7c1929.silk","silkUrl":"/api/admin/tts/files/tts-20261102-142033-7c1929.silk","silkBytes":10833,"silkFrames":147}`；
 失败时 `{"ok":false,"error":"..."}`（未配 key、文本超长、`task-failed` 带 `error_code`/`error_message` 等）。
+SILK 单独失败不影响 WAV，会多一个 `silkError` 字段说明原因。
 
 ### 用量统计
 
