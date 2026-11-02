@@ -69,6 +69,7 @@ public class AsrController {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("enabled", properties.isEnabled());
         result.put("configured", asrService.enabled());
+        result.put("provider", properties.isBailian() ? "bailian" : "siliconflow");
         result.put("model", properties.getModel());
         result.put("baseUrl", properties.getBaseUrl());
         result.put("apiKey", properties.maskedKey());

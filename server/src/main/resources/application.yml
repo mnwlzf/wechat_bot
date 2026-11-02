@@ -76,9 +76,13 @@ app:
   # 默认对接硅基流动 POST {base-url}/audio/transcriptions（multipart：file + model）
   asr:
     enabled: ${ASR_ENABLED:true}
-    base-url: ${ASR_BASE_URL:https://api.siliconflow.cn/v1}
-    api-key: ${ASR_API_KEY:}
-    model: ${ASR_MODEL:XingChenAGI/XingChenASR-V3.2-Ultra}
+    # bailian（默认：阿里云百炼 qwen-audio-3.1-asr-flash，同步 HTTP）或 siliconflow（OpenAI 风格 /audio/transcriptions）
+    provider: ${ASR_PROVIDER:bailian}
+    # 百炼：https://dashscope.aliyuncs.com ；硅基流动：https://api.siliconflow.cn
+    base-url: ${ASR_BASE_URL:https://dashscope.aliyuncs.com}
+    # 不单独配就用 TTS 那把百炼 Key，一个 Key 管识别+合成
+    api-key: ${ASR_API_KEY:${DASHSCOPE_API_KEY:}}
+    model: ${ASR_MODEL:qwen-audio-3.1-asr-flash}
     timeout: ${ASR_TIMEOUT:90s}
     max-bytes: ${ASR_MAX_BYTES:52428800}            # 接口上限 50MB
     # 收到语音消息是否自动转写；关掉就回到「只能看到时长」

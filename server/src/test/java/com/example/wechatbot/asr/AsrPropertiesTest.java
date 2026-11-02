@@ -39,12 +39,24 @@ class AsrPropertiesTest {
     }
 
     @Test
-    @DisplayName("默认值：模型名与接口地址开箱可用")
+    @DisplayName("默认值：模型名与接口地址开箱可用（阿里云百炼 qwen-audio-3.1-asr-flash）")
     void hasSensibleDefaults() {
         AsrProperties properties = new AsrProperties();
-        assertThat(properties.getBaseUrl()).isEqualTo("https://api.siliconflow.cn/v1");
-        assertThat(properties.getModel()).isEqualTo("XingChenAGI/XingChenASR-V3.2-Ultra");
+        assertThat(properties.getProvider()).isEqualTo("bailian");
+        assertThat(properties.isBailian()).isTrue();
+        assertThat(properties.getBaseUrl()).isEqualTo("https://dashscope.aliyuncs.com");
+        assertThat(properties.getModel()).isEqualTo("qwen-audio-3.1-asr-flash");
         assertThat(properties.isConfigured()).isFalse();
+    }
+
+    @Test
+    @DisplayName("provider 可以写成 siliconflow，大小写不敏感")
+    void switchesProvider() {
+        AsrProperties properties = new AsrProperties();
+        properties.setProvider("SiliconFlow");
+        assertThat(properties.isBailian()).isFalse();
+        properties.setProvider("");
+        assertThat(properties.isBailian()).isTrue();
     }
 
     @Test

@@ -348,13 +348,21 @@ Hook 推来的非文本消息（`type` 不是 `1`）不再丢弃，而是归类�
 
 ### 语音转文字
 
-`type=34` 的语音会转成文字再交给模型（对标 `POST /v1/audio/transcriptions`）。链路：
+`type=34` 的语音会转成文字再交给模型。链路：
 
 1. **首选：本地语音库**。微信 4.x 收到的语音不落盘，音频只在 `db_storage/message/media_*.db` 的 `VoiceInfo.voice_data`（SILK）。回调报文里的 `msgid` 就是库里的 `svr_id`，按它精确定位（实测一一对应）；报文没有 `msgid` 时按 `create_time` 在 `ASR_VOICE_WINDOW_SECONDS` 秒窗口内兜底。库是 SQLCipher 4 加密的，服务端自己逐页解密，明文不落盘；
 2. 本地库没命中时，报文里能取到 `md5` 就按文件名在 `msg/attach/**/Voice`、`msg/attach/**/Audio` 下找，对不上再按「消息时间前后 `ASR_VOICE_WINDOW_SECONDS` 秒内写盘的 `.dat` / `.silk`」兜底；`.dat` 用本机 kvcomm 派生的密钥解 V2 容器（和图片同一套逻辑），只接受解密后是 SILK / WAV 的内容，避免把别的附件当语音；
 3. 报文里带 `voiceurl` 时也试一下直连下载（能下到 SILK / WAV 才算）；
 4. SILK 交给外部解码命令转 WAV（Java 侧没有 SILK 解码器）——`ASR_SILK_DECODER` 支持两种协议：JSON 进 JSON 出（stdin `{"b64":...}` → stdout `{"b64":...}`，与 WeChatAgent 的 `scripts/decode-wechat-voice.mjs` 一致）和文件模式（命令里带 `{input}`/`{output}`，例如 `ffmpeg -y -i {input} {output}`）；
-5. 以 multipart（字段 `file` + `model`）上传到 `{ASR_BASE_URL}/audio/transcriptions`，取响应里的 `text`；
+5. 交给 ASR 接口，两种 provider：
+   - **`bailian`（默认）**：阿里云百炼 `qwen-audio-3.1-asr-flash`，同步 HTTP
+     `POST {ASR_BASE_URL}/api/v1/services/aigc/multimodal-generation/generation`，
+     头部 `X-DashScope-SSE: disable`，音频以 **base64 data URL** 内联在请求体里
+     （`input.messages[0].content[0] = {"type":"input_audio","input_audio":{"data":"data:audio/wav;base64,..."}}`，
+     `parameters.format` 和 `parameters.sample_rate` 从字节头里认，不靠文件名），结果取 `output.text`
+     （没有就取 `output.sentence.text`）。不需要公网 URL，也不用先传 OSS；
+   - **`siliconflow`（备选）**：OpenAI 风格 `POST {ASR_BASE_URL}/v1/audio/transcriptions`，
+     multipart（`file` + `model`），取响应里的 `text`；
 6. 转写结果替换占位文本：模型看到 `[语音转写] 明天上午十点开会`，并附带一条「已经转成文字，别再说听不到」的系统提示。
 
 任何一步失败都退回原来的 `[语音 5″]` + 「只能看到时长」说明，不影响回复。
@@ -396,9 +404,10 @@ Hook 推来的非文本消息（`type` 不是 `1`）不再丢弃，而是归类�
 | 环境变量 | 默认 | 说明 |
 | --- | --- | --- |
 | `ASR_ENABLED` | `true` | 关掉后不调接口 |
-| `ASR_BASE_URL` | `https://api.siliconflow.cn/v1` | 兼容 OpenAI transcriptions 的服务地址 |
-| `ASR_API_KEY` | 空 | 服务密钥；留空视为未配置，语音只显示时长 |
-| `ASR_MODEL` | `XingChenAGI/XingChenASR-V3.2-Ultra` | 模型名 |
+| `ASR_PROVIDER` | `bailian` | `bailian`（百炼同步接口）或 `siliconflow`（OpenAI 风格 multipart） |
+| `ASR_BASE_URL` | `https://dashscope.aliyuncs.com` | 百炼地域域名；硅基流动填 `https://api.siliconflow.cn`（带不带 `/v1` 都行） |
+| `ASR_API_KEY` | 空 | 服务密钥；**留空则用 `DASHSCOPE_API_KEY`**（一个 Key 管识别+合成） |
+| `ASR_MODEL` | `qwen-audio-3.1-asr-flash` | 模型名（硅基流动那套是 `XingChenAGI/XingChenASR-V3.2-Ultra`） |
 | `ASR_TRANSCRIBE_VOICE` | `true` | 是否自动转写收到的语音 |
 | `ASR_SILK_DECODER` | 空 | SILK→WAV 解码命令；留空自动探测 `node` + WeChatAgent 的解码脚本 |
 | `ASR_TIMEOUT` | `90s` | 单次转写超时 |
@@ -434,7 +443,7 @@ Invoke-RestMethod -Method Post http://localhost:8080/api/admin/asr/test -Headers
 curl.exe -s -X POST http://localhost:8080/api/admin/asr/test -H "X-Admin-Token: $env:ADMIN_TOKEN" -F "file=@D:/tmp/a.wav"
 ```
 
-响应形如 `{"ok":true,"text":"今天天气不错，我们下午去公园吧。","model":"XingChenAGI/XingChenASR-V3.2-Ultra","latencyMs":2214,"bytes":169134,"silk":false}`；失败时 `{"ok":false,"error":"..."}`，错误一律是可读中文（密钥缺失、接口 4xx/5xx、解码器不可用等）。
+响应形如 `{"ok":true,"text":"今天天气不错，我们下午去公园吧。","model":"qwen-audio-3.1-asr-flash","latencyMs":2214,"bytes":169134,"silk":false}`；失败时 `{"ok":false,"error":"..."}`，错误一律是可读中文（密钥缺失、接口 4xx/5xx、解码器不可用等）。
 
 ### 语音合成（TTS）
 
