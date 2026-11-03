@@ -126,4 +126,77 @@ class ScheduledMessageServiceTest {
         assertThatThrownBy(() -> service.cancel(message.getId()))
                 .hasMessageContaining("只有待发送");
     }
+
+    @Test
+    void dailyRepeatStaysPendingAndAdvancesToNextDay() {
+        ScheduledMessage message = scheduled("每天九点提醒");
+        message.setRepeatRule(ScheduledRepeat.DAILY);
+        when(repository.findByStatusAndScheduledAtLessThanEqualOrderByScheduledAtAsc(
+                eq(ScheduledStatus.PENDING), any(), any(Pageable.class))).thenReturn(List.of(message));
+        when(contentFilter.apply(any())).thenAnswer(inv -> ContentFilterService.Result.pass(inv.getArgument(0)));
+        when(outboxRepository.save(any(OutboxMessage.class))).thenAnswer(inv -> {
+            OutboxMessage outbox = inv.getArgument(0);
+            outbox.setId(UUID.randomUUID());
+            return outbox;
+        });
+        when(repository.save(any(ScheduledMessage.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        service.dispatchDue();
+
+        // 重复消息不结束：继续排队，时间推到未来最近的一次
+        assertThat(message.getStatus()).isEqualTo(ScheduledStatus.PENDING);
+        assertThat(message.getScheduledAt()).isAfter(OffsetDateTime.now());
+        assertThat(message.getSentCount()).isEqualTo(1);
+    }
+
+    @Test
+    void weeklyRepeatStopsAfterRepeatUntil() {
+        ScheduledMessage message = scheduled("每周例会");
+        message.setRepeatRule(ScheduledRepeat.WEEKLY);
+        message.setScheduledAt(OffsetDateTime.now().minusMinutes(1));
+        message.setRepeatUntil(OffsetDateTime.now().plusHours(1));
+        when(repository.findByStatusAndScheduledAtLessThanEqualOrderByScheduledAtAsc(
+                eq(ScheduledStatus.PENDING), any(), any(Pageable.class))).thenReturn(List.of(message));
+        when(contentFilter.apply(any())).thenAnswer(inv -> ContentFilterService.Result.pass(inv.getArgument(0)));
+        when(outboxRepository.save(any(OutboxMessage.class))).thenAnswer(inv -> {
+            OutboxMessage outbox = inv.getArgument(0);
+            outbox.setId(UUID.randomUUID());
+            return outbox;
+        });
+        when(repository.save(any(ScheduledMessage.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        service.dispatchDue();
+
+        // 下一次（一周后）已经超过截止时间，所以这条到此结束
+        assertThat(message.getStatus()).isEqualTo(ScheduledStatus.SENT);
+        assertThat(message.getSentCount()).isEqualTo(1);
+    }
+
+    @Test
+    void splitLinesQueuesOneOutboxRowPerNonBlankLine() {
+        ScheduledMessage message = scheduled("第一行\n\n  第二行  \n第三行");
+        message.setSplitLines(true);
+        when(repository.findByStatusAndScheduledAtLessThanEqualOrderByScheduledAtAsc(
+                eq(ScheduledStatus.PENDING), any(), any(Pageable.class))).thenReturn(List.of(message));
+        when(contentFilter.apply(any())).thenAnswer(inv -> ContentFilterService.Result.pass(inv.getArgument(0)));
+        when(outboxRepository.save(any(OutboxMessage.class))).thenAnswer(inv -> {
+            OutboxMessage outbox = inv.getArgument(0);
+            outbox.setId(UUID.randomUUID());
+            return outbox;
+        });
+        when(repository.save(any(ScheduledMessage.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        service.dispatchDue();
+
+        verify(outboxRepository, times(3)).save(any(OutboxMessage.class));
+        assertThat(message.getStatus()).isEqualTo(ScheduledStatus.SENT);
+    }
+
+    @Test
+    void splitKeepsWholeContentWhenNotSplitting() {
+        assertThat(ScheduledMessageService.split(" 一整段话 \n换行也保留 ", false))
+                .containsExactly("一整段话 \n换行也保留");
+        assertThat(ScheduledMessageService.split("a\n\nb", true)).containsExactly("a", "b");
+        assertThat(ScheduledMessageService.split("   ", true)).isEmpty();
+    }
 }

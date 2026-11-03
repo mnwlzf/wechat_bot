@@ -4,12 +4,13 @@ import dayjs from 'dayjs'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import { adminApi } from '@/api'
-import type { Conversation, PageResult, ScheduledMessage } from '@/api/types'
+import type { Conversation, PageResult, ScheduledMessage, ScheduledRepeat } from '@/api/types'
 import { getErrorMessage } from '@/api/client'
 
 const loading = ref(false)
 const saving = ref(false)
 const dialogVisible = ref(false)
+const editingId = ref<string | null>(null)
 const formRef = ref<FormInstance>()
 const page = ref(0)
 const pageSize = 20
@@ -29,6 +30,9 @@ const form = reactive({
   chatName: '',
   content: '',
   scheduledAt: '',
+  repeatRule: 'NONE' as ScheduledRepeat,
+  repeatUntil: '',
+  splitLines: false,
 })
 
 const formRules: FormRules = {
@@ -51,9 +55,20 @@ const statusTypes: Record<string, string> = {
   FAILED: 'danger',
 }
 
+const repeatLabels: Record<ScheduledRepeat, string> = {
+  NONE: '',
+  DAILY: '每天',
+  WEEKLY: '每周',
+}
+
 const pendingCount = computed(
   () => result.value.content.filter((item) => item.status === 'PENDING').length,
 )
+
+const contentParts = computed(() => {
+  if (!form.splitLines) return form.content.trim() ? 1 : 0
+  return form.content.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).length
+})
 
 async function load() {
   loading.value = true
@@ -75,14 +90,47 @@ async function loadConversations() {
   }
 }
 
-function openCreate() {
+function resetForm() {
   Object.assign(form, {
     chatId: '',
     chatName: '',
     content: '',
     scheduledAt: dayjs().add(10, 'minute').format('YYYY-MM-DD HH:mm:ss'),
+    repeatRule: 'NONE' as ScheduledRepeat,
+    repeatUntil: '',
+    splitLines: false,
+  })
+}
+
+function openCreate() {
+  editingId.value = null
+  resetForm()
+  dialogVisible.value = true
+}
+
+function openEdit(item: ScheduledMessage) {
+  editingId.value = item.id
+  Object.assign(form, {
+    chatId: item.chatId,
+    chatName: item.chatName,
+    content: item.content,
+    scheduledAt: dayjs(item.scheduledAt).format('YYYY-MM-DD HH:mm:ss'),
+    repeatRule: item.repeatRule || 'NONE',
+    repeatUntil: item.repeatUntil ? dayjs(item.repeatUntil).format('YYYY-MM-DD HH:mm:ss') : '',
+    splitLines: item.splitLines,
   })
   dialogVisible.value = true
+}
+
+function applyPreset(kind: '10m' | 'tonight' | 'tomorrow' | 'nextMonday') {
+  const now = dayjs()
+  if (kind === '10m') form.scheduledAt = now.add(10, 'minute').format('YYYY-MM-DD HH:mm:ss')
+  if (kind === 'tonight') form.scheduledAt = now.hour(20).minute(0).second(0).format('YYYY-MM-DD HH:mm:ss')
+  if (kind === 'tomorrow') form.scheduledAt = now.add(1, 'day').hour(9).minute(0).second(0).format('YYYY-MM-DD HH:mm:ss')
+  if (kind === 'nextMonday') {
+    const diff = (8 - now.day()) % 7 || 7
+    form.scheduledAt = now.add(diff, 'day').hour(9).minute(0).second(0).format('YYYY-MM-DD HH:mm:ss')
+  }
 }
 
 function onChatPicked(chatId: string) {
@@ -96,13 +144,22 @@ async function submit() {
   if (!valid) return
   saving.value = true
   try {
-    await adminApi.createScheduledMessage({
+    const payload = {
       chatId: form.chatId,
       chatName: form.chatName || undefined,
       content: form.content,
       scheduledAt: dayjs(form.scheduledAt).toISOString(),
-    })
-    ElMessage.success('已排入定时队列')
+      repeatRule: form.repeatRule,
+      repeatUntil: form.repeatUntil ? dayjs(form.repeatUntil).toISOString() : null,
+      splitLines: form.splitLines,
+    }
+    if (editingId.value) {
+      await adminApi.updateScheduledMessage(editingId.value, payload)
+      ElMessage.success('定时消息已更新')
+    } else {
+      await adminApi.createScheduledMessage(payload)
+      ElMessage.success('已排入定时队列')
+    }
     dialogVisible.value = false
     page.value = 0
     await load()
@@ -151,6 +208,10 @@ function timeLabel(value: string) {
   return dayjs(value).format('MM-DD HH:mm')
 }
 
+function lineCount(content: string) {
+  return content.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).length
+}
+
 onMounted(async () => {
   await Promise.all([load(), loadConversations()])
 })
@@ -161,7 +222,7 @@ onMounted(async () => {
     <div class="page-head">
       <div>
         <h1>定时消息</h1>
-        <p>按预约时间发送，到点自动进入投递队列，走同一套重试与伪装节奏。</p>
+        <p>自己填时间、接收人和内容，到点自动进入投递队列，走同一套重试与伪装节奏。</p>
       </div>
       <div class="head-actions">
         <el-button :icon="Refresh" @click="load">刷新</el-button>
@@ -178,9 +239,18 @@ onMounted(async () => {
       </div>
       <div class="surface-card__body">
         <el-table v-if="result.content.length" :data="result.content" style="width: 100%">
-          <el-table-column label="发送时间" width="128">
+          <el-table-column label="发送时间" width="150">
             <template #default="{ row }">
               <span class="mono">{{ timeLabel(row.scheduledAt) }}</span>
+              <el-tag
+                v-if="row.repeatRule !== 'NONE'"
+                size="small"
+                type="warning"
+                effect="plain"
+                class="repeat-tag"
+              >
+                {{ repeatLabels[row.repeatRule as ScheduledRepeat] }}
+              </el-tag>
             </template>
           </el-table-column>
           <el-table-column label="会话" min-width="170">
@@ -190,21 +260,37 @@ onMounted(async () => {
             </template>
           </el-table-column>
           <el-table-column label="内容" min-width="240">
-            <template #default="{ row }"><p class="content-clamp">{{ row.content }}</p></template>
+            <template #default="{ row }">
+              <p class="content-clamp">{{ row.content }}</p>
+              <span v-if="row.splitLines" class="split-hint">分 {{ lineCount(row.content) }} 条发送</span>
+            </template>
           </el-table-column>
-          <el-table-column label="状态" width="92">
+          <el-table-column label="状态" width="96">
             <template #default="{ row }">
               <el-tag :type="statusTypes[row.status]" size="small" effect="light">
                 {{ statusLabels[row.status] || row.status }}
               </el-tag>
+              <span v-if="row.sentCount > 0" class="sent-count">已发 {{ row.sentCount }} 次</span>
+              <el-tooltip v-if="row.lastError" :content="row.lastError" placement="top">
+                <span class="error-dot">!</span>
+              </el-tooltip>
             </template>
           </el-table-column>
-          <el-table-column label="" width="120" align="right">
+          <el-table-column label="" width="164" align="right">
             <template #default="{ row }">
               <el-button
                 v-if="row.status === 'PENDING'"
                 text
                 type="primary"
+                size="small"
+                @click="openEdit(row)"
+              >
+                编辑
+              </el-button>
+              <el-button
+                v-if="row.status === 'PENDING'"
+                text
+                type="warning"
                 size="small"
                 @click="cancel(row)"
               >
@@ -232,7 +318,11 @@ onMounted(async () => {
       </div>
     </section>
 
-    <el-dialog v-model="dialogVisible" title="新建定时消息" width="min(560px, 92vw)">
+    <el-dialog
+      v-model="dialogVisible"
+      :title="editingId ? '编辑定时消息' : '新建定时消息'"
+      width="min(580px, 92vw)"
+    >
       <el-form ref="formRef" :model="form" :rules="formRules" label-position="top">
         <el-form-item label="发送到" prop="chatId">
           <el-select
@@ -261,22 +351,51 @@ onMounted(async () => {
             placeholder="选择日期与时间"
             style="width: 100%"
           />
+          <div class="preset-row">
+            <el-button text size="small" @click="applyPreset('10m')">10 分钟后</el-button>
+            <el-button text size="small" @click="applyPreset('tonight')">今天 20:00</el-button>
+            <el-button text size="small" @click="applyPreset('tomorrow')">明天 09:00</el-button>
+            <el-button text size="small" @click="applyPreset('nextMonday')">下周一 09:00</el-button>
+          </div>
           <div class="field-hint">到点后最多延迟 20 秒进入投递队列，实际发送受伪装层配额影响。</div>
+        </el-form-item>
+        <el-form-item label="重复">
+          <el-select v-model="form.repeatRule" style="width: 100%">
+            <el-option label="不重复（只发一次）" value="NONE" />
+            <el-option label="每天（同一时间）" value="DAILY" />
+            <el-option label="每周（同一星期几与时间）" value="WEEKLY" />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="form.repeatRule !== 'NONE'" label="重复截止（可选）">
+          <el-date-picker
+            v-model="form.repeatUntil"
+            type="datetime"
+            value-format="YYYY-MM-DD HH:mm:ss"
+            placeholder="留空表示一直重复"
+            style="width: 100%"
+          />
         </el-form-item>
         <el-form-item label="消息内容" prop="content">
           <el-input
             v-model="form.content"
             type="textarea"
-            :rows="4"
+            :rows="5"
             maxlength="5000"
             show-word-limit
-            placeholder="需要发送的文字内容"
+            :placeholder="form.splitLines ? '每行一条消息，按顺序依次发送' : '需要发送的文字内容'"
           />
+          <div class="split-row">
+            <el-switch v-model="form.splitLines" size="small" />
+            <span>按行拆成多条发送</span>
+            <span v-if="form.splitLines" class="split-count">共 {{ contentParts }} 条</span>
+          </div>
         </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="saving" @click="submit">加入队列</el-button>
+        <el-button type="primary" :loading="saving" @click="submit">
+          {{ editingId ? '保存修改' : '加入队列' }}
+        </el-button>
       </template>
     </el-dialog>
   </div>
@@ -306,6 +425,57 @@ onMounted(async () => {
   color: var(--ink-soft);
   font-size: var(--fs-xs);
   line-height: 1.6;
+}
+
+.split-hint {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted-soft);
+  font-size: 10px;
+}
+
+.repeat-tag {
+  margin-top: 4px;
+}
+
+.sent-count {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted-soft);
+  font-size: 10px;
+}
+
+.error-dot {
+  display: inline-grid;
+  width: 14px;
+  height: 14px;
+  margin-top: 4px;
+  place-items: center;
+  border-radius: 50%;
+  color: #fff;
+  background: #dc2626;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-top: 4px;
+}
+
+.split-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
+.split-count {
+  color: var(--ink-soft);
 }
 
 .pagination {

@@ -39,6 +39,23 @@ public class ScheduledMessage {
     @Column(name = "scheduled_at", nullable = false)
     private OffsetDateTime scheduledAt;
 
+    /** 重复规则；重复发送时每发一次就把 scheduledAt 往后推一个周期。 */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "repeat_rule", nullable = false, length = 20)
+    private ScheduledRepeat repeatRule = ScheduledRepeat.NONE;
+
+    /** 重复截止时间；为空表示一直重复。 */
+    @Column(name = "repeat_until")
+    private OffsetDateTime repeatUntil;
+
+    /** 内容按行拆成多条依次发送（群通知分条更自然）。 */
+    @Column(name = "split_lines", nullable = false)
+    private boolean splitLines = false;
+
+    /** 已经成功发出过几次（重复消息会累加）。 */
+    @Column(name = "sent_count", nullable = false)
+    private int sentCount = 0;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private ScheduledStatus status = ScheduledStatus.PENDING;
