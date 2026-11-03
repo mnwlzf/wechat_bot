@@ -13,6 +13,9 @@ import java.util.UUID;
 public interface ConversationRepository extends JpaRepository<Conversation, UUID> {
     Optional<Conversation> findByBotIdAndChatId(UUID botId, String chatId);
 
+    /** 只按 chat_id 找最近活跃的会话：管理端按群维护记忆时手里只有 chat_id。 */
+    Optional<Conversation> findFirstByChatIdOrderByLastMessageAtDesc(String chatId);
+
     Page<Conversation> findAllByOrderByLastMessageAtDesc(Pageable pageable);
 
     /**

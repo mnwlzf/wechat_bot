@@ -16,6 +16,12 @@ import java.util.UUID;
 public interface MessageLogRepository extends JpaRepository<MessageLog, UUID> {
     Page<MessageLog> findByConversationId(UUID conversationId, Pageable pageable);
     List<MessageLog> findByConversationIdOrderByCreatedAtDesc(UUID conversationId, Pageable pageable);
+
+    /** 取某个时间点之前的历史消息（升序），用于滚动摘要。 */
+    List<MessageLog> findByConversationIdAndCreatedAtLessThanOrderByCreatedAtAsc(
+            UUID conversationId, OffsetDateTime before, Pageable pageable);
+
+    long countByConversationIdAndCreatedAtGreaterThan(UUID conversationId, OffsetDateTime after);
     long countByCreatedAtGreaterThanEqual(OffsetDateTime time);
     long countByDirectionAndCreatedAtGreaterThanEqual(MessageDirection direction, OffsetDateTime time);
     long countByStatusAndCreatedAtGreaterThanEqual(MessageStatus status, OffsetDateTime time);
