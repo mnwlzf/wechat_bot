@@ -122,9 +122,17 @@ $headers = @{ Authorization = "Bearer dev-admin-token" }
 | GET | `/api/admin/diagnostics` | 诊断聚合：钩子探活 + 回调计数 + 最近回调 + 失败投递 |
 | GET | `/api/admin/diagnostics/outbox` | 失败投递列表 |
 | POST | `/api/admin/diagnostics/outbox/{id}/retry` | 手动重试失败投递（attempts 归零重新入队） |
-| GET/POST/PUT/DELETE | `/api/admin/prompt-templates` | 提示词模板（可复用人格） |
-| POST | `/api/admin/conversations/{id}/persona` | 会话绑定提示词模板：`{"promptTemplateId":"…"}`，传 `null` 回退默认 |
-| GET/POST | `/api/admin/scheduled-messages` | 定时消息列表 / 新建 |
+| GET/POST/PUT/DELETE | `/api/admin/prompt-templates` | 人设（提示词模板）：增删改查，`defaultPersona` 标记默认人设 |
+| POST | `/api/admin/prompt-templates/{id}/default` | 设为全局默认人设（未单独指定的会话都用它） |
+| DELETE | `/api/admin/prompt-templates/default` | 取消默认人设，回退到机器人 `systemPrompt` |
+| POST | `/api/admin/conversations/{id}/persona` | 会话/群单独绑定人设：`{"promptTemplateId":"…"}`，传 `null` 回退默认 |
+| GET | `/api/admin/memories?chatId=…` | 会话（群）共享记忆：滚动摘要 + 人工要点 |
+| POST | `/api/admin/memories` | 新增人工记忆要点：`{"chatId","chatName","content","enabled"}` |
+| PUT/DELETE | `/api/admin/memories/{id}` | 修改内容 / 启停 / 删除记忆条目 |
+| POST | `/api/admin/memories/summaries?chatId=…` | 立即按现有历史重算一次滚动摘要（同步） |
+| DELETE | `/api/admin/memories/summaries?chatId=…` | 清空摘要，下次重新压缩（人工要点保留） |
+| GET/POST | `/api/admin/scheduled-messages` | 定时消息列表 / 新建（支持 `repeatRule`、`splitLines`） |
+| PUT | `/api/admin/scheduled-messages/{id}` | 编辑待发送的定时消息（时间、接收人、内容、重复规则） |
 | POST | `/api/admin/scheduled-messages/{id}/cancel` | 取消待发送的定时消息 |
 | DELETE | `/api/admin/scheduled-messages/{id}` | 删除定时消息记录 |
 | PUT | `/api/admin/settings/media` | 媒体消息策略（enabled / replyMode / ackText） |
@@ -135,6 +143,14 @@ $headers = @{ Authorization = "Bearer dev-admin-token" }
 | POST | `/api/admin/debug/chat` | 在线调试（不发送微信）。可选 `quoteAuthor` / `quoteText` 模拟引用、`mediaKind` 模拟语音/图片等媒体消息 |
 | GET | `/api/admin/disguise` | 伪装层状态、配额、最近决策 |
 | POST | `/api/admin/disguise/preview` | 预览文风清洗、分条与延迟（不占配额） |
+| GET | `/api/admin/send-policies` | 发信策略：默认策略生效值 + 所有按群覆盖 |
+| GET | `/api/admin/send-policies/{chatId}` | 某个会话的生效发信策略 |
+| PUT | `/api/admin/send-policies/default` | 保存默认发信策略（未单独配置的会话都用它） |
+| PUT/DELETE | `/api/admin/send-policies/{chatId}` | 保存 / 删除按群发信策略（删除即恢复默认） |
+| GET | `/api/admin/reply-policies` | 回复策略：默认策略生效值 + 所有按群覆盖 |
+| GET | `/api/admin/reply-policies/{chatId}` | 某个群的生效回复策略 |
+| PUT | `/api/admin/reply-policies/default` | 保存默认回复策略 |
+| PUT/DELETE | `/api/admin/reply-policies/{chatId}` | 保存 / 删除按群回复策略（删除即恢复默认） |
 
 具体请求/响应结构见 `server/src/main/java/com/example/wechatbot/web/dto/AdminDtos.java`。
 
@@ -227,6 +243,60 @@ POST /api/admin/search-settings/test
   "parts": [{ "text": "好的！整理如下：code", "delaySeconds": 7 }]
 }
 ```
+
+#### 按群发信策略
+
+发信参数有三层，逐字段覆盖：**环境变量 `app.disguise.*` → 默认策略 → 该会话的策略**。
+没在页面上配过的会话直接用默认策略，所以升级之后行为不会突然改变。
+
+```json
+{
+  "readDelayMinMs": 1200,
+  "readDelayMaxMs": 7000,
+  "maxDelayMs": 90000,
+  "splitEnabled": true,
+  "maxParts": 3,
+  "maxPartChars": 90,
+  "perMinute": 3,
+  "per10Minutes": 8,
+  "perHour": 20,
+  "perDay": 120,
+  "minGapMs": 1200,
+  "emojiLimit": 1,
+  "dropRate": 0.0,
+  "promptEnabled": true
+}
+```
+
+- `GET /api/admin/send-policies` → `{"defaultPolicy":{…,"inherited":true},"defaultRow":null,"overrides":[…]}`：默认策略的生效值 + 所有按群覆盖
+- `GET /api/admin/send-policies/{chatId}` → 该会话的生效值（`effective`）+ 它自己的覆盖行（`override`，没配过为 `null`）
+- `PUT /api/admin/send-policies/default` 与 `PUT /api/admin/send-policies/{chatId}?chatName=群名`：只写非空字段，`null` 表示「这项继续沿用下一层」
+- `DELETE /api/admin/send-policies/{chatId}`：删掉按群策略，该群立即回退默认
+
+配额是两层同时生效：会话级 `perMinute` / `per10Minutes` / `perHour` / `perDay` / `minGapMs` 与账号级 `globalPerHour` / `globalPerDay`（账号级仍只在环境变量里配，避免某个群把整号配额顶满）。
+
+#### 按群回复策略
+
+决定「这个群要不要回」，同样是逐字段覆盖：**机器人配置的 `groupWakeWords` → 默认策略 → 该群的策略**。
+
+```json
+{
+  "mode": "RANDOM",
+  "wakeWords": "@机器人,小助手",
+  "randomRate": 0.35,
+  "humanCooldownSeconds": 60
+}
+```
+
+- `mode` 取 `ALWAYS`（主动回复，每条都回）/ `RANDOM`（随机回复）/ `WAKE`（关键词唤醒）/ `HUMAN`（拟人回复，模型自己判断）；`null` 表示这项沿用下一层
+- `RANDOM`：命中唤醒词一定回，其余按 `randomRate`（0~1）插话；**没命中也会入库**并标记「随机未命中 xx%」，保证之后接话时上下文完整
+- `WAKE`：没命中的文本不入库（历史行为），避免把整群闲聊都收进来
+- `HUMAN`：消息一律入库，再带完整对话问一次模型「这条要不要接」；模型输出 `[[NO_REPLY]]` 时标记为忽略（不发送、不占配额）。
+  `humanCooldownSeconds`（0~3600，默认 60）是两次判定的最小间隔，间隔内的消息只入库不判定
+- 只作用于群聊；私聊保持「收到就回」
+- `GET /api/admin/reply-policies` → 默认生效值 + 所有按群覆盖 + 机器人配置的唤醒词（`botWakeWords`）
+- `GET /api/admin/reply-policies/{chatId}` → 该群生效值（`effective`，含 `source`：`bot` / `default` / `chat`）+ 覆盖行（`override`）
+- `PUT /api/admin/reply-policies/default`、`PUT /api/admin/reply-policies/{chatId}?chatName=群名`、`DELETE /api/admin/reply-policies/{chatId}`
 
 ### 自动回复规则与诊断
 
@@ -534,15 +604,40 @@ SILK 单独失败不影响 WAV，会多一个 `silkError` 字段说明原因。
 
 数据全部来自 `message_log`，不做额外埋点。预估成本需要先在「运行策略」填写每千 token 单价（`PUT /api/admin/settings/pricing`，`{"promptPricePerK":0.001,"completionPricePerK":0.002}`），未填写时返回 0。
 
-### 提示词模板与定时消息
+### 人设（提示词模板）
 
-提示词模板用于按会话切换人格，绑定时 `POST /api/admin/conversations/{id}/persona`：
+人设就是一段系统提示词，支持自定义增删改，也支持「全局默认 + 按群单独指定」：
+
+- 生效顺序：**会话/群绑定的人设 → 全局默认人设 → 机器人 `systemPrompt`**
+- 全局最多一个默认人设（数据库唯一索引保证），首次启动会内置一份「大肥鱼」，可直接编辑
+- 绑定/解绑按会话：`POST /api/admin/conversations/{id}/persona`，`{"promptTemplateId":"0b1f…"}`，传 `null` 表示回退默认
+- 会话列表的 `effectivePersonaName` 会显示实际生效的人设（继承默认时带「（默认）」后缀）
 
 ```json
-{ "promptTemplateId": "0b1f…" }
+{
+  "name": "大肥鱼",
+  "description": "一条爱吃爱睡的胖鱼，嘴贫心软",
+  "content": "你是「大肥鱼」，一条住在微信里的胖鱼……"
+}
 ```
 
-绑定的模板会**替代**机器人默认 `systemPrompt` 参与上下文拼装；解绑传 `null`。模板内容变更后，下一次回复即生效。
+删除默认人设时，会自动把最近更新的一条顶上，避免机器人突然失去人设。
+
+### 共享记忆（群内所有成员共用）
+
+上下文窗口只装最近 N 条消息，活跃群聊里前面定过的事很快滚出窗口，机器人就会「各说各的」。共享记忆把滚出窗口的历史压成滚动摘要，再叠上人工要点，一起注入系统提示词：
+
+- 摘要：模型自动生成，每个会话一条（`kind = SUMMARY`），只处理「窗口之外、且上次没压缩过」的消息
+- 要点：管理端手工维护（`kind = NOTE`），可启停，`enabled=false` 时不进提示词
+- 按 `chat_id` 存：同一个群的所有成员共用；私聊只属于那一个人，不会串味
+
+```json
+{ "chatId": "49878296302@chatroom", "chatName": "客户群", "content": "群里管张伟叫老张；周五 16:00 站会", "enabled": true }
+```
+
+触发条件与长度上限在 `app.memory.*`（见 `.env.example` 的 `MEMORY_*`）：默认新增 24 条历史才压一次，两次之间至少间隔 5 分钟，摘要上限 600 字，注入要点最多 8 条。
+
+### 定时消息
 
 定时消息到点后由后端调度器（默认 20 秒一轮）复制到 `outbox`，沿用同一套重试、租约与伪装节奏，因此：
 
@@ -550,14 +645,20 @@ SILK 单独失败不影响 WAV，会多一个 `silkError` 字段说明原因。
 {
   "chatId": "49878296302@chatroom",
   "chatName": "客户群",
-  "content": "明天上午十点的例会挪到下午三点",
-  "scheduledAt": "2026-11-01T10:00:00+08:00"
+  "content": "明天上午十点的例会挪到下午三点\n记得带电脑",
+  "scheduledAt": "2026-11-01T10:00:00+08:00",
+  "repeatRule": "DAILY",
+  "repeatUntil": null,
+  "splitLines": true
 }
 ```
 
-- `scheduledAt` 不能早于当前时间；`chatId` 支持 `wxid` 或 `@chatroom`；
-- 状态机：`PENDING`（待发送）→ `SENT`（已转投递队列）/ `CANCELLED` / `FAILED`（命中敏感词拦截或入队异常）；
-- 只有 `PENDING` 可以取消，已入队的消息请到诊断中心的失败投递里重试。
+- `scheduledAt` 不能早于当前时间；`chatId` 支持 `wxid` 或 `@chatroom`，页面可直接从会话列表选，也能粘贴
+- `repeatRule`：`NONE` / `DAILY` / `WEEKLY`。重复消息发完不结束，而是把 `scheduledAt` 推到未来最近的一次继续排队；停机错过的轮次不会补发
+- `repeatUntil`：重复截止时间，留空表示一直重复
+- `splitLines=true`：内容按行拆成多条依次入队（最多 10 条），适合群通知分条发
+- 状态机：`PENDING`（待发送）→ `SENT`（已转投递队列）/ `CANCELLED` / `FAILED`（命中敏感词拦截或入队异常）；重复消息在两次发送之间保持 `PENDING`
+- 只有 `PENDING` 可以编辑或取消；已入队的消息请到诊断中心的失败投递里重试
 
 
 ## 4. 外部集成 API

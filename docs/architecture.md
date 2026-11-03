@@ -121,7 +121,9 @@ Java 轮询流程：
 3. `DisguiseClock` 判断是否处于睡眠/离线窗口，必要时整体顺延
 4. `QuotaGuard` 按分钟/10 分钟/小时/天与全局配额排队
 5. `PacingModel` 按“读 + 想 + 打字 + 昼夜节律”计算延迟
-6. 每条气泡写一行 `outbox_message`，各自带 `next_attempt_at`
+6. **第一条延迟封顶**：配额排队算出的时间最多推到 `app.disguise.max-first-delay-ms`（默认 15 秒），
+   超出就压回来并在排期日志里注明「配额排队已压到上限」；睡眠/离线块在封顶之后仍然生效
+7. 每条气泡写一行 `outbox_message`，各自带 `next_attempt_at`
 
 `OutboxService.lease` 保证同一会话同一时刻只有一条在途消息，分条不会被并发发出。
 完整策略见 [disguise.md](disguise.md)。
@@ -145,12 +147,75 @@ Base URL 只填域名时客户端自动补 `/v1`，429/5xx 单次重试。
 |---|---|
 | `model_provider` | OpenAI 兼容模型配置，API Key AES-GCM 加密 |
 | `bot_config` | 机器人策略、唤醒词、上下文和限流 |
-| `conversation` | 会话索引和最后一条消息 |
+| `conversation` | 会话索引和最后一条消息；`prompt_template_id` 记录该会话/群单独指定的人设 |
+| `prompt_template` | 人设（系统提示词）；`is_default` 标记全局默认，`builtin_key` 标记内置人设 |
+| `chat_memory` | 会话共享长期记忆：`SUMMARY` 滚动摘要 + `NOTE` 人工要点 |
 | `message_log` | 入站/出站消息审计 |
 | `outbox_message` | 可靠回复发送队列 |
+| `scheduled_message` | 定时消息；`repeat_rule` 重复规则、`split_lines` 分条发送 |
+| `send_policy` | 发信策略；`chat_id` 为空表示全局默认，其余为按群覆盖 |
+| `reply_policy` | 回复策略（主动 / 随机 / 唤醒）；`chat_id` 为空表示全局默认 |
 | `wechat_hook_cursor` | 按账号和会话持久化增量游标 |
 
 Redis 只承担可重建的协调状态：事件去重和分钟级限流。核心消息、配置和游标都在 PostgreSQL。
+
+### 7.1 上下文拼装顺序
+
+`ChatOrchestrator.buildContext` 按固定顺序拼系统消息，顺序变了会直接影响模型行为：
+
+1. **人设**：会话绑定 → 全局默认人设 → 机器人 `systemPrompt`（三选一）
+2. **共享记忆**：该会话的滚动摘要 + 启用的要点（群聊里所有成员共用）
+3. **文风约束**：伪装层的 `promptSuffix`
+4. **按需提示**：引用回复说明、语音/图片边界说明、联网搜索结果
+5. **最近 N 条对话**（`bot_config.context_window`），群聊入站消息带 `[发送者]` 前缀
+
+记忆只补「窗口之外」的历史，所以第 2 步和第 5 步不会重复同一段对话。
+
+### 7.2 发信策略的合并
+
+`SendPolicyService.forChat(chatId)` 每次回复发出去之前解析一次，返回一份只读快照：
+
+```text
+DisguiseProperties(环境变量) → send_policy(chat_id IS NULL) → send_policy(chat_id = 当前会话)
+```
+
+- 逐字段覆盖：某一层该字段为 NULL 就继续沿用下一层
+- 结果按 `chatId` 缓存，任何一次策略写入都会让缓存整体失效
+- `DisguiseService` 把这份快照传给 `StyleNormalizer` / `ReplyComposer` / `PacingModel` / `QuotaGuard`，
+  所以文风清洗、分条、延迟、限流都按该群的策略算；账号级配额（`globalPerHour` / `globalPerDay`）仍然是全局的
+- 会话停用（`enabled=false`）时该群立即回退到默认策略，配置保留
+
+### 7.3 回复策略的合并
+
+`ReplyPolicyService.forChat(chatId, bot)` 在**收消息时**判定要不要回，同样三层：
+
+```text
+bot_config.group_wake_words → reply_policy(chat_id IS NULL) → reply_policy(chat_id = 当前群)
+```
+
+- 唤醒词为空即「主动回复」，所以老配置（清空唤醒词）的行为完全不变
+- `RANDOM` 未命中时消息仍然入库（`status=IGNORED` + 「随机未命中 xx%」），摘要在下一轮仍能覆盖这段历史
+- `WAKE` 未命中的文本不入库，直接返回 `IGNORED`，不产生任何写操作
+- `HUMAN`（拟人）：消息一律入库，`ChatOrchestrator` 在提示词里追加「自己判断要不要接」的说明，
+  模型输出 `[[NO_REPLY]]` 时把来消息标成 `IGNORED` 并**不进投递链路**（不占配额、不写 outbox）；
+  判定本身由 `HumanReplyGuard` 按 `humanCooldownSeconds` 节流，状态放内存，重启最多多判一次
+- 每次判定直接查库（两条带索引的小查询），改完立即生效，没有缓存失效逻辑
+- 私聊不走这套判定，保持「收到就回」
+
+### 7.4 连发消息聚合（防复读机）
+
+判定「要回」之后不直接生成，而是交给 `ReplyDispatcher`，按 `chatId` 聚合：
+
+- **防抖**：最后一条消息之后静默 `app.reply.debounce-seconds`（默认 3 秒）才真正生成，
+  一次回复覆盖整串对话；期间的新消息只是把定时器往后推
+- **封顶**：从这串消息的第一条算起，攒满 `app.reply.max-wait-seconds`（默认 12 秒）必须回一次，
+  刷屏的群不会永远等不到静默；0 表示不封顶
+- **串行**：同一个 `chatId` 用 `Set` 占位，上一条还在生成时新请求每 500ms 重试排队，
+  保证一个群不会同时冒出两段回复
+- **不留悬空状态**：被合并掉的请求通过 `superseded` 回调把那条来消息标成
+  `IGNORED` + 「已合并到随后的回复」，页面上不会出现永远停在「已接收」的记录
+- 生成跑在自己的线程池（`reply-worker`，默认 4 个会话并发），不占用 `chatExecutor`；
+  关闭开关（`REPLY_DEBOUNCE_ENABLED=false`）即恢复「每条消息各自生成」
 
 ## 8. 失败与降级
 
