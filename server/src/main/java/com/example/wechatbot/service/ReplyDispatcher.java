@@ -15,6 +15,7 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -50,8 +51,11 @@ public class ReplyDispatcher {
      * @param future     定时任务句柄，用来在会话被合并时取消
      * @param firstAt    这串消息的第一条时间，用来兜住 {@code maxWaitSeconds}
      * @param superseded 这次请求被新消息合并掉时执行（把那条消息标成已合并）
+     * @param alive      被合并后置为 false：已经排上队但还没跑的生成一律作废，
+     *                   避免「合并了却还是单独回了一条」
      */
-    private record Pending(long seq, ScheduledFuture<?> future, long firstAt, Runnable superseded) {}
+    private record Pending(long seq, ScheduledFuture<?> future, long firstAt, Runnable superseded,
+                           AtomicBoolean alive) {}
 
     @org.springframework.beans.factory.annotation.Autowired
     public ReplyDispatcher(ReplyProperties properties) {
@@ -85,7 +89,7 @@ public class ReplyDispatcher {
     public void submit(String chatId, Runnable generate, Runnable superseded) {
         String key = chatId == null || chatId.isBlank() ? "default" : chatId;
         if (!properties.isEnabled()) {
-            runSerialized(key, generate);
+            runSerialized(key, new AtomicBoolean(true), generate);
             return;
         }
         long now = System.currentTimeMillis();
@@ -94,36 +98,48 @@ public class ReplyDispatcher {
         long capSeconds = Math.max(0, properties.getMaxWaitSeconds());
         long maxWait = capSeconds == 0 ? Long.MAX_VALUE / 4 : capSeconds * 1000L;
         long seq = sequence.incrementAndGet();
+        AtomicBoolean alive = new AtomicBoolean(true);
 
         pending.compute(key, (ignored, previous) -> {
             long firstAt = now;
             if (previous != null) {
                 firstAt = previous.firstAt();
                 previous.future().cancel(false);
+                // 已经排上队的那次生成也一并作废：合并后的消息只当上下文，不再单独回
+                previous.alive().set(false);
                 notifySuperseded(key, previous);
             }
             // 攒够 maxWait 就立刻回；否则再等 debounce，看还有没有新消息
             long wait = Math.min(debounce, Math.max(0, maxWait - (now - firstAt)));
             ScheduledFuture<?> future = timer.schedule(
-                    () -> fire(key, seq, generate), wait, TimeUnit.MILLISECONDS);
-            return new Pending(seq, future, firstAt, superseded);
+                    () -> fire(key, seq, alive, generate), wait, TimeUnit.MILLISECONDS);
+            return new Pending(seq, future, firstAt, superseded, alive);
         });
     }
 
-    private void fire(String key, long seq, Runnable generate) {
+    private void fire(String key, long seq, AtomicBoolean alive, Runnable generate) {
         Pending current = pending.get(key);
         if (current != null && current.seq() == seq) {
             pending.remove(key, current);
         }
-        runSerialized(key, generate);
+        if (!alive.get()) {
+            log.debug("这次生成已被后续消息合并，跳过: chat={}", key);
+            return;
+        }
+        runSerialized(key, alive, generate);
     }
 
     /**
      * 同一个会话同一时刻只跑一个生成任务；正在跑就过一会儿再来，不丢请求。
+     * 等队列期间如果发现这次请求已经被合并，直接放弃。
      */
-    private void runSerialized(String key, Runnable task) {
+    private void runSerialized(String key, AtomicBoolean alive, Runnable task) {
+        if (!alive.get()) {
+            log.debug("排队的生成已被合并，跳过: chat={}", key);
+            return;
+        }
         if (!running.add(key)) {
-            timer.schedule(() -> runSerialized(key, task), RETRY_MILLIS, TimeUnit.MILLISECONDS);
+            timer.schedule(() -> runSerialized(key, alive, task), RETRY_MILLIS, TimeUnit.MILLISECONDS);
             return;
         }
         try {

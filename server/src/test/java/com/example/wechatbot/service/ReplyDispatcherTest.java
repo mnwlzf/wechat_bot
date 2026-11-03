@@ -84,6 +84,23 @@ class ReplyDispatcherTest {
     }
 
     @Test
+    void supersededRequestNeverRepliesOnItsOwn() {
+        ReplyDispatcher dispatcher = dispatcher(1, 5);
+        AtomicInteger first = new AtomicInteger();
+        AtomicInteger second = new AtomicInteger();
+
+        // 第一条还没等到静默，第二条就来了：第一条只当上下文，不能再单独回
+        dispatcher.submit("123@chatroom", first::incrementAndGet, null);
+        dispatcher.submit("123@chatroom", second::incrementAndGet, null);
+
+        await(() -> second.get() == 1);
+        sleep(300);
+
+        assertThat(first.get()).isZero();
+        assertThat(second.get()).isEqualTo(1);
+    }
+
+    @Test
     void chatsAreIsolatedFromEachOther() {
         ReplyDispatcher dispatcher = dispatcher(1, 5);
         AtomicInteger runs = new AtomicInteger();
@@ -122,20 +139,19 @@ class ReplyDispatcherTest {
             int now = concurrent.incrementAndGet();
             peak.accumulateAndGet(now, Math::max);
             runs.incrementAndGet();
-            sleep(150);
+            sleep(400);
             concurrent.decrementAndGet();
         };
 
+        // 第一条已经开跑（不在等待窗口里，不会被合并），第二条只能排队等它结束
         dispatcher.submit("123@chatroom", generate, null);
-        sleep(40);
-        dispatcher.submit("123@chatroom", generate, null);
-        sleep(40);
+        sleep(150);
         dispatcher.submit("123@chatroom", generate, null);
 
-        await(() -> runs.get() >= 3);
+        await(() -> runs.get() >= 2);
         sleep(200);
 
-        assertThat(runs.get()).isEqualTo(3);
+        assertThat(runs.get()).isEqualTo(2);
         // 上一条没生成完时新请求排队等待，不会两条回复抢跑（否则群里会同时冒出两段话）
         assertThat(peak.get()).isEqualTo(1);
     }

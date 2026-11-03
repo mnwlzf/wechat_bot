@@ -245,7 +245,7 @@ public class InboxService {
                 return;
             }
             item.setStatus(MessageStatus.IGNORED);
-            item.setErrorMessage("已合并到随后的回复（短时间内多条消息）");
+            item.setErrorMessage("已合并到随后的回复（短时间内多条消息），只作为上下文");
             messageRepository.save(item);
         });
     }

@@ -214,6 +214,11 @@ bot_config.group_wake_words → reply_policy(chat_id IS NULL) → reply_policy(c
   保证一个群不会同时冒出两段回复
 - **不留悬空状态**：被合并掉的请求通过 `superseded` 回调把那条来消息标成
   `IGNORED` + 「已合并到随后的回复」，页面上不会出现永远停在「已接收」的记录
+- **合并即作废**：每个请求带一个 `alive` 令牌，被合并时置为 false；定时任务取消和令牌是双保险，
+  已经排进串行队列的生成在启动前会再查一次令牌，避免「已经标记忽略却还是单独回了一条」
+- **忽略的消息只当上下文**：`ChatOrchestrator.generateReply` / `generateFixedReply` 入口直接跳过
+  `IGNORED` 的来消息（不调模型、不占配额、不写 outbox），但它们仍在 `buildContext` 的历史里，
+  后续回复看得到这些内容
 - 生成跑在自己的线程池（`reply-worker`，默认 4 个会话并发），不占用 `chatExecutor`；
   关闭开关（`REPLY_DEBOUNCE_ENABLED=false`）即恢复「每条消息各自生成」
 

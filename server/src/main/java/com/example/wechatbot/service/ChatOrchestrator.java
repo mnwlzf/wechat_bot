@@ -145,6 +145,12 @@ public class ChatOrchestrator {
         BotConfig bot = requireBot(botId);
         Conversation conversation = requireConversation(conversationId);
         MessageLog inbound = requireInbound(inboundId);
+        if (inbound.getStatus() == MessageStatus.IGNORED) {
+            // 连发被合并的那几条、以及拟人模式判定不回的，都只当上下文，不再单独回一条
+            log.info("跳过单独回复：该消息已标记忽略（{}）: conversation={}",
+                    inbound.getErrorMessage(), conversationId);
+            return null;
+        }
 
         try {
             LlmReply reply = autoReply.match(conversation.getChatType(), inbound.getContent())
@@ -205,6 +211,11 @@ public class ChatOrchestrator {
         BotConfig bot = requireBot(botId);
         Conversation conversation = requireConversation(conversationId);
         MessageLog inbound = requireInbound(inboundId);
+        if (inbound.getStatus() == MessageStatus.IGNORED) {
+            log.info("跳过固定回复：该消息已标记忽略（{}）: conversation={}",
+                    inbound.getErrorMessage(), conversationId);
+            return null;
+        }
         try {
             return deliver(bot, conversation, inbound, LlmReply.rule(text), true);
         } catch (Exception ex) {

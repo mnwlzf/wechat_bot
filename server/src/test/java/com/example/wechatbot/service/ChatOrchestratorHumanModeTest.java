@@ -121,6 +121,21 @@ class ChatOrchestratorHumanModeTest {
     }
 
     @Test
+    void mergedMessageIsNeverRepliedOnItsOwn() {
+        stub(ReplyMode.ALWAYS, "好的，马上到");
+        // 连发时被合并掉的那条：只当上下文，不能再单独回一条，也不能再烧一次模型调用
+        inbound.setStatus(MessageStatus.IGNORED);
+        inbound.setErrorMessage("已合并到随后的回复（短时间内多条消息），只作为上下文");
+
+        LlmReply result = orchestrator.generateReply(bot.getId(), conversation.getId(), inbound.getId());
+
+        assertThat(result).isNull();
+        verify(llmGateway, never()).chat(any(), any());
+        verify(outboxRepository, never()).save(any());
+        assertThat(inbound.getStatus()).isEqualTo(MessageStatus.IGNORED);
+    }
+
+    @Test
     void hintIsInsertedRightAfterThePersona() {
         List<ChatMessage> context = List.of(ChatMessage.system("你是群里的成员"), ChatMessage.user("今天下午开会"));
 
