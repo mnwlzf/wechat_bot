@@ -44,6 +44,18 @@ const router = createRouter({
           name: 'pacing',
           component: () => import('@/views/PacingView.vue'),
           meta: { title: '发信节奏' },
+        },
+        {
+          path: 'send-policies',
+          name: 'send-policies',
+          component: () => import('@/views/SendPolicyView.vue'),
+          meta: { title: '发信策略' },
+        },
+        {
+          path: 'reply-policies',
+          name: 'reply-policies',
+          component: () => import('@/views/ReplyPolicyView.vue'),
+          meta: { title: '回复策略' },
         },        {
           path: 'conversations',
           name: 'conversations',
@@ -60,7 +72,13 @@ const router = createRouter({
           path: 'prompts',
           name: 'prompts',
           component: () => import('@/views/PromptTemplatesView.vue'),
-          meta: { title: '提示词模板' },
+          meta: { title: '人设' },
+        },
+        {
+          path: 'memories',
+          name: 'memories',
+          component: () => import('@/views/MemoryView.vue'),
+          meta: { title: '共享记忆' },
         },
         {
           path: 'scheduled',

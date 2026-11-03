@@ -12,7 +12,6 @@ import com.example.wechatbot.repository.BotConfigRepository;
 import com.example.wechatbot.repository.ConversationRepository;
 import com.example.wechatbot.repository.MessageLogRepository;
 import com.example.wechatbot.repository.OutboxMessageRepository;
-import com.example.wechatbot.repository.PromptTemplateRepository;
 import com.example.wechatbot.wechat.WeChatImageResolver;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -60,6 +59,17 @@ public class ChatOrchestrator {
             对方这次发的是一张图片，但本地没能取到画面（文件没找到或解密失败），你看不到图里的内容。\
             不要编造画面细节；可以请对方重新发一次，或者把图里的文字打出来。""";
 
+    /** 拟人模式的判定说明：要不要回、回什么，都由模型自己定。 */
+    private static final String HUMAN_HINT = """
+            【拟人模式】你就在这个群里，不是被叫到才说话的客服。读完上面的对话，自己判断最新这条消息要不要接：
+            - 不接：别人之间在聊、已经有人答了、只是「嗯/收到/哈哈」或表情、跟你无关或你插不上话、同一话题你刚说过。
+              这种情况只输出 [[NO_REPLY]]，不要有任何其它文字，也不要解释原因。
+            - 要接：直接写你要发出去的那句话，像群成员一样自然、简短、口语化；不要写「我来回答」「作为 AI」这类话。
+            判断标准像真人：没被点到也可以插一句，但别每条都刷存在感；不确定时宁可 [[NO_REPLY]]。""";
+
+    /** 模型表示「这次不回复」的标记。 */
+    static final String NO_REPLY_TOKEN = "[[NO_REPLY]]";
+
     private final BotConfigRepository botRepository;
     private final ConversationRepository conversationRepository;
     private final MessageLogRepository messageRepository;
@@ -70,9 +80,12 @@ public class ChatOrchestrator {
     private final DisguiseProperties disguiseProperties;
     private final AutoReplyService autoReply;
     private final ContentFilterService contentFilter;
-    private final PromptTemplateRepository promptTemplateRepository;
+    private final PromptTemplateService personaService;
+    private final ChatMemoryService memoryService;
     private final WeChatImageResolver imageResolver;
     private final VoiceTranscriber voiceTranscriber;
+    private final ReplyPolicyService replyPolicies;
+    private final HumanReplyGuard humanGuard;
 
     public ChatOrchestrator(BotConfigRepository botRepository,
                             ConversationRepository conversationRepository,
@@ -84,9 +97,12 @@ public class ChatOrchestrator {
                             DisguiseProperties disguiseProperties,
                             AutoReplyService autoReply,
                             ContentFilterService contentFilter,
-                            PromptTemplateRepository promptTemplateRepository,
+                            PromptTemplateService personaService,
+                            ChatMemoryService memoryService,
                             WeChatImageResolver imageResolver,
-                            VoiceTranscriber voiceTranscriber) {
+                            VoiceTranscriber voiceTranscriber,
+                            ReplyPolicyService replyPolicies,
+                            HumanReplyGuard humanGuard) {
         this.botRepository = botRepository;
         this.conversationRepository = conversationRepository;
         this.messageRepository = messageRepository;
@@ -97,9 +113,12 @@ public class ChatOrchestrator {
         this.disguiseProperties = disguiseProperties;
         this.autoReply = autoReply;
         this.contentFilter = contentFilter;
-        this.promptTemplateRepository = promptTemplateRepository;
+        this.personaService = personaService;
+        this.memoryService = memoryService;
         this.imageResolver = imageResolver;
         this.voiceTranscriber = voiceTranscriber;
+        this.replyPolicies = replyPolicies;
+        this.humanGuard = humanGuard;
     }
 
     @Async("chatExecutor")
@@ -115,6 +134,13 @@ public class ChatOrchestrator {
         return generateReply(botId, conversationId, inboundId, true);
     }
 
+    /**
+     * 生成并投递一条回复。
+     *
+     * <p>拟人模式（{@link ReplyMode#HUMAN}）下，先按群策略判断这次要不要问模型，再让模型自己决定回不回：
+     * 冷却期内、或模型输出 {@code [[NO_REPLY]]} 时都只把来消息标记为忽略并返回 {@code null}，
+     * 不发送任何东西、也不占发信配额。</p>
+     */
     public LlmReply generateReply(UUID botId, UUID conversationId, UUID inboundId, boolean enqueueOutbox) {
         BotConfig bot = requireBot(botId);
         Conversation conversation = requireConversation(conversationId);
@@ -129,14 +155,33 @@ public class ChatOrchestrator {
                     .orElse(null);
 
             if (reply == null) {
+                // 只有真实投递才走拟人判定，在线调试不占用冷却、也不会被跳过
+                ReplyPolicyService.Effective policy = replyPolicies.forChat(conversation.getChatId(), bot);
+                boolean human = enqueueOutbox && policy.mode() == ReplyMode.HUMAN;
+                if (human && !humanGuard.acquire(conversation.getChatId(), policy.humanCooldownSeconds())) {
+                    markSkipped(inbound, "拟人模式：判定冷却中（" + policy.humanCooldownSeconds() + " 秒），本条只记录");
+                    return null;
+                }
                 List<ChatMessage> context = buildContext(bot, conversation, inbound);
+                if (human) {
+                    context = withHumanHint(context);
+                }
                 reply = llmGateway.chat(bot, context);
+                if (human && isNoReply(reply.content())) {
+                    markSkipped(inbound, "拟人模式：模型判断这条不需要回复");
+                    return null;
+                }
                 if (enqueueOutbox && disguiseProperties.isRegenerateOnRepeat()
                         && disguise.isRepetitive(conversation.getChatId(), reply.content())) {
                     reply = regenerateWithVariation(bot, context, reply);
                 }
             }
-            return deliver(bot, conversation, inbound, reply, enqueueOutbox);
+            LlmReply delivered = deliver(bot, conversation, inbound, reply, enqueueOutbox);
+            // 真实会话才维护共享记忆；在线调试不污染任何群的历史
+            if (enqueueOutbox) {
+                memoryService.summarizeAsync(bot, conversation);
+            }
+            return delivered;
         } catch (Exception ex) {
             markFailed(inbound, ex);
             throw ex;
@@ -298,6 +343,32 @@ public class ChatOrchestrator {
                 reply.promptTokens(), reply.completionTokens(), reply.latencyMs());
     }
 
+    /** 把拟人判定说明插在人设之后、对话之前，兼容只认「system 在前」的模型服务。 */
+    static List<ChatMessage> withHumanHint(List<ChatMessage> context) {
+        List<ChatMessage> messages = new ArrayList<>(context.size() + 1);
+        messages.addAll(context);
+        messages.add(Math.min(1, messages.size()), ChatMessage.system(HUMAN_HINT));
+        return messages;
+    }
+
+    /** 模型用标记表示「这次不回复」；容忍空格与大小写差异。 */
+    static boolean isNoReply(String content) {
+        if (content == null) {
+            return true;
+        }
+        String normalized = content.replaceAll("\\s+", "").toUpperCase(java.util.Locale.ROOT);
+        return normalized.contains("[[NO_REPLY]]") || normalized.contains("[[NOREPLY]]")
+                || normalized.contains("[[不回复]]");
+    }
+
+    /** 拟人模式判定不回复：只把来消息标记为忽略，不发任何消息、不占配额。 */
+    private void markSkipped(MessageLog inbound, String note) {
+        inbound.setStatus(MessageStatus.IGNORED);
+        inbound.setErrorMessage(abbreviate(note, 1000));
+        messageRepository.save(inbound);
+        log.info("拟人模式未回复: conversation={} note={}", inbound.getConversationId(), note);
+    }
+
     private List<ChatMessage> buildContext(BotConfig bot, Conversation conversation, MessageLog currentInbound) {
         int size = Math.max(1, bot.getContextWindow());
         var pageable = PageRequest.of(0, size, Sort.by(Sort.Direction.DESC, "createdAt"));
@@ -357,13 +428,17 @@ public class ChatOrchestrator {
             messages.add(ChatMessage.user(currentInbound.getContent()));
         }
 
-        String style = disguise.promptSuffix();
+        String style = disguise.promptSuffix(conversation.getChatId());
         String searchQuery = currentInbound.getMediaKind() == null ? currentInbound.getContent() : "";
         String searchContext = searchAugmenter.buildContext(bot, searchQuery);
-        String systemPrompt = resolveSystemPrompt(bot, conversation);
+        PromptTemplateService.Persona persona = personaService.resolve(bot, conversation);
+        String memoryBlock = memoryService.promptBlock(conversation.getChatId(), conversation.getChatType());
 
-        List<ChatMessage> withStyle = new ArrayList<>(messages.size() + 5);
-        withStyle.add(ChatMessage.system(systemPrompt));
+        List<ChatMessage> withStyle = new ArrayList<>(messages.size() + 6);
+        withStyle.add(ChatMessage.system(persona.content()));
+        if (!memoryBlock.isBlank()) {
+            withStyle.add(ChatMessage.system(memoryBlock));
+        }
         if (!style.isBlank()) {
             withStyle.add(ChatMessage.system(style));
         }
@@ -473,19 +548,6 @@ public class ChatOrchestrator {
         if (value != null && !value.isBlank() && !values.contains(value)) {
             values.add(value);
         }
-    }
-
-    /** 会话绑定了提示词模板时优先使用模板，否则回退到机器人默认提示词。 */
-    private String resolveSystemPrompt(BotConfig bot, Conversation conversation) {
-        if (conversation.getPromptTemplateId() != null) {
-            String template = promptTemplateRepository.findById(conversation.getPromptTemplateId())
-                    .map(PromptTemplate::getContent)
-                    .orElse(null);
-            if (template != null && !template.isBlank()) {
-                return template;
-            }
-        }
-        return bot.getSystemPrompt();
     }
 
     private ZoneId zone() {

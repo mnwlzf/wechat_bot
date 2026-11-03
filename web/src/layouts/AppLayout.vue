@@ -3,11 +3,14 @@ import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   ChatDotRound,
+  ChatLineSquare,
+  Collection,
   Cpu,
   DataBoard,
   Document,
   MagicStick,
   Monitor,
+  Odometer,
   Operation,
   Promotion,
   Setting,
@@ -65,6 +68,12 @@ function logout() {
         <el-menu-item index="/pacing">
           <el-icon><Timer /></el-icon><span>发信节奏</span>
         </el-menu-item>
+        <el-menu-item index="/send-policies">
+          <el-icon><Odometer /></el-icon><span>发信策略</span>
+        </el-menu-item>
+        <el-menu-item index="/reply-policies">
+          <el-icon><ChatLineSquare /></el-icon><span>回复策略</span>
+        </el-menu-item>
         <el-menu-item index="/conversations">
           <el-icon><ChatDotRound /></el-icon><span>会话记录</span>
         </el-menu-item>
@@ -72,7 +81,10 @@ function logout() {
           <el-icon><Promotion /></el-icon><span>自动回复</span>
         </el-menu-item>
         <el-menu-item index="/prompts">
-          <el-icon><Document /></el-icon><span>提示词模板</span>
+          <el-icon><Document /></el-icon><span>人设</span>
+        </el-menu-item>
+        <el-menu-item index="/memories">
+          <el-icon><Collection /></el-icon><span>共享记忆</span>
         </el-menu-item>
         <el-menu-item index="/scheduled">
           <el-icon><Timer /></el-icon><span>定时消息</span>

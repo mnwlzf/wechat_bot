@@ -18,7 +18,9 @@ class InboxServiceTest {
             mock(DedupeService.class),
             mock(RateLimitService.class),
             mock(ChatOrchestrator.class),
-            mock(RuntimeSettingsService.class)
+            mock(RuntimeSettingsService.class),
+            new ReplyPolicyService(mock(com.example.wechatbot.repository.ReplyPolicyRepository.class)),
+            new InlineReplyDispatcher()
     );
 
     @Test

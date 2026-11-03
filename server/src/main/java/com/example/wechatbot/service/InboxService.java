@@ -13,6 +13,8 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import java.time.OffsetDateTime;
 import java.util.Arrays;
+import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 
 @Service
 public class InboxService {
@@ -23,6 +25,8 @@ public class InboxService {
     private final RateLimitService rateLimitService;
     private final ChatOrchestrator chatOrchestrator;
     private final RuntimeSettingsService settings;
+    private final ReplyPolicyService replyPolicies;
+    private final ReplyDispatcher replyDispatcher;
 
     public InboxService(BotConfigRepository botRepository,
                         ConversationRepository conversationRepository,
@@ -30,7 +34,9 @@ public class InboxService {
                         DedupeService dedupeService,
                         RateLimitService rateLimitService,
                         ChatOrchestrator chatOrchestrator,
-                        RuntimeSettingsService settings) {
+                        RuntimeSettingsService settings,
+                        ReplyPolicyService replyPolicies,
+                        ReplyDispatcher replyDispatcher) {
         this.botRepository = botRepository;
         this.conversationRepository = conversationRepository;
         this.messageRepository = messageRepository;
@@ -38,6 +44,8 @@ public class InboxService {
         this.rateLimitService = rateLimitService;
         this.chatOrchestrator = chatOrchestrator;
         this.settings = settings;
+        this.replyPolicies = replyPolicies;
+        this.replyDispatcher = replyDispatcher;
     }
 
     @Transactional
@@ -79,19 +87,46 @@ public class InboxService {
         if (event.chatType() == ChatType.PRIVATE && !bot.isReplyPrivate()) {
             return new AgentDtos.EventAccepted("IGNORED", "私聊回复未启用", null);
         }
-        boolean wakeMatched = true;
+        boolean triggered = true;
+        String decisionNote = null;
         if (event.chatType() == ChatType.GROUP) {
             if (!bot.isReplyGroup()) {
                 return new AgentDtos.EventAccepted("IGNORED", "群聊回复未启用", null);
             }
-            wakeMatched = matchesWakeWord(bot.getGroupWakeWords(), content);
-            // 文本消息没唤醒就直接忽略；媒体消息没有文字，改为记录后按策略决定是否回复
-            if (!wakeMatched && !media) {
-                return new AgentDtos.EventAccepted("IGNORED", "未命中群聊唤醒词", null);
+            // 每个群可以有自己的回复策略：主动回复 / 随机回复 / 关键词唤醒
+            ReplyPolicyService.Effective policy = replyPolicies.forChat(event.chatId(), bot);
+            boolean wakeMatched = matchesWakeWord(policy.wakeWords(), content);
+            switch (policy.mode()) {
+                case ALWAYS -> {
+                    triggered = true;
+                    decisionNote = "主动回复（每条群消息都参与）";
+                }
+                case RANDOM -> {
+                    // 被叫到一定回；没叫到时按概率插话
+                    boolean hit = wakeMatched
+                            || ThreadLocalRandom.current().nextDouble() < policy.randomRate();
+                    triggered = hit;
+                    decisionNote = hit
+                            ? (wakeMatched ? "命中关键词唤醒" : "随机命中（" + percent(policy.randomRate()) + "）")
+                            : "随机未命中（" + percent(policy.randomRate()) + "）";
+                }
+                case WAKE -> {
+                    triggered = wakeMatched;
+                    decisionNote = wakeMatched ? "命中关键词唤醒" : "未命中群聊唤醒词";
+                    // 文本消息没唤醒就直接忽略，不入库（媒体消息没有文字，仍记录后按策略决定）
+                    if (!triggered && !media) {
+                        return new AgentDtos.EventAccepted("IGNORED", decisionNote, null);
+                    }
+                }
+                case HUMAN -> {
+                    // 拟人模式：消息一律入库，要不要回交给模型判断（节流与判定在 ChatOrchestrator 里）
+                    triggered = true;
+                    decisionNote = "拟人模式：交给模型判断";
+                }
             }
         }
         String mediaMode = settings.mediaReplyMode();
-        boolean shouldReply = media ? (wakeMatched && !"ignore".equals(mediaMode)) : wakeMatched;
+        boolean shouldReply = media ? (triggered && !"ignore".equals(mediaMode)) : triggered;
 
         if (!dedupeService.firstSeen(event.eventId())) {
             return new AgentDtos.EventAccepted("DUPLICATE", "重复事件已忽略", null);
@@ -162,7 +197,7 @@ public class InboxService {
             inbound.setStatus(MessageStatus.IGNORED);
             inbound.setErrorMessage(media
                     ? "媒体消息按策略仅记录（replyMode=" + mediaMode + "）"
-                    : "未命中群聊唤醒词");
+                    : (decisionNote == null ? "未触发回复" : decisionNote));
             messageRepository.save(inbound);
             return new AgentDtos.EventAccepted("IGNORED", inbound.getErrorMessage(), conversation.getId());
         }
@@ -170,25 +205,49 @@ public class InboxService {
         final var botId = bot.getId();
         final var conversationId = conversation.getId();
         final var inboundId = inbound.getId();
+        final String chatKey = conversation.getChatId();
         final boolean ackReply = media && "ack".equals(mediaMode);
         final String ackText = ackReply ? settings.mediaAckText() : null;
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
-                    if (ackReply) {
-                        chatOrchestrator.generateFixedReplyAsync(botId, conversationId, inboundId, ackText);
-                    } else {
-                        chatOrchestrator.generateReplyAsync(botId, conversationId, inboundId);
-                    }
+                    dispatchReply(chatKey, botId, conversationId, inboundId, ackReply, ackText);
                 }
             });
-        } else if (ackReply) {
-            chatOrchestrator.generateFixedReplyAsync(botId, conversationId, inboundId, ackText);
         } else {
-            chatOrchestrator.generateReplyAsync(botId, conversationId, inboundId);
+            dispatchReply(chatKey, botId, conversationId, inboundId, ackReply, ackText);
         }
         return new AgentDtos.EventAccepted("ACCEPTED", "消息已接收，正在生成回复", conversationId);
+    }
+
+    /**
+     * 交给聚合器：同一个群一秒里连发好几条时，只回一次、而且回的是「最后那一下」之后的完整对话。
+     *
+     * <p>被合并掉的那条消息标成「已合并」，避免页面上留下一条永远是「已接收」却没人管的记录。</p>
+     */
+    private void dispatchReply(String chatId, UUID botId, UUID conversationId, UUID inboundId,
+                               boolean ackReply, String ackText) {
+        replyDispatcher.submit(chatId,
+                () -> {
+                    if (ackReply) {
+                        chatOrchestrator.generateFixedReply(botId, conversationId, inboundId, ackText);
+                    } else {
+                        chatOrchestrator.generateReply(botId, conversationId, inboundId);
+                    }
+                },
+                () -> markMerged(inboundId));
+    }
+
+    private void markMerged(UUID inboundId) {
+        messageRepository.findById(inboundId).ifPresent(item -> {
+            if (item.getStatus() != MessageStatus.RECEIVED) {
+                return;
+            }
+            item.setStatus(MessageStatus.IGNORED);
+            item.setErrorMessage("已合并到随后的回复（短时间内多条消息）");
+            messageRepository.save(item);
+        });
     }
 
     private static MediaKind mediaKindOf(String value) {
@@ -220,5 +279,10 @@ public class InboxService {
 
     private String abbreviate(String value, int max) {
         return value.length() <= max ? value : value.substring(0, max);
+    }
+
+    /** 概率转成人话，写进忽略原因里方便排查。 */
+    private static String percent(double rate) {
+        return Math.round(rate * 100) + "%";
     }
 }

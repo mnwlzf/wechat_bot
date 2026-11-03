@@ -274,6 +274,8 @@ export interface Conversation {
   botPaused: boolean
   promptTemplateId?: string | null
   promptTemplateName?: string | null
+  /** 实际生效的人设：未绑定时显示「默认人设（默认）」 */
+  effectivePersonaName?: string | null
 }
 
 export interface PromptTemplate {
@@ -281,6 +283,11 @@ export interface PromptTemplate {
   name: string
   description: string
   content: string
+  /** 全局默认人设：会话未单独指定时回退到它 */
+  defaultPersona: boolean
+  /** 内置人设（例如大肥鱼） */
+  builtin: boolean
+  builtinKey?: string | null
   updatedAt: string
 }
 
@@ -290,7 +297,31 @@ export interface PromptTemplateInput {
   content: string
 }
 
+export type MemoryKind = 'SUMMARY' | 'NOTE'
+
+export interface ChatMemory {
+  id: string
+  chatId: string
+  chatName: string
+  kind: MemoryKind
+  source: 'AUTO' | 'MANUAL'
+  content: string
+  enabled: boolean
+  messageCount: number
+  coveredUntil?: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface ChatMemoryInput {
+  chatId: string
+  chatName?: string
+  content: string
+  enabled?: boolean
+}
+
 export type ScheduledStatus = 'PENDING' | 'SENT' | 'CANCELLED' | 'FAILED'
+export type ScheduledRepeat = 'NONE' | 'DAILY' | 'WEEKLY'
 
 export interface ScheduledMessage {
   id: string
@@ -299,6 +330,10 @@ export interface ScheduledMessage {
   chatName: string
   content: string
   scheduledAt: string
+  repeatRule: ScheduledRepeat
+  repeatUntil?: string | null
+  splitLines: boolean
+  sentCount: number
   status: ScheduledStatus
   attempts: number
   lastError?: string
@@ -312,6 +347,9 @@ export interface ScheduledMessageInput {
   chatName?: string
   content: string
   scheduledAt: string
+  repeatRule?: ScheduledRepeat
+  repeatUntil?: string | null
+  splitLines?: boolean
 }
 
 export interface Message {
@@ -495,3 +533,121 @@ export interface SearchTestResult {
   latencyMs: number
 }
 
+
+export interface SendPolicyInput {
+  readDelayMinMs?: number | null
+  readDelayMaxMs?: number | null
+  maxDelayMs?: number | null
+  splitEnabled?: boolean | null
+  maxParts?: number | null
+  maxPartChars?: number | null
+  perMinute?: number | null
+  per10Minutes?: number | null
+  perHour?: number | null
+  perDay?: number | null
+  minGapMs?: number | null
+  emojiLimit?: number | null
+  dropRate?: number | null
+  promptEnabled?: boolean | null
+  enabled?: boolean | null
+}
+
+/** 数据库里的一行策略：chatId 为空表示全局默认策略 */
+export interface SendPolicyRow {
+  id: string
+  chatId: string | null
+  chatName: string
+  isDefault: boolean
+  enabled: boolean
+  readDelayMinMs: number | null
+  readDelayMaxMs: number | null
+  maxDelayMs: number | null
+  splitEnabled: boolean | null
+  maxParts: number | null
+  maxPartChars: number | null
+  perMinute: number | null
+  per10Minutes: number | null
+  perHour: number | null
+  perDay: number | null
+  minGapMs: number | null
+  emojiLimit: number | null
+  dropRate: number | null
+  promptEnabled: boolean | null
+  updatedAt: string
+}
+
+/** 合并后的生效值；inherited 表示该会话没有单独配置 */
+export interface SendPolicyEffective {
+  readDelayMinMs: number
+  readDelayMaxMs: number
+  maxDelayMs: number
+  splitEnabled: boolean
+  maxParts: number
+  maxPartChars: number
+  perMinute: number
+  per10Minutes: number
+  perHour: number
+  perDay: number
+  minGapMs: number
+  emojiLimit: number
+  dropRate: number
+  promptEnabled: boolean
+  inherited: boolean
+}
+
+export interface SendPolicyOverview {
+  defaultPolicy: SendPolicyEffective
+  defaultRow: SendPolicyRow | null
+  overrides: SendPolicyRow[]
+}
+
+export interface ChatSendPolicy {
+  effective: SendPolicyEffective
+  override: SendPolicyRow | null
+}
+/** 群聊回复策略：主动回复 / 随机回复 / 关键词唤醒 */
+export type ReplyMode = 'ALWAYS' | 'RANDOM' | 'WAKE' | 'HUMAN'
+
+export interface ReplyPolicyInput {
+  mode?: ReplyMode | null
+  wakeWords?: string | null
+  randomRate?: number | null
+  humanCooldownSeconds?: number | null
+  enabled?: boolean | null
+}
+
+/** 数据库里的一行回复策略：chatId 为空表示全局默认策略 */
+export interface ReplyPolicyRow {
+  id: string
+  chatId: string | null
+  chatName: string
+  isDefault: boolean
+  enabled: boolean
+  mode: ReplyMode | null
+  wakeWords: string | null
+  randomRate: number | null
+  humanCooldownSeconds: number | null
+  updatedAt: string
+}
+
+/** 合并三层之后的生效策略；inherited 表示该群没有单独配置 */
+export interface ReplyPolicyEffective {
+  mode: ReplyMode
+  wakeWords: string
+  randomRate: number
+  humanCooldownSeconds: number
+  source: 'bot' | 'default' | 'chat'
+  inherited: boolean
+}
+
+export interface ReplyPolicyOverview {
+  defaultPolicy: ReplyPolicyEffective
+  defaultRow: ReplyPolicyRow | null
+  overrides: ReplyPolicyRow[]
+  botWakeWords: string
+}
+
+export interface ChatReplyPolicy {
+  effective: ReplyPolicyEffective
+  override: ReplyPolicyRow | null
+}

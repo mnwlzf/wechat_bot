@@ -28,7 +28,8 @@ class InboxServiceMediaPolicyTest {
 
     private final InboxService service = new InboxService(
             botRepository, conversationRepository, messageRepository,
-            dedupeService, rateLimitService, chatOrchestrator, settings);
+            dedupeService, rateLimitService, chatOrchestrator, settings,
+            new ReplyPolicyService(mock(com.example.wechatbot.repository.ReplyPolicyRepository.class)), new InlineReplyDispatcher());
 
     private BotConfig bot() {
         BotConfig bot = new BotConfig();
@@ -99,9 +100,9 @@ class InboxServiceMediaPolicyTest {
         AgentDtos.EventAccepted result = service.accept(imageEvent(bot.getId()));
 
         assertThat(result.status()).isEqualTo("ACCEPTED");
-        verify(chatOrchestrator).generateFixedReplyAsync(
+        verify(chatOrchestrator).generateFixedReply(
                 eq(bot.getId()), any(UUID.class), any(UUID.class), eq("收到，我看下～"));
-        verify(chatOrchestrator, never()).generateReplyAsync(any(), any(), any());
+        verify(chatOrchestrator, never()).generateReply(any(), any(), any());
     }
 
     @Test
@@ -113,8 +114,8 @@ class InboxServiceMediaPolicyTest {
         AgentDtos.EventAccepted result = service.accept(imageEvent(bot.getId()));
 
         assertThat(result.status()).isEqualTo("ACCEPTED");
-        verify(chatOrchestrator).generateReplyAsync(eq(bot.getId()), any(UUID.class), any(UUID.class));
-        verify(chatOrchestrator, never()).generateFixedReplyAsync(any(), any(), any(), any());
+        verify(chatOrchestrator).generateReply(eq(bot.getId()), any(UUID.class), any(UUID.class));
+        verify(chatOrchestrator, never()).generateFixedReply(any(), any(), any(), any());
     }
 
     @Test
@@ -137,7 +138,7 @@ class InboxServiceMediaPolicyTest {
                     TransactionSynchronizationManager.getSynchronizations().get(0);
             synchronization.afterCommit();
 
-            verify(chatOrchestrator).generateFixedReplyAsync(
+            verify(chatOrchestrator).generateFixedReply(
                     eq(bot.getId()), any(UUID.class), any(UUID.class), eq("收到，我看下～"));
         } finally {
             TransactionSynchronizationManager.clearSynchronization();
@@ -170,7 +171,7 @@ class InboxServiceMediaPolicyTest {
         AgentDtos.EventAccepted result = service.accept(event, HookExtras.of(new MediaMessageParser.Quoted("可以，我十点到", "张三", "[语音 4″]"), null));
 
         assertThat(result.status()).isEqualTo("ACCEPTED");
-        verify(chatOrchestrator).generateReplyAsync(eq(bot.getId()), any(UUID.class), any(UUID.class));
+        verify(chatOrchestrator).generateReply(eq(bot.getId()), any(UUID.class), any(UUID.class));
 
         ArgumentCaptor<MessageLog> captor = ArgumentCaptor.forClass(MessageLog.class);
         verify(messageRepository, atLeastOnce()).save(captor.capture());

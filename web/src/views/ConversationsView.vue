@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import dayjs from 'dayjs'
 import { ElMessage } from 'element-plus'
 import {
@@ -39,6 +40,13 @@ const drawerVisible = ref(false)
 const activeConversation = ref<Conversation | null>(null)
 const messages = ref<Message[]>([])
 const templates = ref<PromptTemplate[]>([])
+const router = useRouter()
+
+/** 默认人设的名字：下拉里的「默认」选项要写清楚会走谁。 */
+const defaultPersonaName = computed(() => templates.value.find((item) => item.defaultPersona)?.name || '')
+const defaultOptionLabel = computed(() =>
+  defaultPersonaName.value ? `默认（${defaultPersonaName.value}）` : '默认（机器人提示词）',
+)
 
 async function load() {
   loading.value = true
@@ -73,6 +81,20 @@ async function openConversation(row: Conversation) {
 function search() {
   page.value = 0
   load()
+}
+
+/** 跳到「发信策略」并直接打开这个会话的配置。 */
+function openSendPolicy() {
+  const current = activeConversation.value
+  if (!current) return
+  router.push({ name: 'send-policies', query: { chat: current.chatId, name: current.chatName } })
+}
+
+/** 跳到「回复策略」并直接打开这个群的配置。 */
+function openReplyPolicy() {
+  const current = activeConversation.value
+  if (!current) return
+  router.push({ name: 'reply-policies', query: { chat: current.chatId, name: current.chatName } })
 }
 
 function changePage(nextPage: number) {
@@ -151,7 +173,13 @@ async function changePersona(templateId: string) {
       row.promptTemplateId = updated.promptTemplateId
       row.promptTemplateName = updated.promptTemplateName
     }
-    ElMessage.success(updated.promptTemplateName ? `已切换到「${updated.promptTemplateName}」` : '已回退到默认提示词')
+    ElMessage.success(
+      updated.promptTemplateName
+        ? `已切换到「${updated.promptTemplateName}」`
+        : defaultPersonaName.value
+          ? `已回退到默认人设「${defaultPersonaName.value}」`
+          : '已回退到机器人系统提示词',
+    )
   } catch (error) {
     ElMessage.error(getErrorMessage(error))
   }
@@ -211,6 +239,13 @@ onMounted(async () => {
               <el-tag :type="row.chatType === 'GROUP' ? 'warning' : 'primary'" effect="light" size="small">
                 {{ row.chatType === 'GROUP' ? '群聊' : '私聊' }}
               </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="人设" width="132">
+            <template #default="{ row }">
+              <span class="persona-name" :class="{ inherited: !row.promptTemplateId }">
+                {{ row.effectivePersonaName || '机器人提示词' }}
+              </span>
             </template>
           </el-table-column>
           <el-table-column label="最后消息" min-width="320">
@@ -273,15 +308,22 @@ onMounted(async () => {
             :model-value="activeConversation.promptTemplateId || ''"
             size="small"
             class="persona-select"
-            placeholder="默认提示词"
+            :placeholder="defaultOptionLabel"
             @change="changePersona"
           >
-            <el-option label="默认提示词" value="" />
-            <el-option v-for="item in templates" :key="item.id" :label="item.name" :value="item.id" />
+            <el-option :label="defaultOptionLabel" value="" />
+            <el-option
+              v-for="item in templates"
+              :key="item.id"
+              :label="item.defaultPersona ? `${item.name}（默认）` : item.name"
+              :value="item.id"
+            />
           </el-select>
           <el-button text :icon="Refresh" :loading="messageLoading" @click="openConversation(activeConversation)">
             刷新
           </el-button>
+          <el-button text @click="openReplyPolicy">回复策略</el-button>
+          <el-button text @click="openSendPolicy">发信策略</el-button>
         </header>
 
         <div v-loading="messageLoading" class="chat-body">
@@ -405,6 +447,15 @@ onMounted(async () => {
 .persona-select {
   width: 128px;
   flex: 0 0 auto;
+}
+
+.persona-name {
+  color: var(--ink-soft);
+  font-size: var(--fs-xs);
+}
+
+.persona-name.inherited {
+  color: var(--muted-soft);
 }
 
 .media-chip {

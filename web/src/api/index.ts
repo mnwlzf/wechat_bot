@@ -6,6 +6,10 @@ import type {
   Bot,
   BotInput,
   ChatCandidate,
+  ChatMemory,
+  ChatMemoryInput,
+  ChatSendPolicy,
+  ChatReplyPolicy,
   Conversation,
   Dashboard,
   DiagnosticsPayload,
@@ -32,6 +36,14 @@ import type {
   SearchSettings,
   SearchSettingsInput,
   SearchTestResult,
+  SendPolicyEffective,
+  SendPolicyInput,
+  SendPolicyOverview,
+  SendPolicyRow,
+  ReplyPolicyEffective,
+  ReplyPolicyInput,
+  ReplyPolicyOverview,
+  ReplyPolicyRow,
   SettingsSnapshot,
   UsagePricingInput,
   UsageSummary,
@@ -193,6 +205,39 @@ export const adminApi = {
   async deletePromptTemplate(id: string) {
     await http.delete(`/api/admin/prompt-templates/${id}`)
   },
+  /** 设为全局默认人设：没有单独指定人设的会话都用它。 */
+  async setDefaultPromptTemplate(id: string) {
+    const { data } = await http.post<PromptTemplate>(`/api/admin/prompt-templates/${id}/default`)
+    return data
+  },
+  async clearDefaultPromptTemplate() {
+    await http.delete('/api/admin/prompt-templates/default')
+  },
+  async memories(chatId?: string) {
+    const { data } = await http.get<ChatMemory[]>('/api/admin/memories', { params: { chatId } })
+    return data
+  },
+  async createMemory(payload: ChatMemoryInput) {
+    const { data } = await http.post<ChatMemory>('/api/admin/memories', payload)
+    return data
+  },
+  async updateMemory(id: string, payload: { content?: string; enabled?: boolean }) {
+    const { data } = await http.put<ChatMemory>(`/api/admin/memories/${id}`, payload)
+    return data
+  },
+  async deleteMemory(id: string) {
+    await http.delete(`/api/admin/memories/${id}`)
+  },
+  /** 立即按现有历史重算一次共享摘要（同步，可能需要几秒）。 */
+  async summarizeMemory(chatId: string) {
+    const { data } = await http.post<ChatMemory>('/api/admin/memories/summaries', null, {
+      params: { chatId },
+    })
+    return data
+  },
+  async resetMemorySummary(chatId: string) {
+    await http.delete('/api/admin/memories/summaries', { params: { chatId } })
+  },
   async scheduledMessages(page = 0, size = 20) {
     const { data } = await http.get<PageResult<ScheduledMessage>>('/api/admin/scheduled-messages', {
       params: { page, size },
@@ -201,6 +246,10 @@ export const adminApi = {
   },
   async createScheduledMessage(payload: ScheduledMessageInput) {
     const { data } = await http.post<ScheduledMessage>('/api/admin/scheduled-messages', payload)
+    return data
+  },
+  async updateScheduledMessage(id: string, payload: ScheduledMessageInput) {
+    const { data } = await http.put<ScheduledMessage>(`/api/admin/scheduled-messages/${id}`, payload)
     return data
   },
   async cancelScheduledMessage(id: string) {
@@ -237,12 +286,50 @@ export const adminApi = {
     const { data } = await http.get<UsageSummary>('/api/admin/usage', { params: { days } })
     return data
   },
+  async sendPolicies() {
+    const { data } = await http.get<SendPolicyOverview>('/api/admin/send-policies')
+    return data
+  },
+  async chatSendPolicy(chatId: string) {
+    const { data } = await http.get<ChatSendPolicy>(`/api/admin/send-policies/${encodeURIComponent(chatId)}`)
+    return data
+  },
+  async saveDefaultSendPolicy(payload: SendPolicyInput) {
+    const { data } = await http.put<SendPolicyEffective>('/api/admin/send-policies/default', payload)
+    return data
+  },
+  async saveChatSendPolicy(chatId: string, chatName: string, payload: SendPolicyInput) {
+    const { data } = await http.put<SendPolicyRow>(
+      `/api/admin/send-policies/${encodeURIComponent(chatId)}`,
+      payload,
+      { params: { chatName } },
+    )
+    return data
+  },
+  async deleteChatSendPolicy(chatId: string) {
+    await http.delete(`/api/admin/send-policies/${encodeURIComponent(chatId)}`)
+  },
+  async replyPolicies() {
+    const { data } = await http.get<ReplyPolicyOverview>('/api/admin/reply-policies')
+    return data
+  },
+  async chatReplyPolicy(chatId: string) {
+    const { data } = await http.get<ChatReplyPolicy>(`/api/admin/reply-policies/${encodeURIComponent(chatId)}`)
+    return data
+  },
+  async saveDefaultReplyPolicy(payload: ReplyPolicyInput) {
+    const { data } = await http.put<ReplyPolicyEffective>('/api/admin/reply-policies/default', payload)
+    return data
+  },
+  async saveChatReplyPolicy(chatId: string, chatName: string, payload: ReplyPolicyInput) {
+    const { data } = await http.put<ReplyPolicyRow>(
+      `/api/admin/reply-policies/${encodeURIComponent(chatId)}`,
+      payload,
+      { params: { chatName } },
+    )
+    return data
+  },
+  async deleteChatReplyPolicy(chatId: string) {
+    await http.delete(`/api/admin/reply-policies/${encodeURIComponent(chatId)}`)
+  },
 }
-
-
-
-
-
-
-
-
