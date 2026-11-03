@@ -3,6 +3,7 @@ package com.example.wechatbot.web;
 import com.example.wechatbot.disguise.DisguiseProperties;
 import com.example.wechatbot.disguise.DisguiseScheduleService;
 import com.example.wechatbot.disguise.DisguiseService;
+import com.example.wechatbot.disguise.PacingModel;
 import com.example.wechatbot.disguise.StyleNormalizer;
 import com.example.wechatbot.domain.ChatType;
 import org.springframework.web.bind.annotation.*;
@@ -48,7 +49,7 @@ public class DisguiseController {
                 properties.getThinkBaseMs(),
                 properties.getCharsPerSecond(),
                 properties.getTypingJitter(),
-                properties.getMaxDelayMs(),
+                PacingModel.effectiveMaxDelayMs(properties.getMaxDelayMs()),
                 properties.getLongPauseProbability(),
                 properties.getLongPauseMaxMs(),
                 properties.getAwayProbability(),

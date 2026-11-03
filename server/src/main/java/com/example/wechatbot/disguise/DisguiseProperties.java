@@ -52,8 +52,8 @@ public class DisguiseProperties {
 
     private int thinkBaseMs = 500;
 
-    /** 单条消息从收到到发出的最大延迟。 */
-    private int maxDelayMs = 90000;
+    /** 单条消息拟人延迟的配置上限；运行时还会受 30 秒硬上限保护。 */
+    private int maxDelayMs = 30000;
 
     /** 偶发“去忙别的了”的长停顿概率。 */
     private double longPauseProbability = 0.08;

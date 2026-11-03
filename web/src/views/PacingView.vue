@@ -97,9 +97,9 @@ const delayItems = computed<PacingItem[]>(() => {
       env: 'DISGUISE_CHARS_PER_SECOND / DISGUISE_TYPING_JITTER',
     },
     {
-      label: '单条最大延迟',
+      label: '单条拟人延迟上限',
       value: seconds(c.maxDelayMs),
-      description: '拟人延迟的硬上限。读、想、打字、长停顿全部叠加后，也不会超过此时间。',
+      description: '系统硬上限为 30 秒，配置只能更低。读、想、打字、长停顿全部叠加后也不会超过该时间；睡眠和离线排期不受此上限影响。',
       env: 'DISGUISE_MAX_DELAY_MS',
     },
     {

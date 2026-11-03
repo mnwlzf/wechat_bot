@@ -36,6 +36,13 @@ class DisguiseEndpointTest {
     }
 
     @Test
+    void exposesThirtySecondReplyDelayCap() throws Exception {
+        mockMvc.perform(get("/api/admin/disguise/config").header("Authorization", "Bearer test-admin"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.maxDelayMs").value(30_000));
+    }
+
+    @Test
     void previewCleansStyleWithoutConsumingQuota() throws Exception {
         String body = """
                 {"chatId":"wxid_demo","chatType":"PRIVATE","text":"**好的**！首先，我为您整理如下：`code`"}

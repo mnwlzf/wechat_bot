@@ -186,7 +186,7 @@ app:
     think-base-ms: ${DISGUISE_THINK_BASE_MS:500}
     chars-per-second: ${DISGUISE_CHARS_PER_SECOND:3.4}
     typing-jitter: ${DISGUISE_TYPING_JITTER:0.30}
-    max-delay-ms: ${DISGUISE_MAX_DELAY_MS:90000}
+    max-delay-ms: ${DISGUISE_MAX_DELAY_MS:30000}
     long-pause-probability: ${DISGUISE_LONG_PAUSE_PROBABILITY:0.08}
     long-pause-max-ms: ${DISGUISE_LONG_PAUSE_MAX_MS:180000}
     away-probability: ${DISGUISE_AWAY_PROBABILITY:0.02}

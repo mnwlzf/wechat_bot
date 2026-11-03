@@ -17,6 +17,9 @@ import java.util.concurrent.ThreadLocalRandom;
 @Component
 public class PacingModel {
 
+    /** 回复拟人延迟的硬上限，避免为了伪装而严重拖慢实际回复。 */
+    public static final int MAX_REPLY_DELAY_MS = 30_000;
+
     private final DisguiseProperties properties;
     private final ZoneId zone;
 
@@ -51,8 +54,12 @@ public class PacingModel {
         if (random.nextDouble() < properties.getAwayProbability()) {
             total += random.nextDouble(properties.getAwayMinMs(), Math.max(properties.getAwayMinMs() + 1, properties.getAwayMaxMs()));
         }
-        long capped = Math.min((long) total, properties.getMaxDelayMs());
+        long capped = Math.min((long) total, effectiveMaxDelayMs(properties.getMaxDelayMs()));
         return Math.max(800, capped);
+    }
+
+    public static int effectiveMaxDelayMs(int configuredMaxMs) {
+        return Math.max(800, Math.min(MAX_REPLY_DELAY_MS, configuredMaxMs));
     }
 
     /** 两条气泡之间的间隔：手比脑快，通常 1~3 秒。 */
