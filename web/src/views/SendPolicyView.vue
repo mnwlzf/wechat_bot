@@ -29,22 +29,26 @@ const chatInput = ref('')
 const chatNameInput = ref('')
 
 const form = reactive({
-  readDelayMinMs: 1200,
-  readDelayMaxMs: 7000,
-  maxDelayMs: 90000,
+  // 按群策略里 null = 沿用默认策略；只有「默认策略」弹窗才会全部填满
+  readDelayMinMs: 1200 as number | null,
+  readDelayMaxMs: 7000 as number | null,
+  maxDelayMs: 90000 as number | null,
   splitEnabled: true,
-  maxParts: 3,
-  maxPartChars: 90,
-  perMinute: 3,
-  per10Minutes: 8,
-  perHour: 20,
-  perDay: 120,
-  minGapMs: 1200,
-  emojiLimit: 1,
-  dropPercent: 0,
+  maxParts: 3 as number | null,
+  maxPartChars: 90 as number | null,
+  perMinute: 3 as number | null,
+  per10Minutes: 8 as number | null,
+  perHour: 20 as number | null,
+  perDay: 120 as number | null,
+  minGapMs: 1200 as number | null,
+  emojiLimit: 1 as number | null,
+  dropPercent: 0 as number | null,
   promptEnabled: true,
   enabled: true,
 })
+
+/** 该群当前实际生效的策略，按群弹窗里只用来做「留空即沿用」的提示 */
+const effectivePolicy = ref<SendPolicyEffective | null>(null)
 
 const defaultPolicy = computed(() => overview.value?.defaultPolicy || null)
 const overrides = computed(() => overview.value?.overrides || [])
@@ -66,23 +70,82 @@ function policySummary(policy: SendPolicyEffective | SendPolicyRow) {
   return parts.join(' · ')
 }
 
-function fill(policy: SendPolicyEffective | SendPolicyRow) {
-  form.readDelayMinMs = policy.readDelayMinMs ?? form.readDelayMinMs
-  form.readDelayMaxMs = policy.readDelayMaxMs ?? form.readDelayMaxMs
-  form.maxDelayMs = policy.maxDelayMs ?? form.maxDelayMs
-  form.splitEnabled = policy.splitEnabled ?? form.splitEnabled
-  form.maxParts = policy.maxParts ?? form.maxParts
-  form.maxPartChars = policy.maxPartChars ?? form.maxPartChars
-  form.perMinute = policy.perMinute ?? form.perMinute
-  form.per10Minutes = policy.per10Minutes ?? form.per10Minutes
-  form.perHour = policy.perHour ?? form.perHour
-  form.perDay = policy.perDay ?? form.perDay
-  form.minGapMs = policy.minGapMs ?? form.minGapMs
-  form.emojiLimit = policy.emojiLimit ?? form.emojiLimit
-  form.dropPercent = Math.round((policy.dropRate ?? 0) * 1000) / 10
-  form.promptEnabled = policy.promptEnabled ?? form.promptEnabled
-  form.enabled = 'enabled' in policy ? policy.enabled : true
+/** 列表里展示「这条覆盖 + 其余沿用默认」的合并结果，避免只改一项时显示成一堆 0。 */
+function mergedRow(row: SendPolicyRow): SendPolicyEffective {
+  const base = defaultPolicy.value
+  if (!base) return row as unknown as SendPolicyEffective
+  const merged = { ...base } as Record<string, unknown>
+  for (const [key, value] of Object.entries(row)) {
+    if (value !== null && value !== undefined && key in merged) {
+      merged[key] = value
+    }
+  }
+  return merged as unknown as SendPolicyEffective
 }
+
+/** 默认策略弹窗：生效值本身就是具体的，全部填满。 */
+function fillDefault(policy: SendPolicyEffective) {
+  form.readDelayMinMs = policy.readDelayMinMs
+  form.readDelayMaxMs = policy.readDelayMaxMs
+  form.maxDelayMs = policy.maxDelayMs
+  form.splitEnabled = policy.splitEnabled
+  form.maxParts = policy.maxParts
+  form.maxPartChars = policy.maxPartChars
+  form.perMinute = policy.perMinute
+  form.per10Minutes = policy.per10Minutes
+  form.perHour = policy.perHour
+  form.perDay = policy.perDay
+  form.minGapMs = policy.minGapMs
+  form.emojiLimit = policy.emojiLimit
+  form.dropPercent = Math.round(policy.dropRate * 1000) / 10
+  form.promptEnabled = policy.promptEnabled
+  form.enabled = true
+}
+
+/**
+ * 按群策略弹窗：只回显这条策略自己存过的值，null 保持为空。
+ * 之前这里是拿「生效值」回填的，于是只改了一项的群看起来像全都被覆盖过，
+ * 一保存就把默认值固化成这个群的写死配置。
+ */
+function fillOverride(row: SendPolicyRow | null) {
+  form.readDelayMinMs = row?.readDelayMinMs ?? null
+  form.readDelayMaxMs = row?.readDelayMaxMs ?? null
+  form.maxDelayMs = row?.maxDelayMs ?? null
+  form.splitEnabled = row?.splitEnabled ?? effectivePolicy.value?.splitEnabled ?? true
+  form.maxParts = row?.maxParts ?? null
+  form.maxPartChars = row?.maxPartChars ?? null
+  form.perMinute = row?.perMinute ?? null
+  form.per10Minutes = row?.per10Minutes ?? null
+  form.perHour = row?.perHour ?? null
+  form.perDay = row?.perDay ?? null
+  form.minGapMs = row?.minGapMs ?? null
+  form.emojiLimit = row?.emojiLimit ?? null
+  form.dropPercent = row?.dropRate === null || row?.dropRate === undefined
+    ? null
+    : Math.round(row.dropRate * 1000) / 10
+  form.promptEnabled = row?.promptEnabled ?? effectivePolicy.value?.promptEnabled ?? true
+  form.enabled = row?.enabled ?? true
+}
+
+/** 每个数字输入框的占位文案：留空时到底会用什么。 */
+const placeholders = computed(() => {
+  const policy = effectivePolicy.value
+  if (!policy) return {} as Record<string, string>
+  return {
+    readDelayMinMs: `沿用 ${policy.readDelayMinMs}`,
+    readDelayMaxMs: `沿用 ${policy.readDelayMaxMs}`,
+    maxDelayMs: `沿用 ${policy.maxDelayMs}`,
+    minGapMs: `沿用 ${policy.minGapMs}`,
+    maxParts: `沿用 ${policy.maxParts}`,
+    maxPartChars: `沿用 ${policy.maxPartChars}`,
+    perMinute: `沿用 ${policy.perMinute}`,
+    per10Minutes: `沿用 ${policy.per10Minutes}`,
+    perHour: `沿用 ${policy.perHour}`,
+    perDay: `沿用 ${policy.perDay}`,
+    emojiLimit: `沿用 ${policy.emojiLimit}`,
+    dropPercent: `沿用 ${Math.round(policy.dropRate * 1000) / 10}`,
+  }
+})
 
 function toInput(): SendPolicyInput {
   return {
@@ -98,7 +161,7 @@ function toInput(): SendPolicyInput {
     perDay: form.perDay,
     minGapMs: form.minGapMs,
     emojiLimit: form.emojiLimit,
-    dropRate: Math.round(form.dropPercent) / 100,
+    dropRate: form.dropPercent === null ? null : Math.round(form.dropPercent) / 100,
     promptEnabled: form.promptEnabled,
     enabled: form.enabled,
   }
@@ -128,7 +191,8 @@ function openDefault() {
   if (!defaultPolicy.value) return
   dialogMode.value = 'default'
   editingChatId.value = ''
-  fill(defaultPolicy.value)
+  effectivePolicy.value = defaultPolicy.value
+  fillDefault(defaultPolicy.value)
   dialogVisible.value = true
 }
 
@@ -137,9 +201,8 @@ function openNewChat() {
   editingChatId.value = ''
   chatInput.value = ''
   chatNameInput.value = ''
-  if (defaultPolicy.value) {
-    fill(defaultPolicy.value)
-  }
+  effectivePolicy.value = defaultPolicy.value
+  fillOverride(null)
   dialogVisible.value = true
 }
 
@@ -147,39 +210,43 @@ async function openEditChat(row: SendPolicyRow) {
   await openChatById(row.chatId || '', row.chatName, row)
 }
 
-/** 打开某个会话的策略弹窗：先显示已保存的值，再并入生效值。 */
+/**
+ * 打开某个会话的策略弹窗：先拿到「这条策略存了什么」，只回显存过的值；
+ * 没存过的项留空，用占位文案提示会沿用默认策略。
+ */
 async function openChatById(chatId: string, chatName: string, saved?: SendPolicyRow) {
   dialogMode.value = 'chat'
   editingChatId.value = chatId
   chatInput.value = chatId
   chatNameInput.value = chatName
-  if (saved) {
-    fill(saved)
-    form.enabled = saved.enabled
-  } else if (defaultPolicy.value) {
-    fill(defaultPolicy.value)
-  }
-  dialogVisible.value = true
+  effectivePolicy.value = defaultPolicy.value
+  let override = saved ?? null
   try {
     const detail = await adminApi.chatSendPolicy(chatId)
-    fill(detail.effective)
-    form.enabled = detail.override ? detail.override.enabled : true
+    effectivePolicy.value = detail.effective
+    if (!override && detail.override) {
+      override = detail.override
+    }
   } catch {
-    /* 没有会话记录时用默认值兜底 */
+    /* 还没有会话记录时，用默认策略做占位提示 */
   }
+  fillOverride(override)
+  dialogVisible.value = true
 }
 
 async function onChatPick(value: string) {
   chatNameInput.value = activeConversation.value?.chatName || chatNameInput.value
-  if (!value) return
+  effectivePolicy.value = defaultPolicy.value
+  if (!value) {
+    fillOverride(null)
+    return
+  }
   try {
     const detail = await adminApi.chatSendPolicy(value)
-    fill(detail.effective)
-    if (detail.override) {
-      form.enabled = detail.override.enabled
-    }
+    effectivePolicy.value = detail.effective
+    fillOverride(detail.override ?? null)
   } catch {
-    /* 手填的 chatId 可能还没有会话记录，直接用默认值 */
+    fillOverride(null)
   }
 }
 
@@ -188,7 +255,11 @@ async function submit() {
     ElMessage.warning('请选择或粘贴要配置的会话/群')
     return
   }
-  if (form.readDelayMinMs >= form.readDelayMaxMs) {
+  if (
+    form.readDelayMinMs !== null
+    && form.readDelayMaxMs !== null
+    && form.readDelayMinMs >= form.readDelayMaxMs
+  ) {
     ElMessage.warning('最长读消息延迟需要大于最短读消息延迟')
     return
   }
@@ -331,7 +402,7 @@ onMounted(async () => {
             </template>
           </el-table-column>
           <el-table-column label="策略" min-width="320">
-            <template #default="{ row }"><span class="muted">{{ policySummary(row) }}</span></template>
+            <template #default="{ row }"><span class="muted">{{ policySummary(mergedRow(row)) }}</span></template>
           </el-table-column>
           <el-table-column label="更新时间" width="118">
             <template #default="{ row }"><span class="muted">{{ timeLabel(row.updatedAt) }}</span></template>
@@ -377,18 +448,25 @@ onMounted(async () => {
           </el-select>
         </el-form-item>
 
+        <p v-if="dialogMode === 'chat'" class="inherit-hint">
+          留空的项一律沿用默认策略（输入框里的灰色文案就是当前生效值）；只填要改的那几项即可。
+          <template v-if="effectivePolicy">
+            该群当前生效：{{ policySummary(effectivePolicy) }}
+          </template>
+        </p>
+
         <div class="form-grid">
           <el-form-item label="最短读消息延迟（毫秒）">
-            <el-input-number v-model="form.readDelayMinMs" :min="200" :max="600000" :step="100" controls-position="right" />
+            <el-input-number v-model="form.readDelayMinMs" :min="200" :max="600000" :step="100" :placeholder="placeholders.readDelayMinMs" :value-on-clear="null" controls-position="right" />
           </el-form-item>
           <el-form-item label="最长读消息延迟（毫秒）">
-            <el-input-number v-model="form.readDelayMaxMs" :min="201" :max="600000" :step="100" controls-position="right" />
+            <el-input-number v-model="form.readDelayMaxMs" :min="201" :max="600000" :step="100" :placeholder="placeholders.readDelayMaxMs" :value-on-clear="null" controls-position="right" />
           </el-form-item>
           <el-form-item label="单条最长延迟（毫秒）">
-            <el-input-number v-model="form.maxDelayMs" :min="1000" :max="3600000" :step="1000" controls-position="right" />
+            <el-input-number v-model="form.maxDelayMs" :min="1000" :max="3600000" :step="1000" :placeholder="placeholders.maxDelayMs" :value-on-clear="null" controls-position="right" />
           </el-form-item>
           <el-form-item label="两条之间最小间隔（毫秒）">
-            <el-input-number v-model="form.minGapMs" :min="0" :max="600000" :step="100" controls-position="right" />
+            <el-input-number v-model="form.minGapMs" :min="0" :max="600000" :step="100" :placeholder="placeholders.minGapMs" :value-on-clear="null" controls-position="right" />
           </el-form-item>
         </div>
 
@@ -397,9 +475,9 @@ onMounted(async () => {
             <el-switch v-model="form.splitEnabled" />
             <template v-if="form.splitEnabled">
               <span class="inline-label">最多</span>
-              <el-input-number v-model="form.maxParts" :min="1" :max="10" size="small" controls-position="right" />
+              <el-input-number v-model="form.maxParts" :min="1" :max="10" size="small" :placeholder="placeholders.maxParts" :value-on-clear="null" controls-position="right" />
               <span class="inline-label">条，单条约</span>
-              <el-input-number v-model="form.maxPartChars" :min="20" :max="2000" :step="10" size="small" controls-position="right" />
+              <el-input-number v-model="form.maxPartChars" :min="20" :max="2000" :step="10" size="small" :placeholder="placeholders.maxPartChars" :value-on-clear="null" controls-position="right" />
               <span class="inline-label">字</span>
             </template>
             <span v-else class="muted">整段话一条发完</span>
@@ -408,25 +486,25 @@ onMounted(async () => {
 
         <div class="form-grid form-grid--four">
           <el-form-item label="每分钟">
-            <el-input-number v-model="form.perMinute" :min="0" :max="600" controls-position="right" />
+            <el-input-number v-model="form.perMinute" :min="0" :max="600" :placeholder="placeholders.perMinute" :value-on-clear="null" controls-position="right" />
           </el-form-item>
           <el-form-item label="每 10 分钟">
-            <el-input-number v-model="form.per10Minutes" :min="0" :max="6000" controls-position="right" />
+            <el-input-number v-model="form.per10Minutes" :min="0" :max="6000" :placeholder="placeholders.per10Minutes" :value-on-clear="null" controls-position="right" />
           </el-form-item>
           <el-form-item label="每小时">
-            <el-input-number v-model="form.perHour" :min="0" :max="10000" controls-position="right" />
+            <el-input-number v-model="form.perHour" :min="0" :max="10000" :placeholder="placeholders.perHour" :value-on-clear="null" controls-position="right" />
           </el-form-item>
           <el-form-item label="每天">
-            <el-input-number v-model="form.perDay" :min="0" :max="100000" controls-position="right" />
+            <el-input-number v-model="form.perDay" :min="0" :max="100000" :placeholder="placeholders.perDay" :value-on-clear="null" controls-position="right" />
           </el-form-item>
         </div>
 
         <div class="form-grid">
           <el-form-item label="表情数量上限">
-            <el-input-number v-model="form.emojiLimit" :min="0" :max="20" controls-position="right" />
+            <el-input-number v-model="form.emojiLimit" :min="0" :max="20" :placeholder="placeholders.emojiLimit" :value-on-clear="null" controls-position="right" />
           </el-form-item>
           <el-form-item label="不回复概率（%）">
-            <el-input-number v-model="form.dropPercent" :min="0" :max="100" :step="1" controls-position="right" />
+            <el-input-number v-model="form.dropPercent" :min="0" :max="100" :step="1" :placeholder="placeholders.dropPercent" :value-on-clear="null" controls-position="right" />
           </el-form-item>
         </div>
 
@@ -491,6 +569,16 @@ onMounted(async () => {
   margin: 12px 0 0;
   color: var(--muted);
   font-size: var(--fs-xs);
+}
+
+.inherit-hint {
+  margin: 0 0 14px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
 }
 
 .chat-cell {

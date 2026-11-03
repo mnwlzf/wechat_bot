@@ -5,7 +5,13 @@ import dayjs from 'dayjs'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import { adminApi } from '@/api'
-import type { Conversation, ReplyMode, ReplyPolicyOverview, ReplyPolicyRow } from '@/api/types'
+import type {
+  Conversation,
+  ReplyMode,
+  ReplyPolicyEffective,
+  ReplyPolicyOverview,
+  ReplyPolicyRow,
+} from '@/api/types'
 import { getErrorMessage } from '@/api/client'
 
 const route = useRoute()
@@ -62,6 +68,8 @@ const activeConversation = computed(() =>
 )
 const overrides = computed(() => overview.value?.overrides || [])
 const effective = computed(() => overview.value?.defaultPolicy || null)
+/** 正在编辑的那个群实际生效的策略，只用于弹窗里的提示，不参与回填 */
+const chatEffective = ref<ReplyPolicyEffective | null>(null)
 
 const modeLabels: Record<ReplyMode, string> = {
   ALWAYS: '主动回复',
@@ -151,6 +159,7 @@ function openNewChat() {
   editingChatId.value = ''
   chatInput.value = ''
   chatNameInput.value = ''
+  chatEffective.value = effective.value
   chatForm.mode = effective.value?.mode || 'WAKE'
   chatForm.wakeWords = effective.value?.wakeWords || ''
   chatForm.randomPercent = Math.round((effective.value?.randomRate ?? 0.3) * 100)
@@ -159,29 +168,62 @@ function openNewChat() {
   dialogVisible.value = true
 }
 
+/**
+ * 编辑按群策略：只回显这条策略自己存过的值。
+ * 之前用「默认策略」的值兜底，导致只改了模式的群看起来像把唤醒词也写死了。
+ */
 function openEditChat(row: ReplyPolicyRow) {
   editingChatId.value = row.chatId || ''
   chatInput.value = row.chatId || ''
   chatNameInput.value = row.chatName
-  chatForm.mode = row.mode || effective.value?.mode || 'WAKE'
-  chatForm.wakeWords = row.wakeWords ?? effective.value?.wakeWords ?? ''
+  const fallbackMode = effective.value?.mode || 'WAKE'
+  const mode = row.mode || fallbackMode
+  chatForm.mode = mode
+  // 唤醒模式下后端要求必须有关键词，所以继承默认词；其他模式留空表示继承
+  chatForm.wakeWords = row.wakeWords ?? (mode === 'WAKE' ? effective.value?.wakeWords || '' : '')
   chatForm.randomPercent = Math.round((row.randomRate ?? effective.value?.randomRate ?? 0.3) * 100)
   chatForm.humanCooldown = row.humanCooldownSeconds ?? effective.value?.humanCooldownSeconds ?? 60
   chatForm.enabled = row.enabled
   dialogVisible.value = true
+  void loadChatEffective(row.chatId || '')
+}
+
+async function loadChatEffective(chatId: string) {
+  if (!chatId) {
+    chatEffective.value = effective.value
+    return
+  }
+  try {
+    chatEffective.value = (await adminApi.chatReplyPolicy(chatId)).effective
+  } catch {
+    chatEffective.value = effective.value
+  }
 }
 
 async function onChatPick(value: string) {
   chatNameInput.value = activeConversation.value?.chatName || chatNameInput.value
+  chatEffective.value = effective.value
   if (!value) return
   try {
     const detail = await adminApi.chatReplyPolicy(value)
-    chatForm.mode = detail.effective.mode
-    chatForm.wakeWords = detail.effective.wakeWords
-    chatForm.randomPercent = Math.round(detail.effective.randomRate * 100)
-    chatForm.humanCooldown = detail.effective.humanCooldownSeconds
+    chatEffective.value = detail.effective
     if (detail.override) {
+      // 已经有按群策略：按它自己的值回显
+      const mode = detail.override.mode || detail.effective.mode
+      chatForm.mode = mode
+      chatForm.wakeWords = detail.override.wakeWords
+        ?? (mode === 'WAKE' ? detail.effective.wakeWords : '')
+      chatForm.randomPercent = Math.round(
+        (detail.override.randomRate ?? detail.effective.randomRate) * 100,
+      )
+      chatForm.humanCooldown = detail.override.humanCooldownSeconds
+        ?? detail.effective.humanCooldownSeconds
       chatForm.enabled = detail.override.enabled
+    } else {
+      chatForm.mode = detail.effective.mode
+      chatForm.wakeWords = detail.effective.mode === 'WAKE' ? detail.effective.wakeWords : ''
+      chatForm.randomPercent = Math.round(detail.effective.randomRate * 100)
+      chatForm.humanCooldown = detail.effective.humanCooldownSeconds
     }
   } catch {
     /* 手填的 chatId 可能还没有会话记录，用默认值兜底 */
@@ -396,6 +438,14 @@ onMounted(async () => {
           </el-select>
         </el-form-item>
 
+        <p v-if="chatEffective" class="inherit-hint">
+          该群当前生效：{{ modeLabel(chatEffective.mode) }}
+          <template v-if="chatEffective.mode === 'WAKE'">（唤醒词 {{ chatEffective.wakeWords || '未设置' }}）</template>
+          <template v-else-if="chatEffective.mode === 'RANDOM'">（命中 {{ percent(chatEffective.randomRate) }}）</template>
+          <template v-else-if="chatEffective.mode === 'HUMAN'">（判定间隔 {{ chatEffective.humanCooldownSeconds }} 秒）</template>
+          · 来源 {{ sourceLabels[chatEffective.source] || chatEffective.source }}
+        </p>
+
         <el-form-item label="回复模式">
           <el-radio-group v-model="chatForm.mode">
             <el-radio-button v-for="option in modeOptions" :key="option.value" :value="option.value">
@@ -539,5 +589,15 @@ onMounted(async () => {
 
 .slider-row .el-slider {
   flex: 1;
+}
+
+.inherit-hint {
+  margin: 0 0 14px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
 }
 </style>
