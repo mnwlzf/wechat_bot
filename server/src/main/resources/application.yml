@@ -171,6 +171,31 @@ app:
         model: ${LLM_FALLBACK_MODEL:}
         priority: ${LLM_FALLBACK_PRIORITY:20}
         timeout-seconds: ${LLM_FALLBACK_TIMEOUT_SECONDS:60}
+  # 会话（群）共享长期记忆：把滚出上下文窗口的历史压成滚动摘要，加上人工维护的要点，
+  # 一起注入系统提示词。同一个群的所有成员共用一份，避免长群聊前后信息割裂。
+  memory:
+    enabled: ${MEMORY_ENABLED:true}
+    summary-enabled: ${MEMORY_SUMMARY_ENABLED:true}
+    # 新增多少条历史消息才触发一次自动摘要（低于这个数就等，不浪费 token）
+    trigger-messages: ${MEMORY_TRIGGER_MESSAGES:24}
+    # 生成摘要时保留多少条最近消息不进摘要；0 = 跟随机器人的 context-window
+    keep-recent: ${MEMORY_KEEP_RECENT:0}
+    batch-limit: ${MEMORY_BATCH_LIMIT:200}
+    max-summary-chars: ${MEMORY_MAX_SUMMARY_CHARS:600}
+    # 注入提示词的人工记忆条数上限与单条长度上限
+    max-notes: ${MEMORY_MAX_NOTES:8}
+    note-max-chars: ${MEMORY_NOTE_MAX_CHARS:500}
+    # 同一会话两次自动摘要的最小间隔（分钟）
+    min-interval-minutes: ${MEMORY_MIN_INTERVAL_MINUTES:5}
+  # 群消息常常几秒好几条：先攒一小会儿再回一次，别一条一条抢话
+  reply:
+    enabled: ${REPLY_DEBOUNCE_ENABLED:true}
+    # 最后一条消息之后静默多久才开始生成（秒）
+    debounce-seconds: ${REPLY_DEBOUNCE_SECONDS:3}
+    # 一个持续刷屏的群最多攒多久就必须回一次（秒）
+    max-wait-seconds: ${REPLY_MAX_WAIT_SECONDS:12}
+    # 同时生成回复的会话数上限；同一个会话永远串行
+    workers: ${REPLY_WORKERS:4}
   # 拟人化伪装层：延迟、分条、作息、配额、去重、文风清洗
   disguise:
     enabled: ${DISGUISE_ENABLED:true}
@@ -187,6 +212,8 @@ app:
     chars-per-second: ${DISGUISE_CHARS_PER_SECOND:3.4}
     typing-jitter: ${DISGUISE_TYPING_JITTER:0.30}
     max-delay-ms: ${DISGUISE_MAX_DELAY_MS:30000}
+    # 第一条消息的硬上限：配额排队/打字延迟都不会超过它（作息、免打扰不受影响）
+    max-first-delay-ms: ${DISGUISE_MAX_FIRST_DELAY_MS:15000}
     long-pause-probability: ${DISGUISE_LONG_PAUSE_PROBABILITY:0.08}
     long-pause-max-ms: ${DISGUISE_LONG_PAUSE_MAX_MS:180000}
     away-probability: ${DISGUISE_AWAY_PROBABILITY:0.02}
