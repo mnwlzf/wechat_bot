@@ -88,8 +88,19 @@ public class AdminQueryService {
                 conversation.getLastMessageAt(),
                 conversation.isBotPaused(),
                 conversation.getPromptTemplateId(),
-                templateName
+                templateName,
+                effectivePersonaName(conversation, templateName)
         );
+    }
+
+    /** 未单独指定人设时，页面上要能看出实际走的是哪个默认人设。 */
+    private String effectivePersonaName(Conversation conversation, String boundName) {
+        if (boundName != null) {
+            return boundName;
+        }
+        return promptTemplateRepository.findFirstByIsDefaultTrue()
+                .map(template -> template.getName() + "（默认）")
+                .orElse(null);
     }
 
     /** 人工接管开关：接管后该会话不再自动回复，只记录消息。 */

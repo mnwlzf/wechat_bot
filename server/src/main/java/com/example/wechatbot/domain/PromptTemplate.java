@@ -30,6 +30,14 @@ public class PromptTemplate {
     @Column(nullable = false, columnDefinition = "text")
     private String content;
 
+    /** 默认人设：会话没有单独绑定时回退到它。全局最多一条。 */
+    @Column(name = "is_default", nullable = false)
+    private boolean isDefault = false;
+
+    /** 内置人设的稳定标识（例如 {@code da-fei-yu}）；用户自建的人设为 null。 */
+    @Column(name = "builtin_key", length = 80)
+    private String builtinKey;
+
     @Column(name = "created_at", nullable = false)
     private OffsetDateTime createdAt;
 

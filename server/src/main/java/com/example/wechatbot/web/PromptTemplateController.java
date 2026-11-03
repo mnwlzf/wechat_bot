@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * 提示词模板：可复用的系统提示词，支持按会话绑定不同人格。
+ * 人设（提示词模板）：支持自定义增删改、切换默认人设，并可按会话/群单独绑定。
  */
 @RestController
 @RequestMapping("/api/admin/prompt-templates")
@@ -41,6 +41,18 @@ public class PromptTemplateController {
         service.delete(id);
     }
 
+    /** 设为全局默认人设：所有没有单独指定人设的会话都会用它。 */
+    @PostMapping("/{id}/default")
+    public AdminDtos.PromptTemplateView setDefault(@PathVariable UUID id) {
+        return toView(service.setDefault(id));
+    }
+
+    /** 取消默认人设，回退到机器人自身的 system prompt。 */
+    @DeleteMapping("/default")
+    public void clearDefault() {
+        service.setDefault(null);
+    }
+
     private PromptTemplate toEntity(AdminDtos.PromptTemplateInput input) {
         PromptTemplate template = new PromptTemplate();
         template.setName(input.name());
@@ -55,6 +67,9 @@ public class PromptTemplateController {
                 template.getName(),
                 template.getDescription(),
                 template.getContent(),
+                template.isDefault(),
+                template.getBuiltinKey() != null,
+                template.getBuiltinKey(),
                 template.getUpdatedAt()
         );
     }

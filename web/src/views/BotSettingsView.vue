@@ -181,7 +181,11 @@ onMounted(load)
               </div>
               <el-form-item label="群聊唤醒词" prop="groupWakeWords" class="field-block">
                 <el-input v-model="form.groupWakeWords" placeholder="@机器人,小助手" />
-                <div class="field-hint">多个用逗号分隔；留空时群聊所有消息都会触发回复。</div>
+                <div class="field-hint">
+                  多个用逗号分隔；留空时群聊所有消息都会触发回复。这里是全局基线，单个群可以在
+                  <router-link class="inline-link" to="/reply-policies">回复策略</router-link>
+                  里单独改成主动回复 / 随机回复 / 唤醒回复。
+                </div>
               </el-form-item>
             </div>
 
@@ -323,12 +327,17 @@ onMounted(load)
   background: #fbfcfe;
 }
 
+.inline-link {
+  color: var(--brand-deep);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 @media (max-width: 680px) {
   .status-bar {
     align-items: flex-start;
     flex-wrap: wrap;
   }
-
   .status-bar__tag {
     order: -1;
   }
