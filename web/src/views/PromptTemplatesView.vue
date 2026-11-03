@@ -4,12 +4,15 @@ import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'elem
 import { Plus, Star, StarFilled } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 import { adminApi } from '@/api'
-import type { PromptTemplate, PromptTemplateInput } from '@/api/types'
+import type { Conversation, PromptTemplate, PromptTemplateInput } from '@/api/types'
 import { getErrorMessage } from '@/api/client'
 
 const loading = ref(false)
 const saving = ref(false)
 const templates = ref<PromptTemplate[]>([])
+const conversations = ref<Conversation[]>([])
+const personaSaving = ref<string | null>(null)
+const keyword = ref('')
 const dialogVisible = ref(false)
 const editingId = ref<string | null>(null)
 const formRef = ref<FormInstance>()
@@ -22,6 +25,49 @@ const formRules: FormRules = {
 }
 
 const defaultPersona = computed(() => templates.value.find((item) => item.defaultPersona))
+
+const filteredConversations = computed(() => {
+  const query = keyword.value.trim().toLowerCase()
+  if (!query) return conversations.value
+  return conversations.value.filter(
+    (item) => item.chatName.toLowerCase().includes(query) || item.chatId.toLowerCase().includes(query),
+  )
+})
+
+const boundCount = computed(() => conversations.value.filter((item) => item.promptTemplateId).length)
+
+async function loadConversations() {
+  try {
+    const data = await adminApi.conversations({ page: 0, size: 100 })
+    conversations.value = data.content
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  }
+}
+
+/** 给某个群单独绑定人设；空值表示跟随默认人设。 */
+async function bindPersona(row: Conversation, templateId: string) {
+  personaSaving.value = row.id
+  try {
+    const updated = await adminApi.setPersona(row.id, templateId || null)
+    // 解绑时后端会省略字段，统一按服务端返回值落定
+    row.promptTemplateId = updated.promptTemplateId ?? null
+    row.promptTemplateName = updated.promptTemplateName ?? null
+    row.effectivePersonaName = updated.effectivePersonaName ?? null
+    ElMessage.success(
+      updated.promptTemplateName
+        ? `「${row.chatName}」已改用「${updated.promptTemplateName}」`
+        : defaultPersona.value
+          ? `「${row.chatName}」已回退到默认人设「${defaultPersona.value.name}」`
+          : `「${row.chatName}」已回到机器人系统提示词`,
+    )
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+    await loadConversations()
+  } finally {
+    personaSaving.value = null
+  }
+}
 
 async function load() {
   loading.value = true
@@ -118,7 +164,9 @@ function updatedAt(value: string) {
   return dayjs(value).format('MM-DD HH:mm')
 }
 
-onMounted(load)
+onMounted(async () => {
+  await Promise.all([load(), loadConversations()])
+})
 </script>
 
 <template>
@@ -195,6 +243,61 @@ onMounted(load)
         <div v-else-if="!loading" class="empty-state">
           <strong>还没有人设</strong>
           新建一份「大肥鱼」或「客服语气」，设成默认后所有没单独指定的群都会用它。
+        </div>
+      </div>
+    </section>
+
+    <section class="surface-card">
+      <div class="surface-card__head">
+        <div>
+          <h2>按群指定人设</h2>
+          <p class="head-desc">
+            只给某个群单独换人设，改完立即生效；留空的群继续跟随默认人设。
+            <template v-if="boundCount">当前已有 {{ boundCount }} 个会话单独指定。</template>
+          </p>
+        </div>
+        <div class="head-actions">
+          <el-input v-model="keyword" placeholder="搜索群名 / chatId" clearable class="persona-search" />
+        </div>
+      </div>
+      <div class="surface-card__body">
+        <el-table v-if="filteredConversations.length" :data="filteredConversations" style="width: 100%" max-height="440">
+          <el-table-column label="会话/群" min-width="240">
+            <template #default="{ row }">
+              <div class="chat-cell">
+                <strong>{{ row.chatName }}</strong>
+                <span class="chat-id">{{ row.chatId }}</span>
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="当前人设" min-width="150">
+            <template #default="{ row }">
+              <span :class="{ inherited: !row.promptTemplateId }">
+                {{ row.effectivePersonaName || row.promptTemplateName || '未指定' }}
+              </span>
+            </template>
+          </el-table-column>
+          <el-table-column label="指定人设" width="230">
+            <template #default="{ row }">
+              <el-select
+                :model-value="row.promptTemplateId || ''"
+                size="small"
+                class="persona-picker"
+                :loading="personaSaving === row.id"
+                @change="(value: string) => bindPersona(row, value)"
+              >
+                <el-option
+                  :label="defaultPersona ? `跟随默认（${defaultPersona.name}）` : '跟随默认人设'"
+                  value=""
+                />
+                <el-option v-for="item in templates" :key="item.id" :label="item.name" :value="item.id" />
+              </el-select>
+            </template>
+          </el-table-column>
+        </el-table>
+        <div v-else-if="!loading" class="empty-state">
+          <strong>还没有可以绑定的会话</strong>
+          机器人收到第一条消息之后，这里会出现群和私聊，可以逐个指定人设。
         </div>
       </div>
     </section>
@@ -309,5 +412,33 @@ onMounted(load)
   margin-right: 6px;
   color: #16a34a;
   font-size: 11px;
+}
+
+.persona-search {
+  width: 220px;
+}
+
+.persona-picker {
+  width: 100%;
+}
+
+.chat-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.chat-cell strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.chat-id {
+  color: var(--muted-soft);
+  font-size: 10px;
+}
+
+.inherited {
+  color: var(--muted);
 }
 </style>

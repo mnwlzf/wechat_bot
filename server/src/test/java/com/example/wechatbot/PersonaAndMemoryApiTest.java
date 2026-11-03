@@ -1,7 +1,10 @@
 package com.example.wechatbot;
 
 import com.example.wechatbot.domain.BotConfig;
+import com.example.wechatbot.domain.ChatType;
+import com.example.wechatbot.domain.Conversation;
 import com.example.wechatbot.repository.BotConfigRepository;
+import com.example.wechatbot.repository.ConversationRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
@@ -17,6 +20,7 @@ import org.springframework.test.web.servlet.MvcResult;
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -44,6 +48,9 @@ class PersonaAndMemoryApiTest {
 
     @Autowired
     private BotConfigRepository botRepository;
+
+    @Autowired
+    private ConversationRepository conversationRepository;
 
     /** 测试库是 create-drop，没有 Flyway 的种子数据；定时消息需要至少一个启用的机器人。 */
     @BeforeEach
@@ -174,6 +181,62 @@ class PersonaAndMemoryApiTest {
 
         mockMvc.perform(delete("/api/admin/scheduled-messages/{id}", id).header("Authorization", AUTH))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    void personaCanBeBoundToASingleConversation() throws Exception {
+        // 先造一个默认人设：解绑后页面要能看出回退到了谁
+        String defaultPersona = createPersona("默认人设", "你是默认人设");
+        mockMvc.perform(post("/api/admin/prompt-templates/{id}/default", defaultPersona)
+                        .header("Authorization", AUTH))
+                .andExpect(status().isOk());
+
+        String persona = createPersona("群专用人设", "你是这个群专属的人设");
+        UUID conversationId = seedConversation("binding@chatroom", "绑定测试群");
+
+        // 绑定：会话列表里应立刻显示这条人设
+        mockMvc.perform(post("/api/admin/conversations/{id}/persona", conversationId)
+                        .header("Authorization", AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"promptTemplateId\":\"" + persona + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.promptTemplateId").value(persona))
+                .andExpect(jsonPath("$.promptTemplateName").value("群专用人设"));
+
+        MvcResult listResult = mockMvc.perform(get("/api/admin/conversations").header("Authorization", AUTH))
+                .andExpect(status().isOk())
+                .andReturn();
+        JsonNode bound = objectMapper.readTree(listResult.getResponse().getContentAsString())
+                .path("content").get(0);
+        assertThat(bound.path("promptTemplateId").asText()).isEqualTo(persona);
+
+        // 解绑：回退到默认人设，页面要能看出走的是哪个默认
+        MvcResult cleared = mockMvc.perform(post("/api/admin/conversations/{id}/persona", conversationId)
+                        .header("Authorization", AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"promptTemplateId\":null}"))
+                .andExpect(status().isOk())
+                .andReturn();
+        JsonNode clearedNode = objectMapper.readTree(cleared.getResponse().getContentAsString());
+        // 解绑后回落到默认人设：promptTemplateId 被清空，生效人设显示默认名字
+        assertThat(clearedNode.path("promptTemplateId").isMissingNode()
+                || clearedNode.path("promptTemplateId").isNull()).isTrue();
+        assertThat(clearedNode.path("effectivePersonaName").asText())
+                .as("解绑后应显示默认人设名，实际响应：%s", cleared.getResponse().getContentAsString())
+                .contains("默认");
+    }
+
+    /** 绑定人设需要一个真实会话；测试库是 create-drop，这里自己造一条。 */
+    private UUID seedConversation(String chatId, String chatName) {
+        BotConfig bot = botRepository.findAll().getFirst();
+        Conversation conversation = new Conversation();
+        conversation.setBotId(bot.getId());
+        conversation.setChatId(chatId);
+        conversation.setChatName(chatName);
+        conversation.setChatType(ChatType.GROUP);
+        conversation.setLastMessage("");
+        conversation.setLastMessageAt(OffsetDateTime.now());
+        return conversationRepository.save(conversation).getId();
     }
 
     private String createPersona(String name, String content) throws Exception {

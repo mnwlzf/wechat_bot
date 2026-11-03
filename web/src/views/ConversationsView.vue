@@ -164,14 +164,14 @@ async function toggleTakeover(row: Conversation) {
 
 async function changePersona(templateId: string) {
   if (!activeConversation.value) return
+  const id = activeConversation.value.id
   try {
-    const updated = await adminApi.setPersona(activeConversation.value.id, templateId || null)
-    activeConversation.value.promptTemplateId = updated.promptTemplateId
-    activeConversation.value.promptTemplateName = updated.promptTemplateName
-    const row = result.value.content.find((item) => item.id === updated.id)
-    if (row) {
-      row.promptTemplateId = updated.promptTemplateId
-      row.promptTemplateName = updated.promptTemplateName
+    const updated = await adminApi.setPersona(id, templateId || null)
+    // 未绑定人设时后端会省略该字段，所以照服务端真值重新取一遍，别用局部赋值糊住
+    await load()
+    const fresh = result.value.content.find((item) => item.id === id)
+    if (fresh) {
+      activeConversation.value = fresh
     }
     ElMessage.success(
       updated.promptTemplateName
@@ -182,6 +182,7 @@ async function changePersona(templateId: string) {
     )
   } catch (error) {
     ElMessage.error(getErrorMessage(error))
+    await load()
   }
 }
 
