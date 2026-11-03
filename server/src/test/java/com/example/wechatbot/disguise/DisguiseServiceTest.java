@@ -112,6 +112,8 @@ class DisguiseServiceTest {
         properties.setGlobalPerHour(1000);
         properties.setGlobalPerDay(1000);
         properties.setBurstSize(50);
+        // 关掉第一条硬上限，单独验证「配额本身会把消息推后」
+        properties.setMaxFirstDelayMs(600_000);
         DisguiseService service = service(properties);
 
         Instant now = at(15, 0);
@@ -122,6 +124,30 @@ class DisguiseServiceTest {
         assertFalse(second.dropped());
         assertTrue(second.firstSendAt().isAfter(first.firstSendAt().plusSeconds(30)),
                 "同一会话第二次回复应被配额推后: " + first.firstSendAt() + " -> " + second.firstSendAt());
+    }
+
+    @Test
+    void quotaWaitIsCappedSoRepliesStayTimely() {
+        DisguiseProperties properties = baseProperties();
+        properties.setPerMinute(1);
+        properties.setMinGapMs(0);
+        properties.setPer10Minutes(100);
+        properties.setPerHour(100);
+        properties.setPerDay(100);
+        properties.setGlobalPerHour(1000);
+        properties.setGlobalPerDay(1000);
+        properties.setBurstSize(50);
+        DisguiseService service = service(properties);
+
+        Instant now = at(15, 0);
+        service.plan("wxid_timely", ChatType.PRIVATE, "好，我知道了", now);
+        // 配额说这条得等 60 秒，但默认 15 秒硬上限会把它压回来
+        DisguiseService.Plan second = service.plan("wxid_timely", ChatType.PRIVATE, "那我晚点再过来", now.plusSeconds(1));
+
+        assertFalse(second.dropped());
+        long delay = second.firstSendAt().getEpochSecond() - now.plusSeconds(1).getEpochSecond();
+        assertTrue(delay <= 16, "第一条消息的延迟应被压到 15 秒内，实际 " + delay + " 秒");
+        assertTrue(second.note().contains("压到上限"), second.note());
     }
 
     @Test
@@ -147,5 +173,35 @@ class DisguiseServiceTest {
 
         assertFalse(preview.dropped());
         assertTrue(real.firstSendAt().getEpochSecond() - now.getEpochSecond() < 120);
+    }
+
+    @Test
+    void perChatPolicyOverridesGlobalSplitSettings() {
+        DisguiseProperties global = baseProperties();
+        global.setMaxPartChars(24);
+        global.setMaxParts(3);
+
+        // 这个群单独关掉分条：一段话整条发出去
+        DisguiseProperties singleBubble = new DisguiseProperties();
+        org.springframework.beans.BeanUtils.copyProperties(global, singleBubble);
+        singleBubble.setSplitEnabled(false);
+
+        DisguiseService service = new DisguiseService(
+                global,
+                new DisguiseClock(global),
+                new StyleNormalizer(global),
+                new ReplyComposer(global),
+                new PacingModel(global),
+                new QuotaGuard(global),
+                new RepetitionGuard(global),
+                chatId -> "group_single".equals(chatId) ? singleBubble : global);
+
+        String text = "今天下午公司开会，估计六点才能结束。你先去吃吧，不用等我。我晚点过去找你们，顺便带点水果。";
+
+        DisguiseService.Plan multiple = service.preview("group_multi", ChatType.GROUP, text, at(15, 0));
+        DisguiseService.Plan single = service.preview("group_single", ChatType.GROUP, text, at(15, 0));
+
+        assertTrue(multiple.parts().size() >= 2, "默认策略应分条: " + multiple.parts().size());
+        assertEquals(1, single.parts().size(), "该群关掉分条后应只发一条: " + single.parts());
     }
 }

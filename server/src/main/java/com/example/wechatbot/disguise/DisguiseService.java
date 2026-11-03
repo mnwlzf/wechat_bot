@@ -1,6 +1,8 @@
 package com.example.wechatbot.disguise;
 
 import com.example.wechatbot.domain.ChatType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -23,6 +25,8 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 @Service
 public class DisguiseService {
+
+    private static final Logger log = LoggerFactory.getLogger(DisguiseService.class);
 
     public record PlannedPart(String text, Instant sendAt) {}
 
@@ -51,6 +55,7 @@ public class DisguiseService {
     private static final int RECENT_LIMIT = 40;
 
     private final DisguiseProperties properties;
+    private final SendPolicyResolver policies;
     private final DisguiseClock clock;
     private final StyleNormalizer normalizer;
     private final ReplyComposer composer;
@@ -64,6 +69,7 @@ public class DisguiseService {
     private final AtomicLong repetitive = new AtomicLong();
     private final Deque<Decision> recent = new ArrayDeque<>();
 
+    /** 只有全局配置时使用（单测、以及没接数据库的场景）。 */
     public DisguiseService(DisguiseProperties properties,
                            DisguiseClock clock,
                            StyleNormalizer normalizer,
@@ -71,6 +77,18 @@ public class DisguiseService {
                            PacingModel pacing,
                            QuotaGuard quota,
                            RepetitionGuard repetition) {
+        this(properties, clock, normalizer, composer, pacing, quota, repetition, chatId -> properties);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public DisguiseService(DisguiseProperties properties,
+                           DisguiseClock clock,
+                           StyleNormalizer normalizer,
+                           ReplyComposer composer,
+                           PacingModel pacing,
+                           QuotaGuard quota,
+                           RepetitionGuard repetition,
+                           SendPolicyResolver policies) {
         this.properties = properties;
         this.clock = clock;
         this.normalizer = normalizer;
@@ -78,6 +96,7 @@ public class DisguiseService {
         this.pacing = pacing;
         this.quota = quota;
         this.repetition = repetition;
+        this.policies = policies;
     }
 
     public Plan plan(String chatId, ChatType chatType, String rawReply, Instant now) {
@@ -90,7 +109,13 @@ public class DisguiseService {
     }
 
     public String previewStyle(String rawReply) {
-        return capTotal(normalizer.normalize(rawReply));
+        return capTotal(properties, normalizer.normalize(properties, rawReply));
+    }
+
+    /** 用该会话生效的策略预览文风清洗结果。 */
+    public String previewStyle(String chatId, String rawReply) {
+        DisguiseProperties policy = policies.forChat(chatId);
+        return capTotal(policy, normalizer.normalize(policy, rawReply));
     }
 
     private Plan build(String chatId, ChatType chatType, String rawReply, Instant now, boolean dryRun) {
@@ -102,24 +127,26 @@ public class DisguiseService {
             return new Plan(List.of(new PlannedPart(text, now)), "DIRECT", "伪装层已关闭");
         }
 
-        String styled = previewStyle(rawReply);
+        // 该会话生效的发信策略：默认策略与按群覆盖在 SendPolicyService 里已经合并好
+        DisguiseProperties policy = policies.forChat(chatId);
+        String styled = capTotal(policy, normalizer.normalize(policy, rawReply));
         if (styled.isBlank()) {
             return drop(chatId, now, "EMPTY", "清洗后为空", dryRun);
         }
 
-        double dropRate = Math.max(0, Math.min(1, properties.getDropRate()));
+        double dropRate = Math.max(0, Math.min(1, policy.getDropRate()));
         if (dropRate > 0 && ThreadLocalRandom.current().nextDouble() < dropRate) {
             return drop(chatId, now, "DROP_RANDOM", "模拟看到了没回", dryRun);
         }
 
-        List<String> parts = composer.split(styled);
+        List<String> parts = composer.split(policy, styled);
         if (parts.isEmpty()) {
             return drop(chatId, now, "EMPTY", "分条后为空", dryRun);
         }
 
         boolean group = chatType == ChatType.GROUP;
-        long baseDelay = pacing.delayMs(chatId, parts.getFirst(), group, now);
-        Instant earliest = Instant.ofEpochMilli(quota.earliestAllowed(chatId, now.toEpochMilli()));
+        long baseDelay = pacing.delayMs(policy, chatId, parts.getFirst(), group, now);
+        Instant earliest = Instant.ofEpochMilli(quota.earliestAllowed(policy, chatId, now.toEpochMilli()));
         Instant wake = clock.nextActiveAt(now);
         if (wake.isAfter(now)) {
             wake = clock.resumeWithJitter(wake);
@@ -128,6 +155,21 @@ public class DisguiseService {
         Instant first = now.plusMillis(baseDelay);
         if (earliest.isAfter(first)) {
             first = earliest;
+        }
+
+        // 硬上限：配额排队算出来的等待不能超过 maxFirstDelayMs（默认 15 秒）。
+        // 一个活跃群很容易撞上「每分钟 N 条」的配额，不封顶的话回复会被顺延到一分钟以后，人早聊别的话题了。
+        // 注意顺序：先压上限，再让作息/免打扰往后推——半夜不发就是半夜不发。
+        Instant hardCap = now.plusMillis(Math.max(1000, policy.getMaxFirstDelayMs()));
+        boolean capped = false;
+        if (first.isAfter(hardCap)) {
+            capped = true;
+            if (!dryRun) {
+                log.info("伪装层排期被硬上限截断：{} 秒 → {} 秒（chat={}，配额排队导致）",
+                        Duration.between(now, first).toSeconds(),
+                        Duration.between(now, hardCap).toSeconds(), chatId);
+            }
+            first = hardCap;
         }
         if (wake.isAfter(first)) {
             first = wake;
@@ -148,7 +190,7 @@ public class DisguiseService {
         for (int i = 0; i < parts.size(); i++) {
             String text = parts.get(i);
             if (i > 0) {
-                cursor = cursor.plusMillis(pacing.partGapMs(chatId, text));
+                cursor = cursor.plusMillis(pacing.partGapMs(policy, chatId, text));
             }
             scheduled.add(new PlannedPart(text, cursor));
             if (!dryRun) {
@@ -164,7 +206,8 @@ public class DisguiseService {
             remember(decision);
         }
         return new Plan(List.copyOf(scheduled), "SEND",
-                "延迟 " + deferSeconds + " 秒，分 " + scheduled.size() + " 条");
+                "延迟 " + deferSeconds + " 秒，分 " + scheduled.size() + " 条"
+                        + (capped ? "（配额排队已压到上限）" : ""));
     }
 
     public boolean isRepetitive(String chatId, String text) {
@@ -177,7 +220,16 @@ public class DisguiseService {
 
     /** 追加到系统提示词的口语约束。 */
     public String promptSuffix() {
-        if (!properties.isPromptEnabled() || !properties.isEnabled()) {
+        return promptSuffix(properties);
+    }
+
+    /** 按该会话生效的策略决定是否追加口语约束（有的群不需要这段）。 */
+    public String promptSuffix(String chatId) {
+        return promptSuffix(policies.forChat(chatId));
+    }
+
+    private String promptSuffix(DisguiseProperties policy) {
+        if (!policy.isPromptEnabled() || !properties.isEnabled()) {
             return "";
         }
         return """
@@ -236,8 +288,8 @@ public class DisguiseService {
         }
     }
 
-    private String capTotal(String text) {
-        int max = Math.max(60, properties.getMaxReplyChars());
+    private String capTotal(DisguiseProperties policy, String text) {
+        int max = Math.max(60, policy.getMaxReplyChars());
         if (text.length() <= max) {
             return text;
         }

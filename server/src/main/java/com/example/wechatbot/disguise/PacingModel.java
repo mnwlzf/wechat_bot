@@ -30,31 +30,41 @@ public class PacingModel {
     }
 
     public long delayMs(String chatId, String text, boolean group, Instant now) {
+        return delayMs(properties, chatId, text, group, now);
+    }
+
+    /**
+     * 按该会话生效的发信策略计算延迟：不同群可以有不同的读消息延迟、手速与上限。
+     *
+     * @param policy 该群的生效策略（{@code SendPolicyService.forChat} 的结果），null 时用全局配置
+     */
+    public long delayMs(DisguiseProperties policy, String chatId, String text, boolean group, Instant now) {
+        DisguiseProperties p = policy == null ? properties : policy;
         ThreadLocalRandom random = ThreadLocalRandom.current();
         int length = visibleLength(text);
-        double speed = stableSpeed(chatId);
+        double speed = stableSpeed(p, chatId);
 
         double typing = length / speed * 1000.0;
-        double jitter = clamp(random.nextGaussian() * properties.getTypingJitter(), -0.45, 0.6);
+        double jitter = clamp(random.nextGaussian() * p.getTypingJitter(), -0.45, 0.6);
         typing *= 1.0 + jitter;
 
-        int min = Math.max(300, properties.getReadDelayMinMs());
-        int max = Math.max(min + 1, properties.getReadDelayMaxMs());
+        int min = Math.max(300, p.getReadDelayMinMs());
+        int max = Math.max(min + 1, p.getReadDelayMaxMs());
         double read = min + (max - min) * Math.pow(random.nextDouble(), 2.0);
-        double think = properties.getThinkBaseMs() + Math.min(4500, length * 9.0);
+        double think = p.getThinkBaseMs() + Math.min(4500, length * 9.0);
 
         double total = read + think + typing;
         total *= circadian(now);
         if (group) {
-            total *= Math.max(0.5, properties.getGroupDelayFactor());
+            total *= Math.max(0.5, p.getGroupDelayFactor());
         }
-        if (random.nextDouble() < properties.getLongPauseProbability()) {
-            total += random.nextDouble(15_000, Math.max(16_000, properties.getLongPauseMaxMs()));
+        if (random.nextDouble() < p.getLongPauseProbability()) {
+            total += random.nextDouble(15_000, Math.max(16_000, p.getLongPauseMaxMs()));
         }
-        if (random.nextDouble() < properties.getAwayProbability()) {
-            total += random.nextDouble(properties.getAwayMinMs(), Math.max(properties.getAwayMinMs() + 1, properties.getAwayMaxMs()));
+        if (random.nextDouble() < p.getAwayProbability()) {
+            total += random.nextDouble(p.getAwayMinMs(), Math.max(p.getAwayMinMs() + 1, p.getAwayMaxMs()));
         }
-        long capped = Math.min((long) total, effectiveMaxDelayMs(properties.getMaxDelayMs()));
+        long capped = Math.min((long) total, effectiveMaxDelayMs(p.getMaxDelayMs()));
         return Math.max(800, capped);
     }
 
@@ -64,9 +74,15 @@ public class PacingModel {
 
     /** 两条气泡之间的间隔：手比脑快，通常 1~3 秒。 */
     public long partGapMs(String chatId, String nextPart) {
+        return partGapMs(properties, chatId, nextPart);
+    }
+
+    /** 按该会话生效的策略算气泡间隔。 */
+    public long partGapMs(DisguiseProperties policy, String chatId, String nextPart) {
+        DisguiseProperties p = policy == null ? properties : policy;
         ThreadLocalRandom random = ThreadLocalRandom.current();
-        int min = Math.max(200, properties.getPartGapMinMs());
-        int max = Math.max(min + 1, properties.getPartGapMaxMs());
+        int min = Math.max(200, p.getPartGapMinMs());
+        int max = Math.max(min + 1, p.getPartGapMaxMs());
         double gap = min + (max - min) * random.nextDouble();
         gap += Math.min(1200, visibleLength(nextPart) * 8.0);
         return (long) gap;
@@ -74,8 +90,12 @@ public class PacingModel {
 
     /** 同一个人对同一会话的打字速度稳定在 ±15% 内，避免每条消息速度都不一样。 */
     private double stableSpeed(String chatId) {
+        return stableSpeed(properties, chatId);
+    }
+
+    private double stableSpeed(DisguiseProperties policy, String chatId) {
         double factor = 0.85 + 0.30 * hash01(chatId == null ? "" : chatId);
-        double speed = properties.getCharsPerSecond() * factor;
+        double speed = policy.getCharsPerSecond() * factor;
         return Math.max(1.1, Math.min(9.0, speed));
     }
 

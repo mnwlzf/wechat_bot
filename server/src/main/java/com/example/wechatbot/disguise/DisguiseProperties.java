@@ -55,6 +55,14 @@ public class DisguiseProperties {
     /** 单条消息拟人延迟的配置上限；运行时还会受 30 秒硬上限保护。 */
     private int maxDelayMs = 30000;
 
+    /**
+     * 第一条消息的硬上限（毫秒）：配额排队、打字延迟算出来的等待都不会超过它。
+     *
+     * <p>没有这个上限时，一个活跃群容易撞上「每分钟 3 条」的配额，回复被顺延到 70 秒以后，
+     * 等人看到消息时上下文早就过去了。免打扰/作息（半夜不发）不受这个上限约束。</p>
+     */
+    private int maxFirstDelayMs = 15000;
+
     /** 偶发“去忙别的了”的长停顿概率。 */
     private double longPauseProbability = 0.08;
 
@@ -167,6 +175,8 @@ public class DisguiseProperties {
     public void setThinkBaseMs(int thinkBaseMs) { this.thinkBaseMs = thinkBaseMs; }
     public int getMaxDelayMs() { return maxDelayMs; }
     public void setMaxDelayMs(int maxDelayMs) { this.maxDelayMs = maxDelayMs; }
+    public int getMaxFirstDelayMs() { return maxFirstDelayMs; }
+    public void setMaxFirstDelayMs(int maxFirstDelayMs) { this.maxFirstDelayMs = maxFirstDelayMs; }
     public double getLongPauseProbability() { return longPauseProbability; }
     public void setLongPauseProbability(double longPauseProbability) { this.longPauseProbability = longPauseProbability; }
     public int getLongPauseMaxMs() { return longPauseMaxMs; }

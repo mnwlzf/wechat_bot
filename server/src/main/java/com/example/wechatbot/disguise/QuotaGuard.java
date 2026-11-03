@@ -36,11 +36,16 @@ public class QuotaGuard {
 
     /** 返回该会话允许发送的最早时刻（epoch millis），已可发送则返回 now。 */
     public long earliestAllowed(String chatId, long now) {
+        return earliestAllowed(properties, chatId, now);
+    }
+
+    /** 按该会话生效的策略算配额：某些群可以放宽或收紧频率。 */
+    public long earliestAllowed(DisguiseProperties policy, String chatId, long now) {
         Deque<Long> sends = perChat.computeIfAbsent(chatId == null ? "" : chatId, key -> new ArrayDeque<>());
         long chatEarliest;
         synchronized (sends) {
             prune(sends, now);
-            chatEarliest = earliestFor(sends, now);
+            chatEarliest = earliestFor(policy, sends, now);
         }
         long globalEarliest;
         synchronized (globalLock) {
@@ -80,18 +85,18 @@ public class QuotaGuard {
         }
     }
 
-    private long earliestFor(Deque<Long> sends, long now) {
+    private long earliestFor(DisguiseProperties policy, Deque<Long> sends, long now) {
         long earliest = now;
-        earliest = Math.max(earliest, window(sends, now, MINUTE, properties.getPerMinute()));
-        earliest = Math.max(earliest, window(sends, now, TEN_MINUTES, properties.getPer10Minutes()));
-        earliest = Math.max(earliest, window(sends, now, HOUR, properties.getPerHour()));
-        earliest = Math.max(earliest, window(sends, now, DAY, properties.getPerDay()));
+        earliest = Math.max(earliest, window(sends, now, MINUTE, policy.getPerMinute()));
+        earliest = Math.max(earliest, window(sends, now, TEN_MINUTES, policy.getPer10Minutes()));
+        earliest = Math.max(earliest, window(sends, now, HOUR, policy.getPerHour()));
+        earliest = Math.max(earliest, window(sends, now, DAY, policy.getPerDay()));
 
         if (!sends.isEmpty()) {
             long last = sends.peekLast();
-            earliest = Math.max(earliest, last + Math.max(0, properties.getMinGapMs()));
+            earliest = Math.max(earliest, last + Math.max(0, policy.getMinGapMs()));
         }
-        earliest = Math.max(earliest, burstCooldown(sends, now));
+        earliest = Math.max(earliest, burstCooldown(policy, sends, now));
         return earliest;
     }
 
@@ -106,8 +111,8 @@ public class QuotaGuard {
      * 最近 5 分钟内已经发满 burstSize 条时，强制冷却一段时间。
      * 冷却长度按会话稳定取值，避免每次都在同一秒恢复。
      */
-    private long burstCooldown(Deque<Long> sends, long now) {
-        int burst = Math.max(2, properties.getBurstSize());
+    private long burstCooldown(DisguiseProperties policy, Deque<Long> sends, long now) {
+        int burst = Math.max(2, policy.getBurstSize());
         int recent = 0;
         long oldestRecent = Long.MAX_VALUE;
         for (Long at : sends) {

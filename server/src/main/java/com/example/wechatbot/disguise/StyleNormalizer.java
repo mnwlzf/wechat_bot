@@ -26,6 +26,11 @@ public class StyleNormalizer {
     }
 
     public String normalize(String raw) {
+        return normalize(properties, raw);
+    }
+
+    /** 按该会话生效的策略清洗（不同群可以有不同的表情上限/是否洗文风）。 */
+    public String normalize(DisguiseProperties policy, String raw) {
         if (raw == null) {
             return "";
         }
@@ -35,10 +40,10 @@ public class StyleNormalizer {
             return "";
         }
         text = stripMarkdown(text);
-        if (properties.isStyleEnabled()) {
+        if (policy.isStyleEnabled()) {
             text = stripAiPhrases(text);
             text = polish(text);
-            text = limitEmoji(text, Math.max(0, properties.getEmojiLimit()));
+            text = limitEmoji(text, Math.max(0, policy.getEmojiLimit()));
         }
         return finish(text);
     }

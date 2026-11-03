@@ -87,7 +87,9 @@ public final class AdminDtos {
             OffsetDateTime lastMessageAt,
             boolean botPaused,
             UUID promptTemplateId,
-            String promptTemplateName
+            String promptTemplateName,
+            /** 会话实际生效的人设：未绑定时为「默认人设（默认）」，都没有则为 null。 */
+            String effectivePersonaName
     ) {}
 
     public record TakeoverRequest(boolean paused) {}
@@ -105,7 +107,154 @@ public final class AdminDtos {
             String name,
             String description,
             String content,
+            /** 是否为全局默认人设（会话未单独指定时回退到它）。 */
+            boolean defaultPersona,
+            /** 内置人设（例如「大肥鱼」），可编辑但会被标记出来。 */
+            boolean builtin,
+            String builtinKey,
             OffsetDateTime updatedAt
+    ) {}
+
+    public record MemoryInput(
+            @NotBlank @Size(max = 180) String chatId,
+            @Size(max = 180) String chatName,
+            @NotBlank @Size(max = 2000) String content,
+            Boolean enabled
+    ) {}
+
+    public record MemoryUpdateInput(
+            @Size(max = 2000) String content,
+            Boolean enabled
+    ) {}
+
+    public record MemoryView(
+            UUID id,
+            String chatId,
+            String chatName,
+            String kind,
+            String source,
+            String content,
+            boolean enabled,
+            int messageCount,
+            OffsetDateTime coveredUntil,
+            OffsetDateTime createdAt,
+            OffsetDateTime updatedAt
+    ) {}
+
+    /** 发信策略的编辑入参：null 表示该项沿用下一层（默认策略 / 环境变量）。 */
+    public record SendPolicyInput(
+            Integer readDelayMinMs,
+            Integer readDelayMaxMs,
+            Integer maxDelayMs,
+            Boolean splitEnabled,
+            Integer maxParts,
+            Integer maxPartChars,
+            Integer perMinute,
+            Integer per10Minutes,
+            Integer perHour,
+            Integer perDay,
+            Integer minGapMs,
+            Integer emojiLimit,
+            Double dropRate,
+            Boolean promptEnabled,
+            Boolean enabled
+    ) {}
+
+    public record SendPolicyView(
+            UUID id,
+            String chatId,
+            String chatName,
+            boolean isDefault,
+            boolean enabled,
+            Integer readDelayMinMs,
+            Integer readDelayMaxMs,
+            Integer maxDelayMs,
+            Boolean splitEnabled,
+            Integer maxParts,
+            Integer maxPartChars,
+            Integer perMinute,
+            Integer per10Minutes,
+            Integer perHour,
+            Integer perDay,
+            Integer minGapMs,
+            Integer emojiLimit,
+            Double dropRate,
+            Boolean promptEnabled,
+            OffsetDateTime updatedAt
+    ) {}
+
+    /** 合并三层之后的生效值；inherited=true 表示这个会话没有单独配置。 */
+    public record SendPolicyEffective(
+            int readDelayMinMs,
+            int readDelayMaxMs,
+            int maxDelayMs,
+            boolean splitEnabled,
+            int maxParts,
+            int maxPartChars,
+            int perMinute,
+            int per10Minutes,
+            int perHour,
+            int perDay,
+            int minGapMs,
+            int emojiLimit,
+            double dropRate,
+            boolean promptEnabled,
+            boolean inherited
+    ) {}
+
+    public record SendPolicyOverview(
+            SendPolicyEffective defaultPolicy,
+            SendPolicyView defaultRow,
+            List<SendPolicyView> overrides
+    ) {}
+
+    public record ChatSendPolicy(
+            SendPolicyEffective effective,
+            SendPolicyView override
+    ) {}
+
+    /** 回复策略的编辑入参：null 表示该项沿用下一层（默认策略 / 机器人配置）。 */
+    public record ReplyPolicyInput(
+            String mode,
+            String wakeWords,
+            Double randomRate,
+            Integer humanCooldownSeconds,
+            Boolean enabled
+    ) {}
+
+    public record ReplyPolicyView(
+            UUID id,
+            String chatId,
+            String chatName,
+            boolean isDefault,
+            boolean enabled,
+            String mode,
+            String wakeWords,
+            Double randomRate,
+            Integer humanCooldownSeconds,
+            OffsetDateTime updatedAt
+    ) {}
+
+    /** 合并三层之后的生效策略；inherited=true 表示这个群没有单独配置。 */
+    public record ReplyPolicyEffective(
+            String mode,
+            String wakeWords,
+            double randomRate,
+            int humanCooldownSeconds,
+            String source,
+            boolean inherited
+    ) {}
+
+    public record ReplyPolicyOverview(
+            ReplyPolicyEffective defaultPolicy,
+            ReplyPolicyView defaultRow,
+            List<ReplyPolicyView> overrides,
+            String botWakeWords
+    ) {}
+
+    public record ChatReplyPolicy(
+            ReplyPolicyEffective effective,
+            ReplyPolicyView override
     ) {}
 
     public record ScheduledMessageInput(
@@ -113,7 +262,12 @@ public final class AdminDtos {
             @NotBlank @Size(max = 180) String chatId,
             @Size(max = 180) String chatName,
             @NotBlank @Size(max = 5000) String content,
-            @NotNull OffsetDateTime scheduledAt
+            @NotNull OffsetDateTime scheduledAt,
+            /** NONE / DAILY / WEEKLY */
+            @Size(max = 20) String repeatRule,
+            OffsetDateTime repeatUntil,
+            /** 按行拆成多条依次发送 */
+            Boolean splitLines
     ) {}
 
     public record ScheduledMessageView(
@@ -123,6 +277,10 @@ public final class AdminDtos {
             String chatName,
             String content,
             OffsetDateTime scheduledAt,
+            String repeatRule,
+            OffsetDateTime repeatUntil,
+            boolean splitLines,
+            int sentCount,
             String status,
             int attempts,
             String lastError,

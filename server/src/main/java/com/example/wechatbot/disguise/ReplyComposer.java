@@ -22,14 +22,19 @@ public class ReplyComposer {
     }
 
     public List<String> split(String text) {
+        return split(properties, text);
+    }
+
+    /** 按该会话生效的策略分条（不同群可以有不同的条数与单条字数）。 */
+    public List<String> split(DisguiseProperties policy, String text) {
         if (text == null || text.isBlank()) {
             return List.of();
         }
         String value = text.strip();
-        if (!properties.isSplitEnabled()) {
+        if (!policy.isSplitEnabled()) {
             return List.of(value);
         }
-        int maxPart = Math.max(20, properties.getMaxPartChars());
+        int maxPart = Math.max(20, policy.getMaxPartChars());
 
         List<String> paragraphs = new ArrayList<>();
         for (String line : value.split("\n+")) {
@@ -57,7 +62,7 @@ public class ReplyComposer {
         if (parts.isEmpty()) {
             return List.of();
         }
-        return cap(parts);
+        return cap(policy, parts);
     }
 
     /** 段内按句号/问号/感叹号/分号打包，超长句再在逗号处硬切。 */
@@ -97,8 +102,8 @@ public class ReplyComposer {
         return parts;
     }
 
-    private List<String> cap(List<String> parts) {
-        int maxParts = Math.max(1, properties.getMaxParts());
+    private List<String> cap(DisguiseProperties policy, List<String> parts) {
+        int maxParts = Math.max(1, policy.getMaxParts());
         if (parts.size() <= maxParts) {
             return List.copyOf(parts);
         }
