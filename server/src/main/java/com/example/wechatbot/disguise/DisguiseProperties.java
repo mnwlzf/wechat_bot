@@ -107,7 +107,8 @@ public class DisguiseProperties {
 
     private int globalPerHour = 40;
 
-    private int globalPerDay = 220;
+    /** 账号级每日上限；0 或负数表示不限（默认不限，只看每小时）。 */
+    private int globalPerDay = 0;
 
     /** 同一会话两条消息之间的最小间隔。 */
     private int minGapMs = 1200;

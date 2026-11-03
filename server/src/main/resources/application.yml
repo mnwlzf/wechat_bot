@@ -231,7 +231,7 @@ app:
     per-hour: ${DISGUISE_PER_HOUR:20}
     per-day: ${DISGUISE_PER_DAY:120}
     global-per-hour: ${DISGUISE_GLOBAL_PER_HOUR:40}
-    global-per-day: ${DISGUISE_GLOBAL_PER_DAY:220}
+    global-per-day: ${DISGUISE_GLOBAL_PER_DAY:0}
     min-gap-ms: ${DISGUISE_MIN_GAP_MS:1200}
     burst-size: ${DISGUISE_BURST_SIZE:5}
     burst-cooldown-min-ms: ${DISGUISE_BURST_COOLDOWN_MIN_MS:90000}
