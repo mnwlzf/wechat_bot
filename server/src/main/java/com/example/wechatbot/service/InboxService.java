@@ -1,6 +1,7 @@
 package com.example.wechatbot.service;
 
 import com.example.wechatbot.domain.*;
+import com.example.wechatbot.flow.FlowTraceService;
 import com.example.wechatbot.repository.BotConfigRepository;
 import com.example.wechatbot.repository.ConversationRepository;
 import com.example.wechatbot.repository.MessageLogRepository;
@@ -201,11 +202,18 @@ public class InboxService {
             }
         }
         inbound = messageRepository.save(inbound);
+        FlowTraceService.mark(FlowTraceService.Stage.RECEIVED, conversation.getChatId(),
+                conversation.getChatName(),
+                (conversation.getChatType() == ChatType.GROUP ? "群里" : "私聊")
+                        + (shouldReply ? "的新消息，准备回" : "的新消息（按策略不回）"),
+                content);
 
         if (conversation.isBotPaused()) {
             inbound.setStatus(MessageStatus.IGNORED);
             inbound.setErrorMessage("人工接管中，未自动回复");
             messageRepository.save(inbound);
+            FlowTraceService.mark(FlowTraceService.Stage.SKIP, conversation.getChatId(),
+                    conversation.getChatName(), "人工接管中，不自动回复", content);
             return new AgentDtos.EventAccepted("PAUSED", "人工接管中，未自动回复", conversation.getId());
         }
 
@@ -232,6 +240,8 @@ public class InboxService {
                     ? "媒体消息按策略仅记录（replyMode=" + mediaMode + "）"
                     : (decisionNote == null ? "未触发回复" : decisionNote));
             messageRepository.save(inbound);
+            FlowTraceService.mark(FlowTraceService.Stage.SKIP, conversation.getChatId(),
+                    conversation.getChatName(), "没回：" + inbound.getErrorMessage(), content);
             return new AgentDtos.EventAccepted("IGNORED", inbound.getErrorMessage(), conversation.getId());
         }
 

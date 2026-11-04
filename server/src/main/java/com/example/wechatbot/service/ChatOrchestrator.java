@@ -8,6 +8,7 @@ import com.example.wechatbot.asr.VoiceTranscriber;
 import com.example.wechatbot.disguise.DisguiseProperties;
 import com.example.wechatbot.disguise.DisguiseService;
 import com.example.wechatbot.domain.*;
+import com.example.wechatbot.flow.FlowTraceService;
 import com.example.wechatbot.repository.BotConfigRepository;
 import com.example.wechatbot.repository.ConversationRepository;
 import com.example.wechatbot.repository.MessageLogRepository;
@@ -172,7 +173,16 @@ public class ChatOrchestrator {
                 if (human) {
                     context = withHumanHint(context);
                 }
-                reply = llmGateway.chat(bot, context);
+                long llmStart = System.currentTimeMillis();
+                FlowTraceService.mark(FlowTraceService.Stage.LLM, conversation.getChatId(),
+                        conversation.getChatName(), "请求模型", null);
+                try {
+                    reply = llmGateway.chat(bot, context);
+                } finally {
+                    FlowTraceService.mark(FlowTraceService.Stage.LLM, conversation.getChatId(),
+                            conversation.getChatName(), "模型返回", null, null,
+                            System.currentTimeMillis() - llmStart);
+                }
                 if (human && isNoReply(reply.content())) {
                     markSkipped(inbound, "拟人模式：模型判断这条不需要回复");
                     return null;
@@ -291,6 +301,11 @@ public class ChatOrchestrator {
             messageRepository.save(skipped);
             log.info("伪装层未发送，conversation={} decision={} note={}",
                     conversationId, plan.decision(), plan.note());
+            FlowTraceService.clearWaiting(conversation.getChatId(), FlowTraceService.Stage.QUOTA);
+            FlowTraceService.clearWaiting(conversation.getChatId(), FlowTraceService.Stage.PACING);
+            FlowTraceService.mark(FlowTraceService.Stage.SKIP, conversation.getChatId(),
+                    conversation.getChatName(),
+                    "伪装层没发：" + plan.decision() + "（" + plan.note() + "）", reply.content());
             conversation.setLastMessage(abbreviate(reply.content(), 500));
             conversation.setLastMessageAt(OffsetDateTime.now());
             conversationRepository.save(conversation);
@@ -312,6 +327,20 @@ public class ChatOrchestrator {
                 outbox.setNextAttemptAt(OffsetDateTime.ofInstant(part.sendAt(), zone()));
                 outboxRepository.save(outbox);
             }
+        }
+
+        if (enqueueOutbox && !parts.isEmpty()) {
+            // 伪装层已经排好期了：等配额 / 打字延迟那一层结束，接下来是等发送队列到点
+            FlowTraceService.clearWaiting(conversation.getChatId(), FlowTraceService.Stage.QUOTA);
+            FlowTraceService.clearWaiting(conversation.getChatId(), FlowTraceService.Stage.PACING);
+            long waitMs = Math.max(0, parts.getFirst().sendAt().toEpochMilli() - System.currentTimeMillis());
+            FlowTraceService.mark(FlowTraceService.Stage.OUTBOX, conversation.getChatId(),
+                    conversation.getChatName(),
+                    "进发送队列：" + parts.size() + " 条，第一条 " + (waitMs / 1000.0) + " 秒后发",
+                    plan.joinedText(), waitMs, null);
+            FlowTraceService.waiting(FlowTraceService.Stage.OUTBOX, conversation.getChatId(),
+                    conversation.getChatName(), "等发送队列到点（" + parts.size() + " 条）",
+                    parts.getFirst().sendAt());
         }
 
         String joined = plan.dropped() ? reply.content() : plan.joinedText();

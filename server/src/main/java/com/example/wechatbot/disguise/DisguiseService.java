@@ -1,6 +1,7 @@
 package com.example.wechatbot.disguise;
 
 import com.example.wechatbot.domain.ChatType;
+import com.example.wechatbot.flow.FlowTraceService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -126,9 +127,13 @@ public class DisguiseService {
                 : 0L;
         long cap = Math.max(1000, policy.getMaxFirstDelayMs());
         Instant first = now.plusMillis(Math.min(Math.max(0L, baseDelay), cap));
-        Instant earliest = Instant.ofEpochMilli(quota.earliestAllowed(policy, chatId, now.toEpochMilli()));
+        QuotaGuard.Explanation explanation = quota.explain(policy, chatId, now.toEpochMilli());
+        Instant earliest = Instant.ofEpochMilli(explanation.earliest());
         if (earliest.isAfter(first)) {
             first = now.plusMillis(cap);
+            FlowTraceService.mark(FlowTraceService.Stage.QUOTA, chatId, null,
+                    "配额排队：" + explanation.reason() + "（原样回复已压到上限）",
+                    null, explanation.waitMs(), null);
         }
         quota.record(chatId, first.toEpochMilli());
         return new Plan(List.of(new PlannedPart(text, first)), "SEND", "原样单条发送");
@@ -172,7 +177,8 @@ public class DisguiseService {
 
         boolean group = chatType == ChatType.GROUP;
         long baseDelay = pacing.delayMs(policy, chatId, parts.getFirst(), group, now);
-        Instant earliest = Instant.ofEpochMilli(quota.earliestAllowed(policy, chatId, now.toEpochMilli()));
+        QuotaGuard.Explanation explanation = quota.explain(policy, chatId, now.toEpochMilli());
+        Instant earliest = Instant.ofEpochMilli(explanation.earliest());
         Instant wake = clock.nextActiveAt(now);
         if (wake.isAfter(now)) {
             wake = clock.resumeWithJitter(wake);
@@ -230,10 +236,34 @@ public class DisguiseService {
             repetition.record(chatId, styled);
             planned.incrementAndGet();
             remember(decision);
+            traceQueue(chatId, now, explanation, baseDelay, capped, first, deferSeconds, scheduled.size());
         }
         return new Plan(List.copyOf(scheduled), "SEND",
                 "延迟 " + deferSeconds + " 秒，分 " + scheduled.size() + " 条"
                         + (capped ? "（配额排队已压到上限）" : ""));
+    }
+
+    /**
+     * 把「这条为什么没马上发」写进实时流水：打字延迟、配额排队（含是哪条上限）、
+     * 还是被硬上限截断了。管理端「实时流水」页就是靠这些看排队的。
+     */
+    private void traceQueue(String chatId, Instant now, QuotaGuard.Explanation explanation,
+                            long baseDelay, boolean capped, Instant first, long deferSeconds, int parts) {
+        if (explanation.waitMs() > 0) {
+            String reason = explanation.reason() + (capped ? "（已压到上限）" : "");
+            FlowTraceService.mark(FlowTraceService.Stage.QUOTA, chatId, null,
+                    "配额排队：" + reason + "，顺延 " + (deferSeconds == 0 ? 1 : deferSeconds) + " 秒",
+                    null, explanation.waitMs(), null);
+            FlowTraceService.waiting(FlowTraceService.Stage.QUOTA, chatId, null, reason, first);
+        } else {
+            FlowTraceService.mark(FlowTraceService.Stage.PACING, chatId, null,
+                    "打字延迟 " + Math.max(0, baseDelay / 100) / 10.0 + " 秒后发第一条",
+                    null, baseDelay, null);
+        }
+        if (deferSeconds > 20) {
+            FlowTraceService.waiting(FlowTraceService.Stage.PACING, chatId, null,
+                    "共 " + parts + " 条，顺延 " + deferSeconds + " 秒", first);
+        }
     }
 
     public boolean isRepetitive(String chatId, String text) {

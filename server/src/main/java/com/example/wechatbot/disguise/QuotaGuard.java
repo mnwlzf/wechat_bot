@@ -55,6 +55,77 @@ public class QuotaGuard {
         return Math.max(now, Math.max(chatEarliest, globalEarliest));
     }
 
+    /** 排队原因，管理端「实时流水」用来说明「为什么这条还没发」。 */
+    public record Explanation(long earliest, long waitMs, String reason, String limit) {}
+
+    /**
+     * 和 {@link #earliestAllowed} 同样的规则，但同时告诉调用方「是谁把它压住的」：
+     * 每分钟上限、最小间隔、爆发冷却、还是全局每小时上限。
+     */
+    public Explanation explain(DisguiseProperties policy, String chatId, long now) {
+        Deque<Long> sends = perChat.computeIfAbsent(chatId == null ? "" : chatId, key -> new ArrayDeque<>());
+        long chatEarliest;
+        String chatReason = null;
+        String chatLimit = null;
+        synchronized (sends) {
+            prune(sends, now);
+            chatEarliest = now;
+            long[][] windows = {
+                    {MINUTE, policy.getPerMinute()},
+                    {TEN_MINUTES, policy.getPer10Minutes()},
+                    {HOUR, policy.getPerHour()},
+                    {DAY, policy.getPerDay()},
+            };
+            String[] labels = {"每分钟上限", "10 分钟上限", "每小时上限", "每天上限"};
+            for (int i = 0; i < windows.length; i++) {
+                long boundary = window(sends, now, windows[i][0], (int) windows[i][1]);
+                if (boundary > chatEarliest) {
+                    chatEarliest = boundary;
+                    chatReason = labels[i] + " " + windows[i][1] + " 条";
+                    chatLimit = labels[i];
+                }
+            }
+            if (!sends.isEmpty()) {
+                long gap = sends.peekLast() + Math.max(0, policy.getMinGapMs());
+                if (gap > chatEarliest) {
+                    chatEarliest = gap;
+                    chatReason = "最小发送间隔 " + Math.max(0, policy.getMinGapMs()) + "ms";
+                    chatLimit = "最小发送间隔";
+                }
+            }
+            long burst = burstCooldown(policy, sends, now);
+            if (burst > chatEarliest) {
+                chatEarliest = burst;
+                chatReason = "连发太快，强制冷却";
+                chatLimit = "爆发冷却";
+            }
+        }
+        long globalEarliest;
+        String globalReason = null;
+        synchronized (globalLock) {
+            prune(global, now);
+            globalEarliest = now;
+            long[][] windows = {
+                    {HOUR, properties.getGlobalPerHour()},
+                    {DAY, properties.getGlobalPerDay()},
+            };
+            String[] labels = {"全局每小时上限", "全局每天上限"};
+            for (int i = 0; i < windows.length; i++) {
+                long boundary = window(global, now, windows[i][0], (int) windows[i][1]);
+                if (boundary > globalEarliest) {
+                    globalEarliest = boundary;
+                    globalReason = labels[i] + " " + windows[i][1] + " 条";
+                }
+            }
+        }
+        long earliest = Math.max(now, Math.max(chatEarliest, globalEarliest));
+        boolean globalWins = globalEarliest > chatEarliest;
+        String reason = globalWins ? globalReason : chatReason;
+        String limit = globalWins ? "账号级上限" : chatLimit;
+        return new Explanation(earliest, Math.max(0L, earliest - now),
+                reason == null ? "无需排队" : reason, limit);
+    }
+
     /** 记录一次（可以是未来时刻的）发送计划。 */
     public void record(String chatId, long atMillis) {
         Deque<Long> sends = perChat.computeIfAbsent(chatId == null ? "" : chatId, key -> new ArrayDeque<>());

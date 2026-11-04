@@ -485,6 +485,54 @@ export interface DisguiseDecision {
   preview: string
 }
 
+/** 实时流水的一个阶段。 */
+export type FlowStage =
+  | 'RECEIVED'
+  | 'SKIP'
+  | 'BUFFER'
+  | 'MERGE'
+  | 'QUOTA'
+  | 'PACING'
+  | 'LLM'
+  | 'OUTBOX'
+  | 'SENT'
+  | 'FAILED'
+
+export interface FlowEvent {
+  seq: number
+  at: string
+  stage: FlowStage
+  stageLabel: string
+  chatId?: string | null
+  chatName?: string | null
+  detail: string
+  /** 因为排队/延迟产生的等待（毫秒） */
+  waitMs?: number | null
+  /** 这一步本身的耗时，比如模型调用（毫秒） */
+  durationMs?: number | null
+  preview?: string | null
+}
+
+/** 当前正在等的东西：某个会话卡在哪个阶段、为什么、等到什么时候。 */
+export interface FlowWait {
+  chatId?: string | null
+  chatName?: string | null
+  stage: FlowStage
+  stageLabel: string
+  reason: string
+  since: string
+  until?: string | null
+}
+
+export interface FlowSnapshot {
+  generatedAt: string
+  cursor: number
+  counters: Record<FlowStage, number>
+  waiting: FlowWait[]
+  events: FlowEvent[]
+  capacity: number
+}
+
 export interface DisguiseStatus {
   enabled: boolean
   state: string

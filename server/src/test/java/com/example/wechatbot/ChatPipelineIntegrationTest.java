@@ -14,6 +14,7 @@ import com.example.wechatbot.repository.ConversationRepository;
 import com.example.wechatbot.repository.MessageLogRepository;
 import com.example.wechatbot.repository.ModelProviderRepository;
 import com.example.wechatbot.repository.OutboxMessageRepository;
+import com.example.wechatbot.flow.FlowTraceService;
 import com.example.wechatbot.service.ChatOrchestrator;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
@@ -26,6 +27,7 @@ import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.OffsetDateTime;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -39,6 +41,7 @@ class ChatPipelineIntegrationTest {
     @Autowired private OutboxMessageRepository outboxRepository;
     @Autowired private SecretCipher secretCipher;
     @Autowired private ChatOrchestrator chatOrchestrator;
+    @Autowired private FlowTraceService flowTrace;
 
     private HttpServer server;
 
@@ -110,6 +113,13 @@ class ChatPipelineIntegrationTest {
         assertThat(messageRepository.count()).isEqualTo(2);
         assertThat(outboxRepository.count()).isEqualTo(1);
         assertThat(outboxRepository.findAll().getFirst().getContent()).isEqualTo("你好，我是测试机器人");
+
+        // 实时流水：这一轮必须能在「流水」里看到调模型和进发送队列两步
+        List<FlowTraceService.Event> events = flowTrace.snapshot(0, 200).events();
+        assertThat(events).anyMatch(event -> "LLM".equals(event.stage())
+                && event.chatId().equals("test-chat"));
+        assertThat(events).anyMatch(event -> "OUTBOX".equals(event.stage())
+                && event.detail().contains("进发送队列"));
 
         MessageLog debugInbound = new MessageLog();
         debugInbound.setConversationId(conversation.getId());

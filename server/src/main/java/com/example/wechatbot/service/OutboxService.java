@@ -3,6 +3,7 @@ package com.example.wechatbot.service;
 import com.example.wechatbot.common.ApiException;
 import com.example.wechatbot.domain.OutboxMessage;
 import com.example.wechatbot.domain.OutboxStatus;
+import com.example.wechatbot.flow.FlowTraceService;
 import com.example.wechatbot.repository.OutboxMessageRepository;
 import com.example.wechatbot.web.dto.AgentDtos;
 import org.springframework.data.domain.PageRequest;
@@ -107,6 +108,21 @@ public class OutboxService {
             }
         }
         repository.save(message);
+        // 实时流水：让管理端看得到「已经发到微信了 / 又失败了第几次」
+        if (message.getStatus() == OutboxStatus.SENT) {
+            FlowTraceService.clearWaiting(message.getChatId(), FlowTraceService.Stage.OUTBOX);
+            FlowTraceService.mark(FlowTraceService.Stage.SENT, message.getChatId(), null,
+                    "已发出", message.getContent());
+        } else if (message.getStatus() == OutboxStatus.FAILED) {
+            FlowTraceService.clearWaiting(message.getChatId(), FlowTraceService.Stage.OUTBOX);
+            FlowTraceService.mark(FlowTraceService.Stage.FAILED, message.getChatId(), null,
+                    "发送失败（" + message.getAttempts() + " 次）：" + message.getLastError(),
+                    message.getContent());
+        } else {
+            FlowTraceService.waiting(FlowTraceService.Stage.OUTBOX, message.getChatId(), null,
+                    "发送失败，等第 " + (message.getAttempts() + 1) + " 次重试",
+                    message.getNextAttemptAt() == null ? null : message.getNextAttemptAt().toInstant());
+        }
     }
 
     /**

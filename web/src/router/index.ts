@@ -56,11 +56,18 @@ const router = createRouter({
           name: 'reply-policies',
           component: () => import('@/views/ReplyPolicyView.vue'),
           meta: { title: '回复策略' },
-        },        {
+        },
+        {
           path: 'conversations',
           name: 'conversations',
           component: () => import('@/views/ConversationsView.vue'),
           meta: { title: '会话记录' },
+        },
+        {
+          path: 'flow',
+          name: 'flow',
+          component: () => import('@/views/FlowView.vue'),
+          meta: { title: '实时流水' },
         },
         {
           path: 'rules',

@@ -1,6 +1,7 @@
 package com.example.wechatbot.service;
 
 import com.example.wechatbot.config.ReplyProperties;
+import com.example.wechatbot.flow.FlowTraceService;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -89,6 +90,7 @@ public class ReplyDispatcher {
     public void submit(String chatId, Runnable generate, Runnable superseded) {
         String key = chatId == null || chatId.isBlank() ? "default" : chatId;
         if (!properties.isEnabled()) {
+            FlowTraceService.clearWaiting(key, FlowTraceService.Stage.BUFFER);
             runSerialized(key, new AtomicBoolean(true), generate);
             return;
         }
@@ -108,11 +110,16 @@ public class ReplyDispatcher {
                 // 已经排上队的那次生成也一并作废：合并后的消息只当上下文，不再单独回
                 previous.alive().set(false);
                 notifySuperseded(key, previous);
+                FlowTraceService.mark(FlowTraceService.Stage.MERGE, key, null,
+                        "新消息来了，这一条并进下一轮回复", null);
             }
             // 攒够 maxWait 就立刻回；否则再等 debounce，看还有没有新消息
             long wait = Math.min(debounce, Math.max(0, maxWait - (now - firstAt)));
             ScheduledFuture<?> future = timer.schedule(
                     () -> fire(key, seq, alive, generate), wait, TimeUnit.MILLISECONDS);
+            FlowTraceService.waiting(FlowTraceService.Stage.BUFFER, key, null,
+                    "等群里安静下来（" + (wait / 1000.0) + " 秒）",
+                    java.time.Instant.ofEpochMilli(now + wait));
             return new Pending(seq, future, firstAt, superseded, alive);
         });
     }
@@ -126,6 +133,7 @@ public class ReplyDispatcher {
             log.debug("这次生成已被后续消息合并，跳过: chat={}", key);
             return;
         }
+        FlowTraceService.clearWaiting(key, FlowTraceService.Stage.BUFFER);
         runSerialized(key, alive, generate);
     }
 

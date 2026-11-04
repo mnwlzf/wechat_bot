@@ -14,6 +14,7 @@ import {
   Operation,
   Promotion,
   Setting,
+  Sort,
   SwitchButton,
   Timer,
   TrendCharts,
@@ -76,6 +77,9 @@ function logout() {
         </el-menu-item>
         <el-menu-item index="/conversations">
           <el-icon><ChatDotRound /></el-icon><span>会话记录</span>
+        </el-menu-item>
+        <el-menu-item index="/flow">
+          <el-icon><Sort /></el-icon><span>实时流水</span>
         </el-menu-item>
         <el-menu-item index="/rules">
           <el-icon><Promotion /></el-icon><span>自动回复</span>

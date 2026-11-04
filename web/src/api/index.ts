@@ -18,6 +18,7 @@ import type {
   DisguiseStatus,
   FailedOutbox,
   FilterPolicyInput,
+  FlowSnapshot,
   HookStatus,
   HookSession,
   HookContact,
@@ -126,6 +127,11 @@ export const adminApi = {
       `/api/admin/wechat/chats/${encodeURIComponent(chatId)}/alias`,
       { name },
     )
+    return data
+  },
+  /** 实时流水：一条消息进来→排队→调模型→发出去的每一步（增量拉取，since 传上次的 cursor）。 */
+  async flow(since = 0, limit = 120) {
+    const { data } = await http.get<FlowSnapshot>('/api/admin/flow', { params: { since, limit } })
     return data
   },
   async messages(conversationId: string, page = 0, size = 200) {

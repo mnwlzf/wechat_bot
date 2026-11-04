@@ -107,6 +107,7 @@ $headers = @{ Authorization = "Bearer dev-admin-token" }
 | GET | `/api/admin/dashboard` | 仪表盘统计 |
 | GET | `/api/admin/conversations` | 会话分页列表 |
 | GET | `/api/admin/conversations/{id}/messages` | 会话消息 |
+| GET | `/api/admin/flow` | 实时流水：`?since=<游标>&limit=120`，返回排队中的会话 + 增量事件 |
 | GET/POST/PUT/DELETE | `/api/admin/providers` | 模型提供方 |
 | GET | `/api/admin/providers/bootstrap` | 本次启动的环境变量引导结果（密钥掩码） |
 | POST | `/api/admin/providers/{id}/test` | 模型连通测试（主 Key 失败会自动用备用 Key） |
@@ -348,6 +349,39 @@ POST /api/admin/search-settings/test
 ```
 
 敏感词过滤：`PUT /api/admin/settings/filter`，请求体 `{"bannedWords":["违禁"],"mode":"rewrite"}`。`mode` 取 `off`（不改动）/ `rewrite`（\* 遮蔽）/ `block`（该条回复不发送，写入 `IGNORED` 记录）。
+
+### 实时流水
+
+```http
+GET /api/admin/flow?since=0&limit=120
+```
+
+```json
+{
+  "generatedAt": "2026-11-04T15:22:50.120Z",
+  "cursor": 1287,
+  "capacity": 400,
+  "counters": { "RECEIVED": 42, "SKIP": 5, "BUFFER": 0, "MERGE": 3, "QUOTA": 6,
+                "PACING": 30, "LLM": 37, "OUTBOX": 37, "SENT": 35, "FAILED": 0 },
+  "waiting": [
+    { "chatId": "49878296302@chatroom", "chatName": "城南客户群", "stage": "QUOTA",
+      "stageLabel": "配额排队", "reason": "每分钟上限 3 条",
+      "since": "2026-11-04T15:22:37.010Z", "until": "2026-11-04T15:22:49.010Z" }
+  ],
+  "events": [
+    { "seq": 1287, "at": "2026-11-04T15:22:49.900Z", "stage": "OUTBOX", "stageLabel": "进发送队列",
+      "chatId": "49878296302@chatroom", "chatName": "城南客户群",
+      "detail": "进发送队列：2 条，第一条 0.8 秒后发", "waitMs": 800, "durationMs": null,
+      "preview": "这个周末有人去爬山吗" }
+  ]
+}
+```
+
+- `since` 传上次返回的 `cursor` 即只取新事件（管理端 1.5 秒轮询一次，增量追加，列表不跳动）
+- 阶段固定为 `RECEIVED` / `SKIP` / `BUFFER` / `MERGE` / `QUOTA` / `PACING` / `LLM` / `OUTBOX` / `SENT` / `FAILED`
+- `waitMs` 是排队/延迟时长，`durationMs` 是这一步本身耗时（目前只有模型调用有）
+- `waiting` 只含「还在等」的会话，过期的自动消失；`QUOTA` 的 `reason` 会写明是哪条上限（每分钟 / 每天 / 最小间隔 / 连发冷却 / 全局上限）
+- 全部在内存里：环形缓冲 400 条，重启即清空，不落库、不影响回复链路
 
 ### 媒体消息
 
