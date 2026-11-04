@@ -137,9 +137,14 @@ public class PersonaSwitchService {
         return "好，从现在开始用「" + name + "」。";
     }
 
-    private static boolean isTrigger(String text) {
-        String normalized = text.toLowerCase(java.util.Locale.ROOT);
-        return TRIGGERS.stream().anyMatch(trigger -> trigger.equals(normalized) || trigger.equals(text));
+    /** 这条消息是不是「换人设」指令（供回复策略判断：人设指令免唤醒）。 */
+    public static boolean isTrigger(String text) {
+        if (text == null) {
+            return false;
+        }
+        String trimmed = text.trim();
+        String normalized = trimmed.toLowerCase(java.util.Locale.ROOT);
+        return TRIGGERS.stream().anyMatch(trigger -> trigger.equals(normalized) || trigger.equals(trimmed));
     }
 
     private static Integer matchNumber(String text, int size) {

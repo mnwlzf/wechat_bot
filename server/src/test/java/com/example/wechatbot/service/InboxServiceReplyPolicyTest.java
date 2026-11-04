@@ -42,12 +42,13 @@ class InboxServiceReplyPolicyTest {
     private final ChatOrchestrator chatOrchestrator = mock(ChatOrchestrator.class);
     private final RuntimeSettingsService settings = mock(RuntimeSettingsService.class);
     private final ReplyPolicyRepository policyRepository = mock(ReplyPolicyRepository.class);
+    private final PersonaSwitchService personaSwitch = mock(PersonaSwitchService.class);
 
     private final InboxService service = new InboxService(
             botRepository, conversationRepository, messageRepository,
             dedupeService, rateLimitService, chatOrchestrator, settings,
             new ReplyPolicyService(policyRepository), new InlineReplyDispatcher(),
-            mock(PersonaSwitchService.class));
+            personaSwitch);
 
     private BotConfig bot() {
         BotConfig bot = new BotConfig();
@@ -119,6 +120,21 @@ class InboxServiceReplyPolicyTest {
 
         assertThat(result.status()).isEqualTo("ACCEPTED");
         verify(chatOrchestrator).generateReply(eq(bot.getId()), any(UUID.class), any(UUID.class));
+    }
+
+    @Test
+    void personaCommandBypassesTheWakeWordGate() {
+        BotConfig bot = bot();
+        stubCommon(bot);
+        when(personaSwitch.enabled()).thenReturn(true);
+        when(personaSwitch.handle(any(Conversation.class), eq("换人设")))
+                .thenReturn(Optional.of("1. 大肥鱼"));
+
+        AgentDtos.EventAccepted result = service.accept(event(bot.getId(), "换人设"));
+
+        // 关键词唤醒模式下没说暗号也能换人设：这条要交给固定话术回列表，而不是被丢掉
+        assertThat(result.status()).isEqualTo("PERSONA");
+        verify(personaSwitch).handle(any(Conversation.class), eq("换人设"));
     }
 
     @Test

@@ -106,17 +106,27 @@ public class InboxService {
                     decisionNote = "主动回复（每条群消息都参与）";
                 }
                 case RANDOM -> {
-                    // 被叫到一定回；没叫到时按概率插话
-                    boolean hit = wakeMatched
+                    // 被叫到一定回；没叫到时按概率插话（人设指令同样免抽奖）
+                    boolean personaCommand = !media && personaSwitch.enabled()
+                            && PersonaSwitchService.isTrigger(content);
+                    boolean hit = wakeMatched || personaCommand
                             || ThreadLocalRandom.current().nextDouble() < policy.randomRate();
                     triggered = hit;
                     decisionNote = hit
-                            ? (wakeMatched ? "命中关键词唤醒" : "随机命中（" + percent(policy.randomRate()) + "）")
+                            ? (wakeMatched ? "命中关键词唤醒"
+                                : personaCommand ? "人设指令（免随机）"
+                                : "随机命中（" + percent(policy.randomRate()) + "）")
                             : "随机未命中（" + percent(policy.randomRate()) + "）";
                 }
                 case WAKE -> {
                     triggered = wakeMatched;
                     decisionNote = wakeMatched ? "命中关键词唤醒" : "未命中群聊唤醒词";
+                    // 人设指令免唤醒：用户想换人设时不该先被迫叫一声机器人
+                    if (!triggered && !media && personaSwitch.enabled()
+                            && PersonaSwitchService.isTrigger(content)) {
+                        triggered = true;
+                        decisionNote = "人设指令（免唤醒）";
+                    }
                     // 文本消息没唤醒就直接忽略，不入库（媒体消息没有文字，仍记录后按策略决定）
                     if (!triggered && !media) {
                         return new AgentDtos.EventAccepted("IGNORED", decisionNote, null);
