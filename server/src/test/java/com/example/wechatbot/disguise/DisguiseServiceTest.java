@@ -88,6 +88,25 @@ class DisguiseServiceTest {
     }
 
     @Test
+    void verbatimPlanKeepsNumberingAndStaysOneMessage() {
+        DisguiseProperties properties = baseProperties();
+        // 正常回复会被这样拆条 + 去掉「1. 」开头的编号，手机上就成了一堆碎片
+        properties.setMaxPartChars(24);
+        properties.setMaxParts(3);
+        DisguiseService service = service(properties);
+
+        String list = "可以换成这些人设，回数字就行了：\n1. 大肥鱼\n2. 客服语气\n3. 高冷学姐";
+        DisguiseService.Plan normal = service.plan("wxid_list", ChatType.PRIVATE, list, at(15, 0));
+        DisguiseService.Plan verbatim = service.planVerbatim("wxid_list", ChatType.PRIVATE, list, at(15, 0));
+
+        assertTrue(normal.parts().size() > 1, "普通路径会拆条: " + normal.parts().size());
+        assertEquals(1, verbatim.parts().size(), "控制类消息必须一条发完");
+        String sent = verbatim.parts().getFirst().text();
+        assertEquals(list, sent, "编号与换行都要原样保留");
+        assertTrue(sent.contains("1. 大肥鱼"));
+    }
+
+    @Test
     void repliesAreDeferredDuringQuietHours() {
         DisguiseProperties properties = baseProperties();
         properties.setQuietStart("00:00");

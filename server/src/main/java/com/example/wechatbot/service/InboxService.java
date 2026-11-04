@@ -19,6 +19,8 @@ import java.util.concurrent.ThreadLocalRandom;
 
 @Service
 public class InboxService {
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(InboxService.class);
+
     private final BotConfigRepository botRepository;
     private final ConversationRepository conversationRepository;
     private final MessageLogRepository messageRepository;
@@ -207,13 +209,18 @@ public class InboxService {
             return new AgentDtos.EventAccepted("PAUSED", "人工接管中，未自动回复", conversation.getId());
         }
 
-        // 聊天对象自己挑人设：发「换人设」只回名称列表，回数字后立刻绑定生效。
-        // 这一步要在回复策略判断之前：关键词唤醒模式下没叫到机器人，也依然允许换人设。
+        // 聊天对象自己挑人设：命令式（「换人设」）和自然语言（「换成大肥鱼」）都认。
+        // 这条回复不走聚合队列：它是控制指令的答复，被后面的消息合并掉就永远发不出去了；
+        // 而且必须原样单条发出，编号和换行拆条后在手机上会变成一堆碎片。
         if (!media && personaSwitch.enabled()) {
             Optional<String> personaReply = personaSwitch.handle(conversation, content);
             if (personaReply.isPresent()) {
-                dispatchReply(conversation.getChatId(), bot.getId(), conversation.getId(), inbound.getId(),
-                        true, personaReply.get());
+                try {
+                    chatOrchestrator.generateVerbatimReply(bot.getId(), conversation.getId(),
+                            inbound.getId(), personaReply.get());
+                } catch (RuntimeException ex) {
+                    log.warn("人设回复发送失败: conversation={}", conversation.getId(), ex);
+                }
                 return new AgentDtos.EventAccepted("PERSONA", "按聊天对象的选择切换了人设",
                         conversation.getId());
             }

@@ -51,7 +51,7 @@ class PersonaSwitchServiceTest {
         Optional<String> list = service.handle(chat, "换人设");
 
         assertThat(list).isPresent();
-        assertThat(list.get()).contains("1. 大肥鱼").contains("2. 客服语气").contains("回复 1-2");
+        assertThat(list.get()).contains("1. 大肥鱼").contains("2. 客服语气").contains("回数字");
         // 只发名称，绝不能把系统提示词正文漏给聊天对象
         assertThat(list.get()).doesNotContain("嘴贫心软").doesNotContain("克制");
 
@@ -61,6 +61,58 @@ class PersonaSwitchServiceTest {
         assertThat(picked.get()).contains("客服语气");
         assertThat(chat.getPromptTemplateId()).isEqualTo(cs.getId());
         verify(conversationRepository).save(chat);
+    }
+
+    @Test
+    void naturalLanguageCanNameAPersonaDirectly() {
+        PromptTemplate fish = persona("大肥鱼", "你是大肥鱼", true);
+        PromptTemplate cs = persona("客服语气", "你是客服", false);
+        when(repository.findAllByOrderByIsDefaultDescUpdatedAtDesc()).thenReturn(List.of(fish, cs));
+        Conversation chat = conversation("wxid_friend");
+
+        // 没有先要名单，直接说想换成谁
+        Optional<String> reply = service.handle(chat, "帮我换成客服语气吧");
+
+        assertThat(reply).isPresent();
+        assertThat(reply.get()).contains("客服语气");
+        assertThat(chat.getPromptTemplateId()).isEqualTo(cs.getId());
+    }
+
+    @Test
+    void askingForTheListInPlainWordsWorksToo() {
+        when(repository.findAllByOrderByIsDefaultDescUpdatedAtDesc())
+                .thenReturn(List.of(persona("大肥鱼", "你是大肥鱼", true)));
+        Conversation chat = conversation("wxid_friend");
+
+        Optional<String> reply = service.handle(chat, "现在都有哪些人设呀");
+
+        assertThat(reply).isPresent();
+        assertThat(reply.get()).contains("1. 大肥鱼");
+    }
+
+    @Test
+    void namingThePersonaInsteadOfTheNumberAlsoSelects() {
+        PromptTemplate fish = persona("大肥鱼", "你是大肥鱼", true);
+        PromptTemplate cs = persona("客服语气", "你是客服", false);
+        when(repository.findAllByOrderByIsDefaultDescUpdatedAtDesc()).thenReturn(List.of(fish, cs));
+        Conversation chat = conversation("wxid_friend");
+
+        service.handle(chat, "换人设");
+        Optional<String> picked = service.handle(chat, "就客服语气吧");
+
+        assertThat(picked).isPresent();
+        assertThat(chat.getPromptTemplateId()).isEqualTo(cs.getId());
+    }
+
+    @Test
+    void negationOrPlainChatterDoesNotSwitchAnything() {
+        when(repository.findAllByOrderByIsDefaultDescUpdatedAtDesc())
+                .thenReturn(List.of(persona("大肥鱼", "你是大肥鱼", true)));
+        Conversation chat = conversation("wxid_friend");
+
+        assertThat(service.handle(chat, "不要换成大肥鱼")).isEmpty();
+        assertThat(service.handle(chat, "你这个人设挺有意思的")).isEmpty();
+        assertThat(chat.getPromptTemplateId()).isNull();
     }
 
     @Test
@@ -100,9 +152,14 @@ class PersonaSwitchServiceTest {
 
     @Test
     void plainChatterIsNeverTreatedAsACommand() {
+        when(repository.findAllByOrderByIsDefaultDescUpdatedAtDesc())
+                .thenReturn(List.of(persona("大肥鱼", "你是大肥鱼", true)));
         Conversation chat = conversation("wxid_friend");
 
-        assertThat(service.handle(chat, "他人设挺有意思的")).isEmpty();
-        assertThat(service.handle(chat, "换人设吧")).isEmpty();
+        assertThat(service.handle(chat, "你这个人设挺有意思的")).isEmpty();
+        // 提到了名字但只是随口一问，不是要换人设
+        assertThat(service.handle(chat, "大肥鱼在吗")).isEmpty();
+        assertThat(service.handle(chat, "今天下午开会吗")).isEmpty();
+        assertThat(chat.getPromptTemplateId()).isNull();
     }
 }

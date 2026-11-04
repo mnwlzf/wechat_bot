@@ -182,7 +182,7 @@ public class ChatOrchestrator {
                     reply = regenerateWithVariation(bot, context, reply);
                 }
             }
-            LlmReply delivered = deliver(bot, conversation, inbound, reply, enqueueOutbox);
+            LlmReply delivered = deliver(bot, conversation, inbound, reply, enqueueOutbox, false);
             // 真实会话才维护共享记忆；在线调试不污染任何群的历史
             if (enqueueOutbox) {
                 memoryService.summarizeAsync(bot, conversation);
@@ -217,7 +217,29 @@ public class ChatOrchestrator {
             return null;
         }
         try {
-            return deliver(bot, conversation, inbound, LlmReply.rule(text), true);
+            return deliver(bot, conversation, inbound, LlmReply.rule(text), true, false);
+        } catch (Exception ex) {
+            markFailed(inbound, ex);
+            throw ex;
+        }
+    }
+
+    /**
+     * 原样回复：一条消息发完，不清洗文风、不按行拆条。
+     *
+     * <p>给控制类回复用（人设名单、编号提示）。这类内容靠编号和换行才有意义，
+     * 拆成几条独立消息后手机上就是一串碎片。仍然走敏感词过滤与 outbox 投递。</p>
+     */
+    public LlmReply generateVerbatimReply(UUID botId, UUID conversationId, UUID inboundId, String text) {
+        BotConfig bot = requireBot(botId);
+        Conversation conversation = requireConversation(conversationId);
+        MessageLog inbound = requireInbound(inboundId);
+        if (inbound.getStatus() == MessageStatus.IGNORED) {
+            log.info("跳过原样回复：该消息已标记忽略: conversation={}", conversationId);
+            return null;
+        }
+        try {
+            return deliver(bot, conversation, inbound, LlmReply.rule(text), true, true);
         } catch (Exception ex) {
             markFailed(inbound, ex);
             throw ex;
@@ -225,7 +247,7 @@ public class ChatOrchestrator {
     }
 
     private LlmReply deliver(BotConfig bot, Conversation conversation, MessageLog inbound,
-                             LlmReply reply, boolean enqueueOutbox) {
+                             LlmReply reply, boolean enqueueOutbox, boolean verbatim) {
         UUID botId = bot.getId();
         UUID conversationId = conversation.getId();
 
@@ -254,9 +276,13 @@ public class ChatOrchestrator {
         inbound.setErrorMessage(null);
         messageRepository.save(inbound);
 
-        DisguiseService.Plan plan = enqueueOutbox
-                ? disguise.plan(conversation.getChatId(), conversation.getChatType(), reply.content(), Instant.now())
-                : disguise.preview(conversation.getChatId(), conversation.getChatType(), reply.content(), Instant.now());
+        DisguiseService.Plan plan = !enqueueOutbox
+                ? disguise.preview(conversation.getChatId(), conversation.getChatType(), reply.content(), Instant.now())
+                : verbatim
+                    ? disguise.planVerbatim(conversation.getChatId(), conversation.getChatType(),
+                            reply.content(), Instant.now())
+                    : disguise.plan(conversation.getChatId(), conversation.getChatType(),
+                            reply.content(), Instant.now());
 
         if (plan.dropped() && enqueueOutbox) {
             MessageLog skipped = outboundLog(conversationId, bot, reply, reply.content());

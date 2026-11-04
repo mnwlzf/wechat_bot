@@ -108,6 +108,32 @@ public class DisguiseService {
         return build(chatId, chatType, rawReply, now, true);
     }
 
+    /**
+     * 控制类消息（人设名单、编号提示等）：<b>原样单条</b>发出。
+     *
+     * <p>正常回复要过文风清洗 + 分条，那是为了像真人；但编号名单被拆成几条独立的微信消息后，
+     * 手机上就只剩一串没有编号的碎片。所以这条路径只保留「延迟」这一层拟人，
+     * 不清洗（不清空行、不合并空格）、不拆条，一条消息发完。</p>
+     */
+    public Plan planVerbatim(String chatId, ChatType chatType, String rawReply, Instant now) {
+        if (rawReply == null || rawReply.isBlank()) {
+            return drop(chatId, now, "EMPTY", "内容为空", false);
+        }
+        String text = rawReply.strip();
+        DisguiseProperties policy = properties.isEnabled() ? policies.forChat(chatId) : properties;
+        long baseDelay = properties.isEnabled()
+                ? pacing.delayMs(policy, chatId, text, chatType == ChatType.GROUP, now)
+                : 0L;
+        long cap = Math.max(1000, policy.getMaxFirstDelayMs());
+        Instant first = now.plusMillis(Math.min(Math.max(0L, baseDelay), cap));
+        Instant earliest = Instant.ofEpochMilli(quota.earliestAllowed(policy, chatId, now.toEpochMilli()));
+        if (earliest.isAfter(first)) {
+            first = now.plusMillis(cap);
+        }
+        quota.record(chatId, first.toEpochMilli());
+        return new Plan(List.of(new PlannedPart(text, first)), "SEND", "原样单条发送");
+    }
+
     public String previewStyle(String rawReply) {
         return capTotal(properties, normalizer.normalize(properties, rawReply));
     }
