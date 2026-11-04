@@ -11,10 +11,12 @@ import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.scheduling.support.CronExpression;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
+import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -77,8 +79,15 @@ public class ScheduledMessageService {
     public ScheduledMessage create(UUID botId, String chatId, String chatName, String content,
                                    OffsetDateTime scheduledAt, ScheduledRepeat repeatRule,
                                    OffsetDateTime repeatUntil, boolean splitLines) {
+        return create(botId, chatId, chatName, content, scheduledAt, repeatRule, repeatUntil, splitLines, null);
+    }
+
+    @Transactional
+    public ScheduledMessage create(UUID botId, String chatId, String chatName, String content,
+                                   OffsetDateTime scheduledAt, ScheduledRepeat repeatRule,
+                                   OffsetDateTime repeatUntil, boolean splitLines, String cronExpression) {
         ScheduledMessage message = new ScheduledMessage();
-        apply(message, botId, chatId, chatName, content, scheduledAt, repeatRule, repeatUntil, splitLines);
+        apply(message, botId, chatId, chatName, content, scheduledAt, repeatRule, repeatUntil, splitLines, cronExpression);
         message.setStatus(ScheduledStatus.PENDING);
         return repository.save(message);
     }
@@ -88,11 +97,18 @@ public class ScheduledMessageService {
     public ScheduledMessage update(UUID id, UUID botId, String chatId, String chatName, String content,
                                    OffsetDateTime scheduledAt, ScheduledRepeat repeatRule,
                                    OffsetDateTime repeatUntil, boolean splitLines) {
+        return update(id, botId, chatId, chatName, content, scheduledAt, repeatRule, repeatUntil, splitLines, null);
+    }
+
+    @Transactional
+    public ScheduledMessage update(UUID id, UUID botId, String chatId, String chatName, String content,
+                                   OffsetDateTime scheduledAt, ScheduledRepeat repeatRule,
+                                   OffsetDateTime repeatUntil, boolean splitLines, String cronExpression) {
         ScheduledMessage message = get(id);
         if (message.getStatus() != ScheduledStatus.PENDING) {
             throw ApiException.badRequest("只有待发送的消息可以编辑");
         }
-        apply(message, botId, chatId, chatName, content, scheduledAt, repeatRule, repeatUntil, splitLines);
+        apply(message, botId, chatId, chatName, content, scheduledAt, repeatRule, repeatUntil, splitLines, cronExpression);
         return repository.save(message);
     }
 
@@ -169,8 +185,7 @@ public class ScheduledMessageService {
         message.setSentCount(message.getSentCount() + 1);
         message.setLastError(null);
 
-        ScheduledRepeat repeat = message.getRepeatRule() == null ? ScheduledRepeat.NONE : message.getRepeatRule();
-        OffsetDateTime next = nextOccurrence(message.getScheduledAt(), repeat, message.getRepeatUntil(), now);
+        OffsetDateTime next = nextOccurrence(message, now);
         if (next == null) {
             message.setStatus(ScheduledStatus.SENT);
         } else {
@@ -187,19 +202,72 @@ public class ScheduledMessageService {
      * <p>停机或配额延迟可能让 scheduledAt 落后好几轮，这里直接跳到未来最近的一次，
      * 不会补发一串过期的消息。</p>
      */
-    private static OffsetDateTime nextOccurrence(OffsetDateTime current, ScheduledRepeat repeat,
-                                                 OffsetDateTime repeatUntil, OffsetDateTime now) {
-        if (repeat == null || repeat == ScheduledRepeat.NONE || current == null) {
+    private static OffsetDateTime nextOccurrence(ScheduledMessage message, OffsetDateTime now) {
+        ScheduledRepeat repeat = message.getRepeatRule() == null ? ScheduledRepeat.NONE : message.getRepeatRule();
+        OffsetDateTime current = message.getScheduledAt();
+        if (repeat == ScheduledRepeat.NONE || current == null) {
             return null;
         }
-        OffsetDateTime next = repeat.next(current);
-        while (next != null && !next.isAfter(now)) {
-            next = repeat.next(next);
+        OffsetDateTime next = repeat == ScheduledRepeat.CRON
+                ? nextCron(message.getCronExpression(), current)
+                : repeat.next(current);
+        int guard = 0;
+        while (next != null && !next.isAfter(now) && guard++ < 1000) {
+            next = repeat == ScheduledRepeat.CRON
+                    ? nextCron(message.getCronExpression(), next)
+                    : repeat.next(next);
         }
+        OffsetDateTime repeatUntil = message.getRepeatUntil();
         if (next != null && repeatUntil != null && next.isAfter(repeatUntil)) {
             return null;
         }
         return next;
+    }
+
+    /** cron 的下一次触发时间；表达式非法时返回 null（保存时已经校验过，这里只防御历史数据）。 */
+    static OffsetDateTime nextCron(String expression, OffsetDateTime after) {
+        CronExpression cron = parseCronOrNull(expression);
+        if (cron == null || after == null) {
+            return null;
+        }
+        java.time.ZoneOffset offset = after.getOffset();
+        ZonedDateTime zoneTime = after.toInstant().atZone(offset);
+        ZonedDateTime next = cron.next(zoneTime);
+        return next == null ? null : next.toOffsetDateTime();
+    }
+
+    /**
+     * 解析 cron 表达式，兼容两种写法：
+     * 5 段「分 时 日 月 周」（例如 {@code 0 9 * * 1-5}）会自动补上秒位。
+     */
+    static CronExpression parseCronOrNull(String expression) {
+        if (expression == null || expression.isBlank()) {
+            return null;
+        }
+        String normalized = normalizeCron(expression);
+        try {
+            return CronExpression.parse(normalized);
+        } catch (IllegalArgumentException ex) {
+            return null;
+        }
+    }
+
+    private static String normalizeCron(String expression) {
+        String trimmed = expression.trim().replaceAll("\\s+", " ");
+        int fields = trimmed.split(" ").length;
+        return fields == 5 ? "0 " + trimmed : trimmed;
+    }
+
+    private static CronExpression requireCron(String expression) {
+        if (expression == null || expression.isBlank()) {
+            throw ApiException.badRequest("请填写 cron 表达式，例如 0 9 * * 1-5（工作日 9 点）");
+        }
+        CronExpression cron = parseCronOrNull(expression);
+        if (cron == null) {
+            throw ApiException.badRequest("cron 表达式看不懂：" + expression
+                    + "，格式是「分 时 日 月 周」，例如 0 9 * * 1-5");
+        }
+        return cron;
     }
 
     /** 分条发送：按行拆，空行丢弃，最多 {@link #MAX_PARTS} 条。 */
@@ -220,20 +288,37 @@ public class ScheduledMessageService {
 
     private void apply(ScheduledMessage message, UUID botId, String chatId, String chatName, String content,
                        OffsetDateTime scheduledAt, ScheduledRepeat repeatRule,
-                       OffsetDateTime repeatUntil, boolean splitLines) {
+                       OffsetDateTime repeatUntil, boolean splitLines, String cronExpression) {
         if (chatId == null || chatId.isBlank()) {
             throw ApiException.badRequest("请选择要发送的会话");
         }
         if (content == null || content.isBlank()) {
             throw ApiException.badRequest("消息内容不能为空");
         }
-        if (scheduledAt == null) {
+        ScheduledRepeat repeat = repeatRule == null ? ScheduledRepeat.NONE : repeatRule;
+        String cron = cronExpression == null ? null : cronExpression.trim();
+        OffsetDateTime effectiveAt = scheduledAt;
+        if (repeat == ScheduledRepeat.CRON) {
+            CronExpression parsed = requireCron(cron);
+            // 只给 cron 不给时间时，从「现在之后的下一次」开始；给了过去的时间也自动顺延
+            if (effectiveAt == null || effectiveAt.isBefore(OffsetDateTime.now().minusMinutes(1))) {
+                OffsetDateTime now = OffsetDateTime.now();
+                ZonedDateTime start = parsed.next(now.toInstant().atZone(now.getOffset()));
+                if (start == null) {
+                    throw ApiException.badRequest("这个 cron 永远不会触发：" + cron);
+                }
+                effectiveAt = start.toOffsetDateTime();
+            }
+        } else {
+            cron = null;
+        }
+        if (effectiveAt == null) {
             throw ApiException.badRequest("请选择发送时间");
         }
-        if (scheduledAt.isBefore(OffsetDateTime.now().minusMinutes(1))) {
+        if (effectiveAt.isBefore(OffsetDateTime.now().minusMinutes(1))) {
             throw ApiException.badRequest("发送时间不能早于当前时间");
         }
-        if (repeatUntil != null && repeatUntil.isBefore(scheduledAt)) {
+        if (repeatUntil != null && repeatUntil.isBefore(effectiveAt)) {
             throw ApiException.badRequest("重复截止时间不能早于发送时间");
         }
 
@@ -253,10 +338,11 @@ public class ScheduledMessageService {
                 ? (conversation == null ? normalizedChatId : conversation.getChatName())
                 : chatName.trim());
         message.setContent(content.trim());
-        message.setScheduledAt(scheduledAt);
-        message.setRepeatRule(repeatRule == null ? ScheduledRepeat.NONE : repeatRule);
+        message.setScheduledAt(effectiveAt);
+        message.setRepeatRule(repeat);
         message.setRepeatUntil(repeatUntil);
         message.setSplitLines(splitLines);
+        message.setCronExpression(cron);
     }
 
     private void markFailed(ScheduledMessage message, String reason) {

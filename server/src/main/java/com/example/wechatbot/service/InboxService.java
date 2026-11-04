@@ -13,6 +13,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import java.time.OffsetDateTime;
 import java.util.Arrays;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -27,6 +28,7 @@ public class InboxService {
     private final RuntimeSettingsService settings;
     private final ReplyPolicyService replyPolicies;
     private final ReplyDispatcher replyDispatcher;
+    private final PersonaSwitchService personaSwitch;
 
     public InboxService(BotConfigRepository botRepository,
                         ConversationRepository conversationRepository,
@@ -36,7 +38,8 @@ public class InboxService {
                         ChatOrchestrator chatOrchestrator,
                         RuntimeSettingsService settings,
                         ReplyPolicyService replyPolicies,
-                        ReplyDispatcher replyDispatcher) {
+                        ReplyDispatcher replyDispatcher,
+                        PersonaSwitchService personaSwitch) {
         this.botRepository = botRepository;
         this.conversationRepository = conversationRepository;
         this.messageRepository = messageRepository;
@@ -46,6 +49,7 @@ public class InboxService {
         this.settings = settings;
         this.replyPolicies = replyPolicies;
         this.replyDispatcher = replyDispatcher;
+        this.personaSwitch = personaSwitch;
     }
 
     @Transactional
@@ -191,6 +195,18 @@ public class InboxService {
             inbound.setErrorMessage("人工接管中，未自动回复");
             messageRepository.save(inbound);
             return new AgentDtos.EventAccepted("PAUSED", "人工接管中，未自动回复", conversation.getId());
+        }
+
+        // 聊天对象自己挑人设：发「换人设」只回名称列表，回数字后立刻绑定生效。
+        // 这一步要在回复策略判断之前：关键词唤醒模式下没叫到机器人，也依然允许换人设。
+        if (!media && personaSwitch.enabled()) {
+            Optional<String> personaReply = personaSwitch.handle(conversation, content);
+            if (personaReply.isPresent()) {
+                dispatchReply(conversation.getChatId(), bot.getId(), conversation.getId(), inbound.getId(),
+                        true, personaReply.get());
+                return new AgentDtos.EventAccepted("PERSONA", "按聊天对象的选择切换了人设",
+                        conversation.getId());
+            }
         }
 
         if (!shouldReply) {

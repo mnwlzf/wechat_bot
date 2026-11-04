@@ -4,8 +4,9 @@ import dayjs from 'dayjs'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import { adminApi } from '@/api'
-import type { Conversation, PageResult, ScheduledMessage, ScheduledRepeat } from '@/api/types'
+import type { PageResult, ScheduledMessage, ScheduledRepeat } from '@/api/types'
 import { getErrorMessage } from '@/api/client'
+import ChatSelect from '@/components/ChatSelect.vue'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -23,8 +24,6 @@ const result = ref<PageResult<ScheduledMessage>>({
   size: pageSize,
 })
 
-const conversations = ref<Conversation[]>([])
-
 const form = reactive({
   chatId: '',
   chatName: '',
@@ -32,6 +31,7 @@ const form = reactive({
   scheduledAt: '',
   repeatRule: 'NONE' as ScheduledRepeat,
   repeatUntil: '',
+  cronExpression: '',
   splitLines: false,
 })
 
@@ -59,6 +59,7 @@ const repeatLabels: Record<ScheduledRepeat, string> = {
   NONE: '',
   DAILY: '每天',
   WEEKLY: '每周',
+  CRON: '自定义',
 }
 
 const pendingCount = computed(
@@ -81,15 +82,6 @@ async function load() {
   }
 }
 
-async function loadConversations() {
-  try {
-    const data = await adminApi.conversations({ page: 0, size: 100 })
-    conversations.value = data.content
-  } catch {
-    /* 会话不可用时允许手填 chatId */
-  }
-}
-
 function resetForm() {
   Object.assign(form, {
     chatId: '',
@@ -98,6 +90,7 @@ function resetForm() {
     scheduledAt: dayjs().add(10, 'minute').format('YYYY-MM-DD HH:mm:ss'),
     repeatRule: 'NONE' as ScheduledRepeat,
     repeatUntil: '',
+    cronExpression: '',
     splitLines: false,
   })
 }
@@ -117,6 +110,7 @@ function openEdit(item: ScheduledMessage) {
     scheduledAt: dayjs(item.scheduledAt).format('YYYY-MM-DD HH:mm:ss'),
     repeatRule: item.repeatRule || 'NONE',
     repeatUntil: item.repeatUntil ? dayjs(item.repeatUntil).format('YYYY-MM-DD HH:mm:ss') : '',
+    cronExpression: item.cronExpression || '',
     splitLines: item.splitLines,
   })
   dialogVisible.value = true
@@ -133,9 +127,8 @@ function applyPreset(kind: '10m' | 'tonight' | 'tomorrow' | 'nextMonday') {
   }
 }
 
-function onChatPicked(chatId: string) {
-  const found = conversations.value.find((item) => item.chatId === chatId)
-  form.chatName = found ? found.chatName : ''
+function onChatPicked(conversation: { chatId: string; chatName: string } | null) {
+  form.chatName = conversation ? conversation.chatName : ''
 }
 
 async function submit() {
@@ -151,6 +144,7 @@ async function submit() {
       scheduledAt: dayjs(form.scheduledAt).toISOString(),
       repeatRule: form.repeatRule,
       repeatUntil: form.repeatUntil ? dayjs(form.repeatUntil).toISOString() : null,
+      cronExpression: form.repeatRule === 'CRON' ? form.cronExpression.trim() : null,
       splitLines: form.splitLines,
     }
     if (editingId.value) {
@@ -213,7 +207,7 @@ function lineCount(content: string) {
 }
 
 onMounted(async () => {
-  await Promise.all([load(), loadConversations()])
+  await load()
 })
 </script>
 
@@ -251,6 +245,9 @@ onMounted(async () => {
               >
                 {{ repeatLabels[row.repeatRule as ScheduledRepeat] }}
               </el-tag>
+              <span v-if="row.repeatRule === 'CRON' && row.cronExpression" class="mono cron-hint">
+                {{ row.cronExpression }}
+              </span>
             </template>
           </el-table-column>
           <el-table-column label="会话" min-width="170">
@@ -325,25 +322,14 @@ onMounted(async () => {
     >
       <el-form ref="formRef" :model="form" :rules="formRules" label-position="top">
         <el-form-item label="发送到" prop="chatId">
-          <el-select
+          <ChatSelect
             v-model="form.chatId"
-            filterable
             allow-create
-            default-first-option
-            :reserve-keyword="false"
-            placeholder="选择会话，或直接粘贴 wxid / @chatroom"
-            style="width: 100%"
-            @change="onChatPicked"
-          >
-            <el-option
-              v-for="item in conversations"
-              :key="item.chatId"
-              :label="`${item.chatName}${item.chatType === 'GROUP' ? '（群）' : ''}`"
-              :value="item.chatId"
-            />
-          </el-select>
+            placeholder="搜群名 / 好友昵称 / chatId"
+            @pick="onChatPicked"
+          />
         </el-form-item>
-        <el-form-item label="发送时间" prop="scheduledAt">
+        <el-form-item :label="form.repeatRule === 'CRON' ? '首次发送时间' : '发送时间'" prop="scheduledAt">
           <el-date-picker
             v-model="form.scheduledAt"
             type="datetime"
@@ -364,7 +350,25 @@ onMounted(async () => {
             <el-option label="不重复（只发一次）" value="NONE" />
             <el-option label="每天（同一时间）" value="DAILY" />
             <el-option label="每周（同一星期几与时间）" value="WEEKLY" />
+            <el-option label="自定义 cron 表达式" value="CRON" />
           </el-select>
+        </el-form-item>
+        <el-form-item v-if="form.repeatRule === 'CRON'" label="cron 表达式">
+          <el-input
+            v-model="form.cronExpression"
+            placeholder="分 时 日 月 周，例如 0 9 * * 1-5"
+            class="mono-input"
+          />
+          <div class="preset-row">
+            <el-button text size="small" @click="form.cronExpression = '0 9 * * 1-5'">工作日 9:00</el-button>
+            <el-button text size="small" @click="form.cronExpression = '30 20 * * *'">每天 20:30</el-button>
+            <el-button text size="small" @click="form.cronExpression = '0 10 1 * *'">每月 1 号 10:00</el-button>
+            <el-button text size="small" @click="form.cronExpression = '0 18 * * 5'">每周五 18:00</el-button>
+          </div>
+          <div class="field-hint">
+            顺序是「分 时 日 月 周」，周一到周日写 1-7（也可以写 MON-FRI）。
+            上面的发送时间作为起点，之后按这个表达式推进；留了过去的日期会自动顺延到下一次触发。
+          </div>
         </el-form-item>
         <el-form-item v-if="form.repeatRule !== 'NONE'" label="重复截止（可选）">
           <el-date-picker
@@ -436,6 +440,17 @@ onMounted(async () => {
 
 .repeat-tag {
   margin-top: 4px;
+}
+
+.cron-hint {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted-soft);
+  font-size: 10px;
+}
+
+.mono-input {
+  font-family: var(--mono);
 }
 
 .sent-count {

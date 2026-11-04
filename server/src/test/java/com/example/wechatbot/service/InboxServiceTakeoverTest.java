@@ -31,7 +31,7 @@ class InboxServiceTakeoverTest {
             botRepository, conversationRepository, messageRepository,
             dedupeService, rateLimitService, chatOrchestrator, settings,
             new ReplyPolicyService(mock(com.example.wechatbot.repository.ReplyPolicyRepository.class)),
-            new InlineReplyDispatcher());
+            new InlineReplyDispatcher(), mock(PersonaSwitchService.class));
 
     private BotConfig bot() {
         BotConfig bot = new BotConfig();

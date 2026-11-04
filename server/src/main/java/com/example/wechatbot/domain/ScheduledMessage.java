@@ -48,6 +48,10 @@ public class ScheduledMessage {
     @Column(name = "repeat_until")
     private OffsetDateTime repeatUntil;
 
+    /** 自定义 cron 表达式（仅 repeatRule = CRON 时使用），例如 {@code 0 9 * * 1-5}。 */
+    @Column(name = "cron_expression", length = 120)
+    private String cronExpression;
+
     /** 内容按行拆成多条依次发送（群通知分条更自然）。 */
     @Column(name = "split_lines", nullable = false)
     private boolean splitLines = false;

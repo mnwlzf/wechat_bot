@@ -11,9 +11,11 @@ import java.time.OffsetDateTime;
 public enum ScheduledRepeat {
     NONE,
     DAILY,
-    WEEKLY;
+    WEEKLY,
+    /** 自定义 cron 表达式（分 时 日 月 周，也接受带秒的 6 段写法）。 */
+    CRON;
 
-    /** 下一次发送时间；{@link #NONE} 返回 null。 */
+    /** 下一次发送时间；{@link #NONE} 与 {@link #CRON} 返回 null（cron 需要表达式，见服务层）。 */
     public OffsetDateTime next(OffsetDateTime current) {
         if (current == null) {
             return null;
@@ -21,7 +23,7 @@ public enum ScheduledRepeat {
         return switch (this) {
             case DAILY -> current.plusDays(1);
             case WEEKLY -> current.plusWeeks(1);
-            case NONE -> null;
+            case NONE, CRON -> null;
         };
     }
 

@@ -20,7 +20,8 @@ class InboxServiceTest {
             mock(ChatOrchestrator.class),
             mock(RuntimeSettingsService.class),
             new ReplyPolicyService(mock(com.example.wechatbot.repository.ReplyPolicyRepository.class)),
-            new InlineReplyDispatcher()
+            new InlineReplyDispatcher(),
+            mock(PersonaSwitchService.class)
     );
 
     @Test

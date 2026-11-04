@@ -196,6 +196,11 @@ app:
     max-wait-seconds: ${REPLY_MAX_WAIT_SECONDS:12}
     # 同时生成回复的会话数上限；同一个会话永远串行
     workers: ${REPLY_WORKERS:4}
+  # 聊天对象自己挑人设：发「换人设」只回名称列表，回数字后立刻生效
+  persona:
+    switch-enabled: ${PERSONA_SWITCH_ENABLED:true}
+    # 列完名单后等用户选编号的有效期（秒）
+    pending-seconds: ${PERSONA_PENDING_SECONDS:300}
   # 拟人化伪装层：延迟、分条、作息、配额、去重、文风清洗
   disguise:
     enabled: ${DISGUISE_ENABLED:true}

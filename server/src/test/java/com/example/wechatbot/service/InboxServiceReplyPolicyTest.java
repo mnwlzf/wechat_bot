@@ -46,7 +46,8 @@ class InboxServiceReplyPolicyTest {
     private final InboxService service = new InboxService(
             botRepository, conversationRepository, messageRepository,
             dedupeService, rateLimitService, chatOrchestrator, settings,
-            new ReplyPolicyService(policyRepository), new InlineReplyDispatcher());
+            new ReplyPolicyService(policyRepository), new InlineReplyDispatcher(),
+            mock(PersonaSwitchService.class));
 
     private BotConfig bot() {
         BotConfig bot = new BotConfig();

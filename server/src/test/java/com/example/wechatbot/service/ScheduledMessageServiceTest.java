@@ -173,6 +173,49 @@ class ScheduledMessageServiceTest {
     }
 
     @Test
+    void cronRepeatAdvancesToTheNextMatchingTime() {
+        ScheduledMessage message = scheduled("工作日九点提醒");
+        message.setRepeatRule(ScheduledRepeat.CRON);
+        message.setCronExpression("0 9 * * 1-5");
+        message.setScheduledAt(OffsetDateTime.now().minusMinutes(1));
+        when(repository.findByStatusAndScheduledAtLessThanEqualOrderByScheduledAtAsc(
+                eq(ScheduledStatus.PENDING), any(), any(Pageable.class))).thenReturn(List.of(message));
+        when(contentFilter.apply(any())).thenAnswer(inv -> ContentFilterService.Result.pass(inv.getArgument(0)));
+        when(outboxRepository.save(any(OutboxMessage.class))).thenAnswer(inv -> {
+            OutboxMessage outbox = inv.getArgument(0);
+            outbox.setId(UUID.randomUUID());
+            return outbox;
+        });
+        when(repository.save(any(ScheduledMessage.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        service.dispatchDue();
+
+        // 依然排队，下一次触发按 cron 算：工作日 9 点
+        assertThat(message.getStatus()).isEqualTo(ScheduledStatus.PENDING);
+        assertThat(message.getScheduledAt()).isAfter(OffsetDateTime.now());
+        assertThat(message.getScheduledAt().getHour()).isEqualTo(9);
+        assertThat(message.getScheduledAt().getDayOfWeek().getValue()).isLessThanOrEqualTo(5);
+        assertThat(message.getSentCount()).isEqualTo(1);
+    }
+
+    @Test
+    void invalidCronIsRejectedWithAHint() {
+        assertThatThrownBy(() -> service.create(null, "123@chatroom", "群", "内容",
+                OffsetDateTime.now().plusHours(1), ScheduledRepeat.CRON, null, false, "这不是 cron"))
+                .hasMessageContaining("cron");
+    }
+
+    @Test
+    void cronWithoutAUsableStartTimeSnapsToTheNextTrigger() {
+        when(botRepository.findFirstByEnabledTrueOrderByCreatedAtAsc()).thenReturn(Optional.empty());
+        when(botRepository.findById(any())).thenReturn(Optional.empty());
+        // 没有机器人配置时，先校验 cron 本身：表达式合法、时间在过去也会被顺延
+        assertThatThrownBy(() -> service.create(null, "123@chatroom", "群", "内容",
+                OffsetDateTime.now().minusDays(1), ScheduledRepeat.CRON, null, false, "0 9 * * *"))
+                .hasMessageContaining("机器人");
+    }
+
+    @Test
     void splitLinesQueuesOneOutboxRowPerNonBlankLine() {
         ScheduledMessage message = scheduled("第一行\n\n  第二行  \n第三行");
         message.setSplitLines(true);

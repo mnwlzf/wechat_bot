@@ -133,7 +133,7 @@ $headers = @{ Authorization = "Bearer dev-admin-token" }
 | PUT/DELETE | `/api/admin/memories/{id}` | 修改内容 / 启停 / 删除记忆条目 |
 | POST | `/api/admin/memories/summaries?chatId=…` | 立即按现有历史重算一次滚动摘要（同步） |
 | DELETE | `/api/admin/memories/summaries?chatId=…` | 清空摘要，下次重新压缩（人工要点保留） |
-| GET/POST | `/api/admin/scheduled-messages` | 定时消息列表 / 新建（支持 `repeatRule`、`splitLines`） |
+| GET/POST | `/api/admin/scheduled-messages` | 定时消息列表 / 新建（支持 `repeatRule`、`cronExpression`、`splitLines`） |
 | PUT | `/api/admin/scheduled-messages/{id}` | 编辑待发送的定时消息（时间、接收人、内容、重复规则） |
 | POST | `/api/admin/scheduled-messages/{id}/cancel` | 取消待发送的定时消息 |
 | DELETE | `/api/admin/scheduled-messages/{id}` | 删除定时消息记录 |
@@ -613,7 +613,14 @@ SILK 单独失败不影响 WAV，会多一个 `silkError` 字段说明原因。
 - 生效顺序：**会话/群绑定的人设 → 全局默认人设 → 机器人 `systemPrompt`**
 - 全局最多一个默认人设（数据库唯一索引保证），首次启动会内置一份「大肥鱼」，可直接编辑
 - 绑定/解绑按会话：`POST /api/admin/conversations/{id}/persona`，`{"promptTemplateId":"0b1f…"}`，传 `null` 表示回退默认
+- 按 chatId 绑定（会话还没出现过也行）：`POST /api/admin/personas/bind`，`{"chatId":"wxid_x","promptTemplateId":"0b1f…"}`，
+  `@chatroom` 结尾按群聊建会话，其余按私聊
+- 生效预览：`GET /api/admin/personas/preview/{conversationId}` 返回人设正文、`personaSource`（`chat` / `default` / `bot`）、
+  记忆块与风格块 —— 就是这条会话真正会发给模型的那几段系统提示词
 - 会话列表的 `effectivePersonaName` 会显示实际生效的人设（继承默认时带「（默认）」后缀）
+- **让聊天对象自己选**：群里/私聊里发「换人设」（也认「切换人设 / 选择人设 / 人设列表 / 改人设」），
+  机器人只回人设名称列表，对方回数字即改绑该会话（等价于上面那条按会话绑定），下一条消息立刻生效。
+  名单 5 分钟内有效，回别的话就当普通消息；开关是 `PERSONA_SWITCH_ENABLED`
 
 ```json
 {
@@ -649,14 +656,16 @@ SILK 单独失败不影响 WAV，会多一个 `silkError` 字段说明原因。
   "chatName": "客户群",
   "content": "明天上午十点的例会挪到下午三点\n记得带电脑",
   "scheduledAt": "2026-11-01T10:00:00+08:00",
-  "repeatRule": "DAILY",
+  "repeatRule": "CRON",
+  "cronExpression": "0 9 * * 1-5",
   "repeatUntil": null,
   "splitLines": true
 }
 ```
 
-- `scheduledAt` 不能早于当前时间；`chatId` 支持 `wxid` 或 `@chatroom`，页面可直接从会话列表选，也能粘贴
-- `repeatRule`：`NONE` / `DAILY` / `WEEKLY`。重复消息发完不结束，而是把 `scheduledAt` 推到未来最近的一次继续排队；停机错过的轮次不会补发
+- `scheduledAt` 不能早于当前时间；`chatId` 支持 `wxid` 或 `@chatroom`，页面可按群名 / 好友昵称搜索（`GET /api/admin/conversations?query=`），也能直接粘贴
+- `repeatRule`：`NONE` / `DAILY` / `WEEKLY` / `CRON`。重复消息发完不结束，而是把 `scheduledAt` 推到未来最近的一次继续排队；停机错过的轮次不会补发
+- `cronExpression`：`repeatRule=CRON` 时必填。「分 时 日 月 周」5 段会自动补秒位（存 6 段也直接认），周一到周日写 `1-7` 或 `MON-FRI`；表达式非法直接 400 并提示正确写法。此时 `scheduledAt` 是起点，若落在过去会自动顺延到下一次触发
 - `repeatUntil`：重复截止时间，留空表示一直重复
 - `splitLines=true`：内容按行拆成多条依次入队（最多 10 条），适合群通知分条发
 - 状态机：`PENDING`（待发送）→ `SENT`（已转投递队列）/ `CANCELLED` / `FAILED`（命中敏感词拦截或入队异常）；重复消息在两次发送之间保持 `PENDING`

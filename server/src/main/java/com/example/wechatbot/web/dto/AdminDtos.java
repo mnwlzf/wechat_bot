@@ -263,11 +263,13 @@ public final class AdminDtos {
             @Size(max = 180) String chatName,
             @NotBlank @Size(max = 5000) String content,
             @NotNull OffsetDateTime scheduledAt,
-            /** NONE / DAILY / WEEKLY */
+            /** NONE / DAILY / WEEKLY / CRON */
             @Size(max = 20) String repeatRule,
             OffsetDateTime repeatUntil,
             /** 按行拆成多条依次发送 */
-            Boolean splitLines
+            Boolean splitLines,
+            /** repeatRule = CRON 时必填：5 段（分 时 日 月 周）或 6 段（带秒） */
+            @Size(max = 120) String cronExpression
     ) {}
 
     public record ScheduledMessageView(
@@ -279,6 +281,7 @@ public final class AdminDtos {
             OffsetDateTime scheduledAt,
             String repeatRule,
             OffsetDateTime repeatUntil,
+            String cronExpression,
             boolean splitLines,
             int sentCount,
             String status,

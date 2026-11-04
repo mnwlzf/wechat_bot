@@ -6,6 +6,7 @@ import dayjs from 'dayjs'
 import { adminApi } from '@/api'
 import type { Conversation, PersonaPreview, PromptTemplate, PromptTemplateInput } from '@/api/types'
 import { getErrorMessage } from '@/api/client'
+import ChatSelect from '@/components/ChatSelect.vue'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -309,7 +310,8 @@ onMounted(async () => {
         <div>
           <h2>按群 / 按人指定人设</h2>
           <p class="head-desc">
-            群按群 ID、私聊按好友（wxid）单独换人设，改完立即生效；没指定的继续跟随默认人设。
+            群、私聊都能单独换人设，改完立即生效；没指定的继续跟随默认人设。
+            聊天里发「换人设」也能让聊天对象自己从名称列表里挑。
             <template v-if="boundCount">当前已有 {{ boundCount }} 个会话单独指定。</template>
           </p>
         </div>
@@ -404,12 +406,13 @@ onMounted(async () => {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="bindVisible" title="按 wxid / 群 ID 指定人设" width="min(520px, 92vw)">
+    <el-dialog v-model="bindVisible" title="手动指定某个人 / 某个群的人设" width="min(560px, 92vw)">
       <el-form label-position="top">
-        <el-form-item label="微信 ID">
-          <el-input v-model="bindForm.chatId" placeholder="私聊填 wxid_xxx，群填 xxx@chatroom" />
+        <el-form-item label="群 / 好友">
+          <ChatSelect v-model="bindForm.chatId" allow-create placeholder="搜群名、好友昵称，或直接粘贴 wxid" />
           <div class="field-hint">
-            会话还没出现过也能先绑定：保存时会补一条会话记录，等这个群/这个人发来消息就按这份人设回。
+            直接搜群名或好友昵称就行；会话还没出现过也能先绑定 —— 保存时会补一条会话记录，
+            等这个群 / 这个人发来消息就按这份人设回。
           </div>
         </el-form-item>
         <el-form-item label="人设">

@@ -337,7 +337,7 @@ export interface ChatMemoryInput {
 }
 
 export type ScheduledStatus = 'PENDING' | 'SENT' | 'CANCELLED' | 'FAILED'
-export type ScheduledRepeat = 'NONE' | 'DAILY' | 'WEEKLY'
+export type ScheduledRepeat = 'NONE' | 'DAILY' | 'WEEKLY' | 'CRON'
 
 export interface ScheduledMessage {
   id: string
@@ -348,6 +348,7 @@ export interface ScheduledMessage {
   scheduledAt: string
   repeatRule: ScheduledRepeat
   repeatUntil?: string | null
+  cronExpression?: string | null
   splitLines: boolean
   sentCount: number
   status: ScheduledStatus
@@ -365,6 +366,7 @@ export interface ScheduledMessageInput {
   scheduledAt: string
   repeatRule?: ScheduledRepeat
   repeatUntil?: string | null
+  cronExpression?: string | null
   splitLines?: boolean
 }
 

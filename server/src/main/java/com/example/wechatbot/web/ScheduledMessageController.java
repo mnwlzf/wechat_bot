@@ -36,7 +36,7 @@ public class ScheduledMessageController {
         return toView(service.create(
                 input.botId(), input.chatId(), input.chatName(), input.content(), input.scheduledAt(),
                 ScheduledRepeat.parse(input.repeatRule()), input.repeatUntil(),
-                Boolean.TRUE.equals(input.splitLines())));
+                Boolean.TRUE.equals(input.splitLines()), input.cronExpression()));
     }
 
     @PutMapping("/{id}")
@@ -45,7 +45,7 @@ public class ScheduledMessageController {
         return toView(service.update(id,
                 input.botId(), input.chatId(), input.chatName(), input.content(), input.scheduledAt(),
                 ScheduledRepeat.parse(input.repeatRule()), input.repeatUntil(),
-                Boolean.TRUE.equals(input.splitLines())));
+                Boolean.TRUE.equals(input.splitLines()), input.cronExpression()));
     }
 
     @PostMapping("/{id}/cancel")
@@ -68,6 +68,7 @@ public class ScheduledMessageController {
                 message.getScheduledAt(),
                 message.getRepeatRule() == null ? ScheduledRepeat.NONE.name() : message.getRepeatRule().name(),
                 message.getRepeatUntil(),
+                message.getCronExpression(),
                 message.isSplitLines(),
                 message.getSentCount(),
                 message.getStatus().name(),

@@ -13,6 +13,7 @@ import type {
   SendPolicyRow,
 } from '@/api/types'
 import { getErrorMessage } from '@/api/client'
+import ChatSelect from '@/components/ChatSelect.vue'
 
 type DialogMode = 'default' | 'chat'
 
@@ -52,10 +53,6 @@ const effectivePolicy = ref<SendPolicyEffective | null>(null)
 
 const defaultPolicy = computed(() => overview.value?.defaultPolicy || null)
 const overrides = computed(() => overview.value?.overrides || [])
-
-const activeConversation = computed(() =>
-  conversations.value.find((item) => item.chatId === chatInput.value),
-)
 
 function seconds(ms: number) {
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)} 秒` : `${ms} 毫秒`
@@ -234,8 +231,14 @@ async function openChatById(chatId: string, chatName: string, saved?: SendPolicy
   dialogVisible.value = true
 }
 
-async function onChatPick(value: string) {
-  chatNameInput.value = activeConversation.value?.chatName || chatNameInput.value
+async function onChatPick(conversation: Conversation | null) {
+  const value = chatInput.value
+  if (conversation) {
+    chatNameInput.value = conversation.chatName
+    if (!conversations.value.some((item) => item.chatId === conversation.chatId)) {
+      conversations.value = [conversation, ...conversations.value]
+    }
+  }
   effectivePolicy.value = defaultPolicy.value
   if (!value) {
     fillOverride(null)
@@ -428,24 +431,14 @@ onMounted(async () => {
     >
       <el-form label-position="top">
         <el-form-item v-if="dialogMode === 'chat'" label="会话/群">
-          <el-select
+          <ChatSelect
             v-model="chatInput"
-            filterable
             allow-create
-            default-first-option
-            :reserve-keyword="false"
             :disabled="Boolean(editingChatId)"
-            placeholder="选择会话，或直接粘贴 wxid / @chatroom"
+            placeholder="搜群名 / 好友昵称 / chatId"
             class="chat-select"
-            @change="onChatPick"
-          >
-            <el-option
-              v-for="item in conversations"
-              :key="item.chatId"
-              :label="`${item.chatName}${item.chatType === 'GROUP' ? '（群）' : ''}`"
-              :value="item.chatId"
-            />
-          </el-select>
+            @pick="onChatPick"
+          />
         </el-form-item>
 
         <p v-if="dialogMode === 'chat'" class="inherit-hint">

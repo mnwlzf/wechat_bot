@@ -6,6 +6,7 @@ import { MagicStick, Plus, Refresh } from '@element-plus/icons-vue'
 import { adminApi } from '@/api'
 import type { ChatMemory, Conversation } from '@/api/types'
 import { getErrorMessage } from '@/api/client'
+import ChatSelect from '@/components/ChatSelect.vue'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -55,7 +56,10 @@ async function loadMemories() {
   }
 }
 
-async function onChatChange() {
+async function onChatChange(conversation: Conversation | null) {
+  if (conversation && !conversations.value.some((item) => item.chatId === conversation.chatId)) {
+    conversations.value = [conversation, ...conversations.value]
+  }
   await loadMemories()
 }
 
@@ -188,23 +192,13 @@ onMounted(async () => {
     <section class="surface-card">
       <div class="surface-card__body">
         <div class="toolbar">
-          <el-select
+          <ChatSelect
             v-model="chatId"
-            filterable
             allow-create
-            default-first-option
-            :reserve-keyword="false"
-            placeholder="选择会话，或直接粘贴 wxid / @chatroom"
+            placeholder="搜群名 / 好友昵称 / chatId"
             class="chat-select"
-            @change="onChatChange"
-          >
-            <el-option
-              v-for="item in conversations"
-              :key="item.chatId"
-              :label="`${item.chatName}${item.chatType === 'GROUP' ? '（群）' : ''}`"
-              :value="item.chatId"
-            />
-          </el-select>
+            @pick="onChatChange"
+          />
           <el-button type="primary" :icon="Plus" :disabled="!chatId" @click="openCreate">添加要点</el-button>
         </div>
         <p class="chat-hint" v-if="chatId">
