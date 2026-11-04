@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { Plus, Star, StarFilled } from '@element-plus/icons-vue'
+import { Plus, Star, StarFilled, View } from '@element-plus/icons-vue'
 import dayjs from 'dayjs'
 import { adminApi } from '@/api'
-import type { Conversation, PromptTemplate, PromptTemplateInput } from '@/api/types'
+import type { Conversation, PersonaPreview, PromptTemplate, PromptTemplateInput } from '@/api/types'
 import { getErrorMessage } from '@/api/client'
 
 const loading = ref(false)
@@ -16,6 +16,14 @@ const keyword = ref('')
 const dialogVisible = ref(false)
 const editingId = ref<string | null>(null)
 const formRef = ref<FormInstance>()
+
+const previewVisible = ref(false)
+const previewLoading = ref(false)
+const preview = ref<PersonaPreview | null>(null)
+
+const bindVisible = ref(false)
+const bindSaving = ref(false)
+const bindForm = reactive({ chatId: '', promptTemplateId: '' })
 
 const form = reactive<PromptTemplateInput>({ name: '', description: '', content: '' })
 
@@ -45,7 +53,7 @@ async function loadConversations() {
   }
 }
 
-/** 给某个群单独绑定人设；空值表示跟随默认人设。 */
+/** 给某个群 / 某个人单独绑定人设；空值表示跟随默认人设。 */
 async function bindPersona(row: Conversation, templateId: string) {
   personaSaving.value = row.id
   try {
@@ -67,6 +75,55 @@ async function bindPersona(row: Conversation, templateId: string) {
   } finally {
     personaSaving.value = null
   }
+}
+
+function openBindDialog() {
+  bindForm.chatId = ''
+  bindForm.promptTemplateId = defaultPersona.value?.id || ''
+  bindVisible.value = true
+}
+
+/** 手动绑定：私聊填 wxid、群填 @chatroom 结尾的 ID，会话还没出现过也能先挂上人设。 */
+async function submitBind() {
+  if (!bindForm.chatId.trim()) {
+    ElMessage.warning('请填写微信号 wxid 或群 ID')
+    return
+  }
+  bindSaving.value = true
+  try {
+    const updated = await adminApi.bindPersonaByChatId(bindForm.chatId.trim(), bindForm.promptTemplateId || null)
+    ElMessage.success(`已给「${updated.chatName}」指定人设「${updated.promptTemplateName || '默认'}」`)
+    bindVisible.value = false
+    await loadConversations()
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+  } finally {
+    bindSaving.value = false
+  }
+}
+
+async function openPreview(row: Conversation) {
+  preview.value = null
+  previewLoading.value = true
+  previewVisible.value = true
+  try {
+    preview.value = await adminApi.personaPreview(row.id)
+  } catch (error) {
+    ElMessage.error(getErrorMessage(error))
+    previewVisible.value = false
+  } finally {
+    previewLoading.value = false
+  }
+}
+
+const sourceLabels: Record<string, string> = {
+  chat: '该会话单独指定',
+  default: '全局默认人设',
+  bot: '机器人自身提示词',
+}
+
+function sourceLabel(source?: string) {
+  return (source && sourceLabels[source]) || '未知'
 }
 
 async function load() {
@@ -250,22 +307,28 @@ onMounted(async () => {
     <section class="surface-card">
       <div class="surface-card__head">
         <div>
-          <h2>按群指定人设</h2>
+          <h2>按群 / 按人指定人设</h2>
           <p class="head-desc">
-            只给某个群单独换人设，改完立即生效；留空的群继续跟随默认人设。
+            群按群 ID、私聊按好友（wxid）单独换人设，改完立即生效；没指定的继续跟随默认人设。
             <template v-if="boundCount">当前已有 {{ boundCount }} 个会话单独指定。</template>
           </p>
         </div>
         <div class="head-actions">
-          <el-input v-model="keyword" placeholder="搜索群名 / chatId" clearable class="persona-search" />
+          <el-input v-model="keyword" placeholder="搜索群名 / 好友 / chatId" clearable class="persona-search" />
+          <el-button :icon="Plus" @click="openBindDialog">手动指定</el-button>
         </div>
       </div>
       <div class="surface-card__body">
         <el-table v-if="filteredConversations.length" :data="filteredConversations" style="width: 100%" max-height="440">
-          <el-table-column label="会话/群" min-width="240">
+          <el-table-column label="会话 / 群" min-width="230">
             <template #default="{ row }">
               <div class="chat-cell">
-                <strong>{{ row.chatName }}</strong>
+                <div class="chat-title-line">
+                  <strong>{{ row.chatName }}</strong>
+                  <el-tag size="small" :type="row.chatType === 'GROUP' ? 'primary' : 'success'" effect="plain">
+                    {{ row.chatType === 'GROUP' ? '群聊' : '私聊' }}
+                  </el-tag>
+                </div>
                 <span class="chat-id">{{ row.chatId }}</span>
               </div>
             </template>
@@ -277,7 +340,7 @@ onMounted(async () => {
               </span>
             </template>
           </el-table-column>
-          <el-table-column label="指定人设" width="230">
+          <el-table-column label="指定人设" width="210">
             <template #default="{ row }">
               <el-select
                 :model-value="row.promptTemplateId || ''"
@@ -294,10 +357,15 @@ onMounted(async () => {
               </el-select>
             </template>
           </el-table-column>
+          <el-table-column label="" width="82" align="right">
+            <template #default="{ row }">
+              <el-button text type="primary" size="small" :icon="View" @click="openPreview(row)">预览</el-button>
+            </template>
+          </el-table-column>
         </el-table>
         <div v-else-if="!loading" class="empty-state">
           <strong>还没有可以绑定的会话</strong>
-          机器人收到第一条消息之后，这里会出现群和私聊，可以逐个指定人设。
+          机器人收到第一条消息之后，这里会出现群和私聊；也可以点「手动指定」直接填 wxid 或群 ID 先绑上。
         </div>
       </div>
     </section>
@@ -334,6 +402,66 @@ onMounted(async () => {
         <el-button @click="dialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="saving" @click="submit">保存</el-button>
       </template>
+    </el-dialog>
+
+    <el-dialog v-model="bindVisible" title="按 wxid / 群 ID 指定人设" width="min(520px, 92vw)">
+      <el-form label-position="top">
+        <el-form-item label="微信 ID">
+          <el-input v-model="bindForm.chatId" placeholder="私聊填 wxid_xxx，群填 xxx@chatroom" />
+          <div class="field-hint">
+            会话还没出现过也能先绑定：保存时会补一条会话记录，等这个群/这个人发来消息就按这份人设回。
+          </div>
+        </el-form-item>
+        <el-form-item label="人设">
+          <el-select v-model="bindForm.promptTemplateId" class="persona-picker" placeholder="跟随默认人设">
+            <el-option
+              :label="defaultPersona ? `跟随默认（${defaultPersona.name}）` : '跟随默认人设'"
+              value=""
+            />
+            <el-option v-for="item in templates" :key="item.id" :label="item.name" :value="item.id" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="bindVisible = false">取消</el-button>
+        <el-button type="primary" :loading="bindSaving" @click="submitBind">保存</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="previewVisible" title="这条会话实际会用的提示词" width="min(680px, 94vw)">
+      <div v-loading="previewLoading" class="preview-body">
+        <template v-if="preview">
+          <div class="preview-head">
+            <strong>{{ preview.chatName }}</strong>
+            <el-tag size="small" :type="preview.chatType === 'GROUP' ? 'primary' : 'success'" effect="plain">
+              {{ preview.chatType === 'GROUP' ? '群聊' : '私聊' }}
+            </el-tag>
+            <span class="chat-id">{{ preview.chatId }}</span>
+          </div>
+          <p class="preview-meta">
+            人设：<b>{{ preview.personaName }}</b>
+            <el-tag size="small" type="info" effect="plain">来源 {{ sourceLabel(preview.personaSource) }}</el-tag>
+            <el-tag v-if="preview.personaBuiltin" size="small" effect="plain">内置</el-tag>
+          </p>
+
+          <div class="preview-block">
+            <span class="block-label">① 人设（system）</span>
+            <pre>{{ preview.personaContent }}</pre>
+          </div>
+          <div v-if="preview.memoryBlock" class="preview-block">
+            <span class="block-label">② 长期记忆（system）</span>
+            <pre>{{ preview.memoryBlock }}</pre>
+          </div>
+          <div v-if="preview.styleBlock" class="preview-block">
+            <span class="block-label">③ 微信口语风格约束（system）</span>
+            <pre>{{ preview.styleBlock }}</pre>
+          </div>
+          <p class="field-hint">
+            这三段就是模型每轮最先看到的内容，顺序也是先人设、再记忆、最后风格。
+            改完人设如果这里显示的已经是新内容，说明配置已经生效，剩下的差异来自模型本身和最近的聊天上下文。
+          </p>
+        </template>
+      </div>
     </el-dialog>
   </div>
 </template>
@@ -428,9 +556,60 @@ onMounted(async () => {
   gap: 2px;
 }
 
-.chat-cell strong {
+.chat-title-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chat-title-line strong {
   color: var(--ink);
   font-weight: 600;
+}
+
+.preview-body {
+  min-height: 120px;
+}
+
+.preview-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.preview-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 12px;
+  color: var(--ink-soft);
+  font-size: var(--fs-xs);
+}
+
+.preview-block {
+  margin-bottom: 12px;
+}
+
+.block-label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
+.preview-block pre {
+  margin: 0;
+  padding: 10px 12px;
+  max-height: 180px;
+  overflow: auto;
+  border-radius: var(--radius-sm);
+  background: var(--surface-soft);
+  color: var(--ink-soft);
+  font-size: var(--fs-xs);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .chat-id {

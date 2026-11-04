@@ -26,6 +26,7 @@ import type {
   MediaPolicyInput,
   Message,
   PageResult,
+  PersonaPreview,
   PromptTemplate,
   PromptTemplateInput,
   Provider,
@@ -134,8 +135,17 @@ export const adminApi = {
     )
     return data
   },
-  /** 可选 quoteAuthor/quoteText 模拟引用回复，mediaKind 模拟语音、图片等媒体消息。 */
-  async debugChat(botId: string, content: string, extra?: { quoteAuthor?: string; quoteText?: string; mediaKind?: string }) {
+  /** 可选 quoteAuthor/quoteText 模拟引用回复，mediaKind 模拟语音、图片等媒体消息，promptTemplateId 指定调试用人设。 */
+  async debugChat(
+    botId: string,
+    content: string,
+    extra?: {
+      quoteAuthor?: string
+      quoteText?: string
+      mediaKind?: string
+      promptTemplateId?: string | null
+    },
+  ) {
     const { data } = await http.post<DebugResult>('/api/admin/debug/chat', { botId, content, ...extra })
     return data
   },
@@ -188,6 +198,16 @@ export const adminApi = {
     const { data } = await http.post<Conversation>(`/api/admin/conversations/${conversationId}/persona`, {
       promptTemplateId,
     })
+    return data
+  },
+  /** 按 wxid / 群 ID 直接指定人设，会话还没出现过也能先绑定。 */
+  async bindPersonaByChatId(chatId: string, promptTemplateId: string | null) {
+    const { data } = await http.post<Conversation>('/api/admin/personas/bind', { chatId, promptTemplateId })
+    return data
+  },
+  /** 这条会话实际会发给模型的人设 / 记忆 / 风格三段提示词。 */
+  async personaPreview(conversationId: string) {
+    const { data } = await http.get<PersonaPreview>(`/api/admin/personas/preview/${conversationId}`)
     return data
   },
   async promptTemplates() {

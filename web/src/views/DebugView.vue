@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ChatDotRound, Delete, MagicStick, Promotion, Setting } from '@element-plus/icons-vue'
 import { adminApi } from '@/api'
-import type { Bot, Provider } from '@/api/types'
+import type { Bot, PromptTemplate, Provider } from '@/api/types'
 import { getErrorMessage } from '@/api/client'
 
 interface DebugMessage {
@@ -21,7 +21,10 @@ const loading = ref(false)
 const sending = ref(false)
 const bots = ref<Bot[]>([])
 const providers = ref<Provider[]>([])
+const templates = ref<PromptTemplate[]>([])
 const activeBotId = ref('')
+// 调试用人设：空 = 跟随默认人设（跟真实会话的解析顺序一致）
+const personaId = ref('')
 const input = ref('')
 const chatBody = ref<HTMLElement>()
 const messages = ref<DebugMessage[]>([])
@@ -73,6 +76,11 @@ async function load() {
     bots.value = botList
     providers.value = providerList
     activeBotId.value = botList[0]?.id || ''
+    try {
+      templates.value = await adminApi.promptTemplates()
+    } catch {
+      /* 没有人设时下拉只留「跟随默认」 */
+    }
   } catch (error) {
     ElMessage.error(getErrorMessage(error))
   } finally {
@@ -93,7 +101,8 @@ async function send() {
   }
 
   messages.value.push({ id: crypto.randomUUID(), role: 'user', content })
-  const extra: { quoteAuthor?: string; quoteText?: string; mediaKind?: string } = {}
+  const extra: { quoteAuthor?: string; quoteText?: string; mediaKind?: string; promptTemplateId?: string | null } = {}
+  extra.promptTemplateId = personaId.value || null
   if (mediaKind.value) extra.mediaKind = mediaKind.value
   if (quoteOn.value && quoteText.value.trim()) {
     extra.quoteAuthor = quoteAuthor.value.trim() || '张三'
@@ -213,6 +222,15 @@ onMounted(load)
             @keydown.enter.exact.prevent="send"
           />
           <div class="composer-tools">
+            <el-select v-model="personaId" size="small" style="width: 150px" placeholder="跟随默认人设">
+              <el-option label="跟随默认人设" value="" />
+              <el-option
+                v-for="item in templates"
+                :key="item.id"
+                :label="item.defaultPersona ? `${item.name}（默认）` : item.name"
+                :value="item.id"
+              />
+            </el-select>
             <el-select
               v-model="mediaKind"
               size="small"

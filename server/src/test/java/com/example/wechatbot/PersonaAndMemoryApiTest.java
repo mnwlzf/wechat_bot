@@ -226,6 +226,54 @@ class PersonaAndMemoryApiTest {
                 .contains("默认");
     }
 
+    @Test
+    void personaCanBeBoundByChatIdBeforeTheChatEverHappens() throws Exception {
+        // 有默认人设，解绑后才能断言「回落到默认」
+        String defaultPersona = createPersona("兜底人设", "你是默认人设");
+        mockMvc.perform(post("/api/admin/prompt-templates/{id}/default", defaultPersona)
+                        .header("Authorization", AUTH))
+                .andExpect(status().isOk());
+        String persona = createPersona("私聊专用人设", "你是这个人的老朋友");
+
+        // 还没有任何会话记录：按 wxid 直接绑定，后端补一条私聊会话
+        MvcResult bound = mockMvc.perform(post("/api/admin/personas/bind")
+                        .header("Authorization", AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"chatId\":\"wxid_never_talked\",\"promptTemplateId\":\"" + persona + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.chatType").value("PRIVATE"))
+                .andExpect(jsonPath("$.promptTemplateId").value(persona))
+                .andExpect(jsonPath("$.promptTemplateName").value("私聊专用人设"))
+                .andReturn();
+        JsonNode boundNode = objectMapper.readTree(bound.getResponse().getContentAsString());
+        String conversationId = boundNode.path("id").asText();
+
+        // 预览：确认实际生效的就是这份人设，而不是默认人设
+        mockMvc.perform(get("/api/admin/personas/preview/{id}", conversationId).header("Authorization", AUTH))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.personaSource").value("chat"))
+                .andExpect(jsonPath("$.personaName").value("私聊专用人设"))
+                .andExpect(jsonPath("$.personaContent").value("你是这个人的老朋友"));
+
+        // 群按 chatId 绑定时自动认成群聊
+        mockMvc.perform(post("/api/admin/personas/bind")
+                        .header("Authorization", AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"chatId\":\"9999@chatroom\",\"promptTemplateId\":\"" + persona + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.chatType").value("GROUP"));
+
+        // 解绑后预览回到默认人设
+        mockMvc.perform(post("/api/admin/personas/bind")
+                        .header("Authorization", AUTH)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"chatId\":\"wxid_never_talked\",\"promptTemplateId\":null}"))
+                .andExpect(status().isOk());
+        mockMvc.perform(get("/api/admin/personas/preview/{id}", conversationId).header("Authorization", AUTH))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.personaSource").value("default"));
+    }
+
     /** 绑定人设需要一个真实会话；测试库是 create-drop，这里自己造一条。 */
     private UUID seedConversation(String chatId, String chatName) {
         BotConfig bot = botRepository.findAll().getFirst();

@@ -126,6 +126,8 @@ $headers = @{ Authorization = "Bearer dev-admin-token" }
 | POST | `/api/admin/prompt-templates/{id}/default` | 设为全局默认人设（未单独指定的会话都用它） |
 | DELETE | `/api/admin/prompt-templates/default` | 取消默认人设，回退到机器人 `systemPrompt` |
 | POST | `/api/admin/conversations/{id}/persona` | 会话/群单独绑定人设：`{"promptTemplateId":"…"}`，传 `null` 回退默认 |
+| POST | `/api/admin/personas/bind` | 按 chatId 绑定（私聊填 wxid、群填 `@chatroom` 结尾）：`{"chatId":"…","promptTemplateId":"…"}`，会话不存在时自动补一条 |
+| GET | `/api/admin/personas/preview/{conversationId}` | 该会话实际会发给模型的提示词：人设正文、`personaSource`（chat / default / bot）、记忆块、风格块 |
 | GET | `/api/admin/memories?chatId=…` | 会话（群）共享记忆：滚动摘要 + 人工要点 |
 | POST | `/api/admin/memories` | 新增人工记忆要点：`{"chatId","chatName","content","enabled"}` |
 | PUT/DELETE | `/api/admin/memories/{id}` | 修改内容 / 启停 / 删除记忆条目 |

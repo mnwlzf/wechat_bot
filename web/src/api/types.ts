@@ -297,6 +297,22 @@ export interface PromptTemplateInput {
   content: string
 }
 
+/** 会话实际会发给模型的人设 / 记忆 / 风格三段系统提示词。 */
+export interface PersonaPreview {
+  conversationId: string
+  chatId: string
+  chatName: string
+  chatType: ChatType
+  promptTemplateId?: string | null
+  personaName: string
+  /** chat = 会话单独指定；default = 全局默认人设；bot = 机器人自身提示词 */
+  personaSource: 'chat' | 'default' | 'bot'
+  personaBuiltin: boolean
+  personaContent: string
+  memoryBlock?: string | null
+  styleBlock?: string | null
+}
+
 export type MemoryKind = 'SUMMARY' | 'NOTE'
 
 export interface ChatMemory {

@@ -360,12 +360,35 @@ public final class AdminDtos {
                                @NotBlank @Size(max = 10000) String content,
                                @Size(max = 180) String quoteAuthor,
                                @Size(max = 1000) String quoteText,
-                               @Size(max = 20) String mediaKind) {
+                               @Size(max = 20) String mediaKind,
+                               /** 这次调试用哪个人设；null 表示跟随默认人设。 */
+                               UUID promptTemplateId) {
 
         public DebugRequest(UUID botId, String content) {
-            this(botId, content, null, null, null);
+            this(botId, content, null, null, null, null);
         }
     }
+
+    /** 按 chatId 直接指定人设：会话还没出现过（例如还没私聊过）也能先绑上。 */
+    public record PersonaBindRequest(@NotBlank @Size(max = 180) String chatId, UUID promptTemplateId) {}
+
+    /**
+     * 某个会话实际会发给模型的人设相关提示词，用来解释「改了人设为什么感觉没变」。
+     */
+    public record PersonaPreview(
+            UUID conversationId,
+            String chatId,
+            String chatName,
+            String chatType,
+            UUID promptTemplateId,
+            String personaName,
+            /** chat = 该会话单独指定；default = 默认人设；bot = 机器人自身提示词 */
+            String personaSource,
+            boolean personaBuiltin,
+            String personaContent,
+            String memoryBlock,
+            String styleBlock
+    ) {}
 
     public record DebugResponse(String reply, String provider, String model, long latencyMs) {}
 

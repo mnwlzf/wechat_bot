@@ -53,8 +53,13 @@ public class DebugChatService {
                     return conversationRepository.save(created);
                 });
 
-        MessageLog inbound = new MessageLog();
-        inbound.setConversationId(conversation.getId());
+        // 调试用的人设跟真实会话一致：传了就用它，没传就回到默认人设
+        if (!java.util.Objects.equals(conversation.getPromptTemplateId(), request.promptTemplateId())) {
+            conversation.setPromptTemplateId(request.promptTemplateId());
+            conversationRepository.save(conversation);
+        }
+
+        MessageLog inbound = new MessageLog();        inbound.setConversationId(conversation.getId());
         inbound.setDirection(MessageDirection.INBOUND);
         inbound.setSenderId("debug");
         inbound.setSenderName("管理员");
