@@ -1,13 +1,18 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from 'vue'
 import { adminApi } from '@/api'
-import type { Conversation } from '@/api/types'
+import type { ChatCandidate, ChatChoice, Conversation } from '@/api/types'
 
 /**
- * 会话选择器：输入群名 / 好友昵称 / chatId 都能搜到，不用记 wxid。
+ * 会话选择器：输入群名称 / 好友昵称 / 备注 / chatId 都能搜到，不用记 wxid。
  *
- * <p>列表走服务端搜索（`/api/admin/conversations?query=`），所以会话上千条也不会漏；
- * 下拉项显示「群聊 / 私聊」标签，选中后通过 `pick` 把整条会话抛给父组件（拿 chatName 用）。</p>
+ * <p>两个数据源合并，缺一个不影响另一个：</p>
+ * <ul>
+ *   <li>会话表（`/api/admin/conversations?query=`）：聊过的会话，带着最后一条消息；</li>
+ *   <li>会话目录（`/api/admin/wechat/chats?keyword=`）：本机备注 / 联系人昵称 / 群名称 / 最近回调，
+ *       所以「还没跟机器人说过话」的群和好友也能按名字搜到。</li>
+ * </ul>
+ * <p>目录里的名字优先级更高：会话表里常常只存了一个 wxid / @chatroom。</p>
  */
 const props = withDefaults(
   defineProps<{
@@ -17,33 +22,83 @@ const props = withDefaults(
     /** 允许把没出现在列表里的 chatId 直接填进来（老数据兜底） */
     allowCreate?: boolean
   }>(),
-  { placeholder: '搜群名 / 好友昵称 / chatId', disabled: false, allowCreate: false },
+  { placeholder: '搜群名称 / 好友昵称 / 备注 / chatId', disabled: false, allowCreate: false },
 )
 
 const emit = defineEmits<{
   'update:modelValue': [value: string]
-  pick: [conversation: Conversation | null]
+  pick: [conversation: ChatChoice | null]
 }>()
 
-const options = ref<Conversation[]>([])
+interface Option {
+  chatId: string
+  name: string
+  group: boolean
+  /** 还没跟机器人说过话（会话表里没有），只能按名字绑 */
+  pending?: boolean
+  blocked?: boolean
+}
+
+const options = ref<Option[]>([])
 const loading = ref(false)
 
+function groupOf(chatId: string, chatType?: string) {
+  if (chatType) return chatType === 'GROUP'
+  return chatId.endsWith('@chatroom')
+}
+
 async function search(query: string) {
+  const keyword = query.trim()
   loading.value = true
-  try {
-    const data = await adminApi.conversations({ query: query.trim() || undefined, page: 0, size: 50 })
-    options.value = data.content
-  } catch {
-    /* 搜索失败就保留上一次的结果，不打断输入 */
-  } finally {
-    loading.value = false
+  // 两个请求各自成败，任何一边挂了都还有另一边可用
+  const [directory, conversations] = await Promise.all([
+    adminApi
+      .searchChats({ kind: 'all', keyword: keyword || undefined, limit: 80 })
+      .catch(() => [] as ChatCandidate[]),
+    adminApi
+      .conversations({ query: keyword || undefined, page: 0, size: 80 })
+      .then((page) => page.content)
+      .catch(() => [] as Conversation[]),
+  ])
+
+  const merged = new Map<string, Option>()
+  for (const item of directory) {
+    if (item.blocked) continue
+    merged.set(item.chatId, {
+      chatId: item.chatId,
+      name: item.name || item.chatId,
+      group: item.group,
+    })
   }
+  for (const item of conversations) {
+    const existing = merged.get(item.chatId)
+    const name = item.chatName && item.chatName !== item.chatId ? item.chatName : item.chatId
+    if (existing) {
+      // 目录里的名字更可信（备注 / 昵称），只在它就是个 ID 时才换成会话里的名字
+      if (existing.name === existing.chatId && name !== item.chatId) existing.name = name
+      continue
+    }
+    merged.set(item.chatId, {
+      chatId: item.chatId,
+      name,
+      group: groupOf(item.chatId, item.chatType),
+    })
+  }
+  // 还没聊过的排后面，聊过的按名字排，避免一屏全是陌生群
+  options.value = [...merged.values()].sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN'))
+  loading.value = false
 }
 
 function onPick(value: string | undefined | null) {
   const chatId = value || ''
   emit('update:modelValue', chatId)
-  emit('pick', options.value.find((item) => item.chatId === chatId) || null)
+  const found = options.value.find((item) => item.chatId === chatId)
+  emit(
+    'pick',
+    found
+      ? { chatId: found.chatId, chatName: found.name, chatType: found.group ? 'GROUP' : 'PRIVATE' }
+      : null,
+  )
 }
 
 // 外部改了值（比如从路由带进来 chatId）时，补一次搜索把名字也加载出来
@@ -75,10 +130,16 @@ onMounted(() => void search(''))
     class="chat-select"
     @update:model-value="onPick"
   >
-    <el-option v-for="item in options" :key="item.chatId" :label="item.chatName" :value="item.chatId">
+    <el-option
+      v-for="item in options"
+      :key="item.chatId"
+      :label="item.name"
+      :value="item.chatId"
+      :disabled="item.blocked"
+    >
       <div class="chat-option">
-        <span class="chat-option__name">{{ item.chatName }}</span>
-        <span class="chat-option__tag">{{ item.chatType === 'GROUP' ? '群聊' : '私聊' }}</span>
+        <span class="chat-option__name">{{ item.name }}</span>
+        <span class="chat-option__tag">{{ item.group ? '群聊' : '私聊' }}</span>
       </div>
     </el-option>
   </el-select>

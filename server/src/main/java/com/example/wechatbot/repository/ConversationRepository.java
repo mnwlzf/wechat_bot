@@ -7,6 +7,8 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -30,4 +32,7 @@ public interface ConversationRepository extends JpaRepository<Conversation, UUID
             order by c.lastMessageAt desc
             """)
     Page<Conversation> search(@Param("query") String query, Pageable pageable);
+
+    /** 按 chatId 批量取会话：目录里按昵称 / 群名搜到一批 ID 后，再回表拿会话。 */
+    List<Conversation> findByChatIdIn(Collection<String> chatIds);
 }

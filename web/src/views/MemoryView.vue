@@ -4,7 +4,7 @@ import dayjs from 'dayjs'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { MagicStick, Plus, Refresh } from '@element-plus/icons-vue'
 import { adminApi } from '@/api'
-import type { ChatMemory, Conversation } from '@/api/types'
+import type { ChatChoice, ChatMemory, Conversation } from '@/api/types'
 import { getErrorMessage } from '@/api/client'
 import ChatSelect from '@/components/ChatSelect.vue'
 
@@ -26,12 +26,17 @@ const formRules: FormRules = {
 
 const summary = computed(() => memories.value.find((item) => item.kind === 'SUMMARY') || null)
 const notes = computed(() => memories.value.filter((item) => item.kind === 'NOTE'))
-const activeConversation = computed(() => conversations.value.find((item) => item.chatId === chatId.value))
-const activeName = computed(() => activeConversation.value?.chatName || chatId.value)
+/** 选择器里选中的名字：可能来自会话目录（这个群还没跟机器人说过话） */
+const pickedName = ref('')
+const activeName = computed(
+  () => conversations.value.find((item) => item.chatId === chatId.value)?.chatName
+    || pickedName.value
+    || chatId.value,
+)
 
 async function loadConversations() {
   try {
-    const data = await adminApi.conversations({ page: 0, size: 100 })
+    const data = await adminApi.conversations({ page: 0, size: 1 })
     conversations.value = data.content
     if (!chatId.value && data.content.length) {
       chatId.value = data.content[0].chatId
@@ -56,10 +61,8 @@ async function loadMemories() {
   }
 }
 
-async function onChatChange(conversation: Conversation | null) {
-  if (conversation && !conversations.value.some((item) => item.chatId === conversation.chatId)) {
-    conversations.value = [conversation, ...conversations.value]
-  }
+async function onChatChange(conversation: ChatChoice | null) {
+  if (conversation) pickedName.value = conversation.chatName
   await loadMemories()
 }
 

@@ -6,7 +6,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import { adminApi } from '@/api'
 import type {
-  Conversation,
+  ChatChoice,
   SendPolicyEffective,
   SendPolicyInput,
   SendPolicyOverview,
@@ -22,7 +22,6 @@ const route = useRoute()
 const loading = ref(false)
 const saving = ref(false)
 const overview = ref<SendPolicyOverview | null>(null)
-const conversations = ref<Conversation[]>([])
 const dialogVisible = ref(false)
 const dialogMode = ref<DialogMode>('default')
 const editingChatId = ref('')
@@ -175,15 +174,6 @@ async function load() {
   }
 }
 
-async function loadConversations() {
-  try {
-    const data = await adminApi.conversations({ page: 0, size: 100 })
-    conversations.value = data.content
-  } catch {
-    /* 会话列表不可用时仍可手填 chatId */
-  }
-}
-
 function openDefault() {
   if (!defaultPolicy.value) return
   dialogMode.value = 'default'
@@ -231,13 +221,10 @@ async function openChatById(chatId: string, chatName: string, saved?: SendPolicy
   dialogVisible.value = true
 }
 
-async function onChatPick(conversation: Conversation | null) {
+async function onChatPick(conversation: ChatChoice | null) {
   const value = chatInput.value
   if (conversation) {
     chatNameInput.value = conversation.chatName
-    if (!conversations.value.some((item) => item.chatId === conversation.chatId)) {
-      conversations.value = [conversation, ...conversations.value]
-    }
   }
   effectivePolicy.value = defaultPolicy.value
   if (!value) {
@@ -308,7 +295,7 @@ function timeLabel(value?: string | null) {
 }
 
 onMounted(async () => {
-  await Promise.all([load(), loadConversations()])
+  await load()
   const chat = typeof route.query.chat === 'string' ? route.query.chat : ''
   if (chat) {
     const name = typeof route.query.name === 'string' ? route.query.name : chat

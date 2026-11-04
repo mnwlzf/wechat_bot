@@ -100,6 +100,10 @@ class SilkDecoderTest {
     @DisplayName("解码命令不可用时给出清楚的 SILK 相关错误，而不是抛 NPE")
     void reportsMissingCommand() {
         SilkDecoder decoder = new SilkDecoder(properties("definitely-not-a-real-binary-xyz"), new ObjectMapper());
+        // 命令跑不起来时还会自动探测 WeChatAgent 的解码脚本；本机装了那个项目就探测得到，
+        // 这时「不可用」这条分支根本走不到，跳过而不是假装失败。
+        org.junit.jupiter.api.Assumptions.assumeTrue(decoder.command().isEmpty(),
+                "本机自动探测到了 SILK 解码器，跳过「命令不可用」用例");
 
         assertThatThrownBy(() -> decoder.toWav(silkBytes()))
                 .isInstanceOf(AsrException.class)

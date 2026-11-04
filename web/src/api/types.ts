@@ -278,6 +278,9 @@ export interface Conversation {
   effectivePersonaName?: string | null
 }
 
+/** 会话选择器选中后的最小信息：可能来自会话表，也可能只来自会话目录（还没聊过）。 */
+export type ChatChoice = Pick<Conversation, 'chatId' | 'chatName' | 'chatType'>
+
 export interface PromptTemplate {
   id: string
   name: string

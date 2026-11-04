@@ -35,23 +35,25 @@ const formRules: FormRules = {
 
 const defaultPersona = computed(() => templates.value.find((item) => item.defaultPersona))
 
-const filteredConversations = computed(() => {
-  const query = keyword.value.trim().toLowerCase()
-  if (!query) return conversations.value
-  return conversations.value.filter(
-    (item) => item.chatName.toLowerCase().includes(query) || item.chatId.toLowerCase().includes(query),
-  )
-})
-
 const boundCount = computed(() => conversations.value.filter((item) => item.promptTemplateId).length)
 
-async function loadConversations() {
+/**
+ * 会话列表搜索走服务端：会话表里可能只存了 wxid / @chatroom，
+ * 后端会再用会话目录（备注 / 昵称 / 群名称）补搜一遍，所以搜「客户群」也能命中。
+ */
+async function loadConversations(query = keyword.value.trim()) {
   try {
-    const data = await adminApi.conversations({ page: 0, size: 100 })
+    const data = await adminApi.conversations({ query: query || undefined, page: 0, size: 100 })
     conversations.value = data.content
   } catch (error) {
     ElMessage.error(getErrorMessage(error))
   }
+}
+
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+function onKeywordChange() {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => void loadConversations(), 300)
 }
 
 /** 给某个群 / 某个人单独绑定人设；空值表示跟随默认人设。 */
@@ -316,12 +318,19 @@ onMounted(async () => {
           </p>
         </div>
         <div class="head-actions">
-          <el-input v-model="keyword" placeholder="搜索群名 / 好友 / chatId" clearable class="persona-search" />
+          <el-input
+            v-model="keyword"
+            placeholder="搜索群名 / 好友昵称 / 备注 / chatId"
+            clearable
+            class="persona-search"
+            @input="onKeywordChange"
+            @clear="onKeywordChange"
+          />
           <el-button :icon="Plus" @click="openBindDialog">手动指定</el-button>
         </div>
       </div>
       <div class="surface-card__body">
-        <el-table v-if="filteredConversations.length" :data="filteredConversations" style="width: 100%" max-height="440">
+        <el-table v-if="conversations.length" :data="conversations" style="width: 100%" max-height="440">
           <el-table-column label="会话 / 群" min-width="230">
             <template #default="{ row }">
               <div class="chat-cell">
@@ -366,8 +375,10 @@ onMounted(async () => {
           </el-table-column>
         </el-table>
         <div v-else-if="!loading" class="empty-state">
-          <strong>还没有可以绑定的会话</strong>
-          机器人收到第一条消息之后，这里会出现群和私聊；也可以点「手动指定」直接填 wxid 或群 ID 先绑上。
+          <strong>{{ keyword ? '没搜到匹配的会话' : '还没有可以绑定的会话' }}</strong>
+          {{ keyword
+            ? '换个关键词试试，或者点「手动指定」按群名 / 昵称再搜一次。'
+            : '机器人收到第一条消息之后，这里会出现群和私聊；也可以点「手动指定」按群名或昵称先绑上。' }}
         </div>
       </div>
     </section>

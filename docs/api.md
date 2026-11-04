@@ -320,6 +320,15 @@ POST /api/admin/search-settings/test
 
 人工接管：`POST /api/admin/conversations/{id}/takeover`，请求体 `{"paused": true}`。接管期间收到的消息以 `IGNORED` 入库并记录“人工接管中，未自动回复”，不会进入模型链路。
 
+会话检索：`GET /api/admin/conversations?query=客户群&page=0&size=20`。
+
+- 先按会话表里的 `chat_name` / `chat_id` 模糊匹配；
+- **一条都没匹配上时**，再用会话目录（本机备注 › 联系人昵称 › 群名称 › 最近回调）按名字搜一遍，
+  把命中的 `chat_id` 回表取会话。微信回调没带名字时 `chat_name` 就是 `xxx@chatroom`，
+  光靠数据库 LIKE 永远搜不到中文群名，这一步是补这个洞；
+- 补搜命中的会话，`chatName` 用目录里的名字显示（数据库里的名字本身就是有效名称时保持原样）；
+- 目录依赖微信 Hook / 本地库，读不到时按「没搜到」处理，不影响会话列表本身。
+
 诊断聚合示例（`GET /api/admin/diagnostics`）：
 
 ```json

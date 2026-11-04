@@ -6,7 +6,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import { adminApi } from '@/api'
 import type {
-  Conversation,
+  ChatChoice,
   ReplyMode,
   ReplyPolicyEffective,
   ReplyPolicyOverview,
@@ -44,7 +44,6 @@ const loading = ref(false)
 const savingDefault = ref(false)
 const saving = ref(false)
 const overview = ref<ReplyPolicyOverview | null>(null)
-const conversations = ref<Conversation[]>([])
 const dialogVisible = ref(false)
 const editingChatId = ref('')
 const chatInput = ref('')
@@ -122,15 +121,6 @@ async function load() {
   }
 }
 
-async function loadConversations() {
-  try {
-    const data = await adminApi.conversations({ page: 0, size: 100 })
-    conversations.value = data.content
-  } catch {
-    /* 会话列表不可用时仍可手填 chatId */
-  }
-}
-
 async function saveDefault() {
   if (defaultForm.mode === 'WAKE' && !defaultForm.wakeWords.trim()) {
     ElMessage.warning('关键词唤醒模式需要至少填一个唤醒词')
@@ -198,17 +188,11 @@ async function loadChatEffective(chatId: string) {
   }
 }
 
-async function onChatPick(picked: Conversation | string | null) {
-  const conversation =
-    typeof picked === 'string'
-      ? conversations.value.find((item) => item.chatId === picked) || null
-      : picked
+async function onChatPick(picked: ChatChoice | string | null) {
+  const conversation = typeof picked === 'string' ? null : picked
   const value = chatInput.value
   if (conversation) {
     chatNameInput.value = conversation.chatName
-    if (!conversations.value.some((item) => item.chatId === conversation.chatId)) {
-      conversations.value = [conversation, ...conversations.value]
-    }
   }
   chatEffective.value = effective.value
   if (!value) return
@@ -286,7 +270,7 @@ async function resetToDefault(row: ReplyPolicyRow) {
 }
 
 onMounted(async () => {
-  await Promise.all([load(), loadConversations()])
+  await load()
   const chat = typeof route.query.chat === 'string' ? route.query.chat : ''
   if (chat) {
     openNewChat()

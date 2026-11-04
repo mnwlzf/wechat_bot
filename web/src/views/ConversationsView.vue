@@ -211,7 +211,7 @@ onMounted(async () => {
         <el-input
           v-model="query"
           class="search-input"
-          placeholder="搜索聊天名称或 Chat ID"
+          placeholder="搜索群名称 / 好友昵称 / 备注 / Chat ID"
           :prefix-icon="Search"
           clearable
           @keyup.enter="search"

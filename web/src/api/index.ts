@@ -116,7 +116,7 @@ export const adminApi = {
     return data
   },
   /** 按昵称 / 备注 / 群名称搜索可加入白名单的会话（公众号与系统会话会标记 blocked）。 */
-  async searchChats(params: { kind: 'private' | 'groups'; keyword?: string; limit?: number }) {
+  async searchChats(params: { kind: 'private' | 'groups' | 'all'; keyword?: string; limit?: number }) {
     const { data } = await http.get<ChatCandidate[]>('/api/admin/wechat/chats', { params })
     return data
   },
