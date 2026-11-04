@@ -45,6 +45,8 @@ public class FlowTraceService {
         PACING("打字延迟"),
         LLM("调模型"),
         OUTBOX("进发送队列"),
+        REMIND("提醒"),
+        ACK("回执"),
         SENT("已发出"),
         FAILED("发送失败");
 

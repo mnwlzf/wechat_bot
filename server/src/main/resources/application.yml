@@ -193,6 +193,23 @@ app:
     # 后台补摘要的扫描间隔（毫秒）与每轮最多处理几个会话
     sweep-interval-ms: ${MEMORY_SWEEP_INTERVAL_MS:300000}
     sweep-batch: ${MEMORY_SWEEP_BATCH:20}
+  # 提醒任务：聊天里一句话建、每 N 分钟催一次、回话就停、有次数上限
+  reminder:
+    enabled: ${REMINDER_ENABLED:true}
+    # 允许在聊天里用自然语言建 / 停 / 查提醒
+    create-in-chat: ${REMINDER_CREATE_IN_CHAT:true}
+    # 回执是否允许让模型判断（关掉则只认停止词）
+    nl-ack: ${REMINDER_NL_ACK:true}
+    default-interval-minutes: ${REMINDER_DEFAULT_INTERVAL_MINUTES:5}
+    default-max-times: ${REMINDER_DEFAULT_MAX_TIMES:6}
+    # 次数硬顶：聊天里说「提醒我一万次」也只能到这里
+    hard-max-times: ${REMINDER_HARD_MAX_TIMES:20}
+    min-interval-minutes: ${REMINDER_MIN_INTERVAL_MINUTES:5}
+    max-waiting-per-chat: ${REMINDER_MAX_WAITING_PER_CHAT:3}
+    max-per-day-per-chat: ${REMINDER_MAX_PER_DAY_PER_CHAT:5}
+    # 次数用完时补一句收尾
+    final-message: ${REMINDER_FINAL_MESSAGE:true}
+    ask-back-seconds: ${REMINDER_ASK_BACK_SECONDS:300}
   # 群消息常常几秒好几条：先攒一小会儿再回一次，别一条一条抢话
   reply:
     enabled: ${REPLY_DEBOUNCE_ENABLED:true}

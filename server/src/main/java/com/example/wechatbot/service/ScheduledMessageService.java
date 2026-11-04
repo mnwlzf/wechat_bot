@@ -1,7 +1,10 @@
 package com.example.wechatbot.service;
 
 import com.example.wechatbot.common.ApiException;
+import com.example.wechatbot.config.ReminderProperties;
+import com.example.wechatbot.disguise.DisguiseClock;
 import com.example.wechatbot.domain.*;
+import com.example.wechatbot.flow.FlowTraceService;
 import com.example.wechatbot.repository.BotConfigRepository;
 import com.example.wechatbot.repository.ConversationRepository;
 import com.example.wechatbot.repository.OutboxMessageRepository;
@@ -15,20 +18,26 @@ import org.springframework.scheduling.support.CronExpression;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.time.OffsetDateTime;
-import java.time.ZonedDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
- * 定时消息：到点后转成 outbox 记录，交给既有的投递器发送。
+ * 定时任务：到点后转成 outbox 记录，交给既有的投递器发送。
  *
  * <p>不直接调用微信接口，是为了沿用同一套重试、租约与伪装节奏；
- * 定时消息只负责「什么时候该发」，不负责「怎么发」。</p>
+ * 定时任务只负责「什么时候该发」，不负责「怎么发」。</p>
  *
- * <p>支持三种「一次配置长期生效」的写法：每天 / 每周重复、内容按行拆成多条发送。
- * 重复消息发完不置为 SENT，而是把时间往后推一个周期继续排队，管理端能看到下一次发送时间。</p>
+ * <p>两种任务：</p>
+ * <ul>
+ *   <li>{@link ScheduledKind#MESSAGE}：一次性或按每天/每周/cron 重复；</li>
+ *   <li>{@link ScheduledKind#REMINDER}：每 {@code intervalMinutes} 催一次，对方回话就停
+ *       （{@link #ack}），最多催 {@code maxTimes} 次，次数用完补一句收尾再置 EXPIRED。
+ *       撞上免打扰时段不发送也不计数，醒来接着催。</li>
+ * </ul>
  */
 @Service
 public class ScheduledMessageService {
@@ -36,27 +45,41 @@ public class ScheduledMessageService {
     private static final int BATCH = 20;
     /** 分条发送的条数上限，避免一次填几十行把群刷屏。 */
     private static final int MAX_PARTS = 10;
+    /** 提醒间隔的硬上限：一天催一次已经是极限了。 */
+    private static final int MAX_INTERVAL_MINUTES = 24 * 60;
 
     private final ScheduledMessageRepository repository;
     private final OutboxMessageRepository outboxRepository;
     private final ConversationRepository conversationRepository;
     private final BotConfigRepository botRepository;
     private final ContentFilterService contentFilter;
+    private final DisguiseClock clock;
+    private final ReminderProperties reminderProperties;
 
     public ScheduledMessageService(ScheduledMessageRepository repository,
                                    OutboxMessageRepository outboxRepository,
                                    ConversationRepository conversationRepository,
                                    BotConfigRepository botRepository,
-                                   ContentFilterService contentFilter) {
+                                   ContentFilterService contentFilter,
+                                   DisguiseClock clock,
+                                   ReminderProperties reminderProperties) {
         this.repository = repository;
         this.outboxRepository = outboxRepository;
         this.conversationRepository = conversationRepository;
         this.botRepository = botRepository;
         this.contentFilter = contentFilter;
+        this.clock = clock;
+        this.reminderProperties = reminderProperties;
     }
 
     public Page<ScheduledMessage> list(int page, int size) {
         return repository.findAllByOrderByScheduledAtDesc(
+                PageRequest.of(Math.max(0, page), Math.max(1, Math.min(size, 100))));
+    }
+
+    /** 只列提醒（管理端「提醒」页签）。 */
+    public Page<ScheduledMessage> listReminders(int page, int size) {
+        return repository.findByKindOrderByScheduledAtDesc(ScheduledKind.REMINDER,
                 PageRequest.of(Math.max(0, page), Math.max(1, Math.min(size, 100))));
     }
 
@@ -90,6 +113,94 @@ public class ScheduledMessageService {
         apply(message, botId, chatId, chatName, content, scheduledAt, repeatRule, repeatUntil, splitLines, cronExpression);
         message.setStatus(ScheduledStatus.PENDING);
         return repository.save(message);
+    }
+
+    /**
+     * 提醒任务需要的东西一次给全。
+     *
+     * @param variants     人设生成的几句文案（每行一句，按次数依次用），可以为空
+     * @param finalMessage 次数用完后的收尾话术，可以为空
+     */
+    public record ReminderSpec(String title,
+                               OffsetDateTime firstAt,
+                               Integer intervalMinutes,
+                               Integer maxTimes,
+                               String stopWords,
+                               String content,
+                               String variants,
+                               String finalMessage,
+                               ScheduledRepeat repeatRule,
+                               String cronExpression,
+                               OffsetDateTime repeatUntil,
+                               ScheduleSource source,
+                               String creatorChatId,
+                               String rawInstruction) {}
+
+    /**
+     * 建一个提醒任务。
+     *
+     * <p>只允许私聊：群里谁都能说话，提醒会变成对所有人的广播，也没法判定该谁回执。</p>
+     */
+    @Transactional
+    public ScheduledMessage createReminder(UUID botId, String chatId, String chatName, ReminderSpec spec) {
+        if (chatId == null || chatId.isBlank()) {
+            throw ApiException.badRequest("请选择要提醒的会话");
+        }
+        String normalizedChatId = chatId.trim();
+        BotConfig bot = requireBot(botId);
+        Conversation conversation = conversationRepository.findByBotIdAndChatId(bot.getId(), normalizedChatId)
+                .orElse(null);
+        if (conversation != null && conversation.getChatType() == ChatType.GROUP) {
+            throw ApiException.badRequest("群聊不支持提醒：只能给私聊的人设提醒");
+        }
+        OffsetDateTime firstAt = spec.firstAt() == null ? OffsetDateTime.now().plusMinutes(1) : spec.firstAt();
+        if (firstAt.isBefore(OffsetDateTime.now().minusMinutes(1))) {
+            throw ApiException.badRequest("提醒时间不能早于当前时间");
+        }
+        long waiting = repository.countByChatIdAndKindAndStatus(
+                normalizedChatId, ScheduledKind.REMINDER, ScheduledStatus.PENDING);
+        if (waiting >= Math.max(1, reminderProperties.getMaxWaitingPerChat())) {
+            throw ApiException.badRequest("这个会话已经有 " + waiting + " 个提醒在等回执，先停掉一个再建");
+        }
+        long today = repository.countByChatIdAndKindAndCreatedAtAfter(normalizedChatId, ScheduledKind.REMINDER,
+                OffsetDateTime.now().withHour(0).withMinute(0).withSecond(0).withNano(0));
+        if (today >= Math.max(1, reminderProperties.getMaxPerDayPerChat())) {
+            throw ApiException.badRequest("今天已经建了 " + today + " 个提醒，明天再说吧");
+        }
+
+        ScheduledMessage message = new ScheduledMessage();
+        message.setKind(ScheduledKind.REMINDER);
+        message.setBotId(bot.getId());
+        message.setConversationId(conversation == null ? null : conversation.getId());
+        message.setChatId(normalizedChatId);
+        message.setChatName(chatName == null || chatName.isBlank()
+                ? (conversation == null ? normalizedChatId : conversation.getChatName())
+                : chatName.trim());
+        message.setTitle(trimTo(spec.title(), 120));
+        message.setContent(trimTo(spec.content(), 2000));
+        message.setVariants(trimTo(spec.variants(), 4000));
+        message.setFinalMessage(trimTo(spec.finalMessage(), 500));
+        String stopWords = spec.stopWords() == null || spec.stopWords().isBlank()
+                ? defaultStopWords()
+                : spec.stopWords().trim();
+        message.setStopWords(trimTo(stopWords, 500));
+        message.setScheduledAt(firstAt);
+        message.setRepeatRule(spec.repeatRule() == null ? ScheduledRepeat.NONE : spec.repeatRule());
+        message.setCronExpression(trimTo(spec.cronExpression(), 120));
+        message.setRepeatUntil(spec.repeatUntil());
+        message.setIntervalMinutes(clampInterval(spec.intervalMinutes()));
+        message.setMaxTimes(clampMaxTimes(spec.maxTimes()));
+        message.setSplitLines(false);
+        message.setStatus(ScheduledStatus.PENDING);
+        message.setSource(spec.source() == null ? ScheduleSource.ADMIN : spec.source());
+        message.setCreatorChatId(trimTo(spec.creatorChatId(), 180));
+        message.setRawInstruction(trimTo(spec.rawInstruction(), 2000));
+        return repository.save(message);
+    }
+
+    /** 默认停止词：对方随口一句「好了」「收到」也算完成。 */
+    static String defaultStopWords() {
+        return "已打卡,打卡了,打完了,完成了,弄好了,搞定了,好了,收到,知道了,不用提醒了,别提醒了";
     }
 
     /** 编辑待发送的定时消息：时间、接收人、内容、重复规则都可以改。 */
@@ -127,7 +238,89 @@ public class ScheduledMessageService {
         repository.deleteById(id);
     }
 
-    /** 每 20 秒扫一次到期消息，转成 outbox 交给投递器。 */
+    // ------------------------------------------------------------------ 提醒
+
+    /** 这个私聊里还在等的提醒（含还没开始催的）。 */
+    public List<ScheduledMessage> waitingReminders(String chatId) {
+        if (chatId == null || chatId.isBlank()) {
+            return List.of();
+        }
+        return repository.findByChatIdAndKindAndStatusOrderByScheduledAtAsc(chatId.trim(),
+                ScheduledKind.REMINDER, ScheduledStatus.PENDING);
+    }
+
+    /** 最近真正催过的那条：自然语言回执（「弄好了」）默认停它。 */
+    public Optional<ScheduledMessage> latestWaitingReminder(String chatId) {
+        if (chatId == null || chatId.isBlank()) {
+            return Optional.empty();
+        }
+        return repository.findByChatIdAndKindAndStatusAndSentCountGreaterThanOrderBySentAtDesc(
+                        chatId.trim(), ScheduledKind.REMINDER, ScheduledStatus.PENDING, 0, PageRequest.of(0, 1))
+                .stream().findFirst();
+    }
+
+    /**
+     * 对方回话了：把这条提醒收掉。
+     *
+     * @param ackContent 触发停止的那句原话（留痕，方便复盘「它凭什么算我完成了」）
+     */
+    @Transactional
+    public boolean ack(ScheduledMessage message, String ackContent) {
+        if (message == null || message.getStatus() != ScheduledStatus.PENDING) {
+            return false;
+        }
+        OffsetDateTime now = OffsetDateTime.now();
+        int rounds = message.getSentCount();
+        message.setAckAt(now);
+        message.setAckContent(trimTo(ackContent, 500));
+        message.setLastError(null);
+        // 每天重复的提醒：这一轮到此为止，明天照旧；一次性的就彻底结束
+        ScheduledRepeat repeat = message.getRepeatRule() == null ? ScheduledRepeat.NONE : message.getRepeatRule();
+        boolean rescheduled = false;
+        if (repeat != ScheduledRepeat.NONE) {
+            OffsetDateTime next = nextOccurrence(message, now);
+            if (next != null) {
+                message.setScheduledAt(next);
+                message.setSentCount(0);
+                rescheduled = true;
+            }
+        }
+        message.setStatus(rescheduled ? ScheduledStatus.PENDING : ScheduledStatus.ACKED);
+        repository.save(message);
+        FlowTraceService.mark(FlowTraceService.Stage.ACK, message.getChatId(), message.getChatName(),
+                "对方回话了，提醒「" + safeTitle(message) + "」本轮结束（催了 " + rounds
+                        + " 次" + (rescheduled ? "，明天继续" : "") + "）",
+                ackContent);
+        return true;
+    }
+
+    /** 「别提醒我了」：把这个会话里等待中的提醒全部停掉。 */
+    @Transactional
+    public int stopWaiting(String chatId) {
+        List<ScheduledMessage> waiting = waitingReminders(chatId);
+        for (ScheduledMessage message : waiting) {
+            message.setStatus(ScheduledStatus.CANCELLED);
+            message.setAckContent("用户要求停止提醒");
+            repository.save(message);
+            FlowTraceService.mark(FlowTraceService.Stage.ACK, message.getChatId(), message.getChatName(),
+                    "对方要求停止提醒「" + safeTitle(message) + "」", null);
+        }
+        return waiting.size();
+    }
+
+    /** 管理端「停止」：待发或等回执都能停。 */
+    @Transactional
+    public ScheduledMessage stop(UUID id, String reason) {
+        ScheduledMessage message = get(id);
+        if (message.getStatus() != ScheduledStatus.PENDING) {
+            throw ApiException.badRequest("这个任务已经不在等待中了");
+        }
+        message.setStatus(ScheduledStatus.CANCELLED);
+        message.setAckContent(trimTo(reason, 500));
+        return repository.save(message);
+    }
+
+    /** 每 20 秒扫一次到期任务，转成 outbox 交给投递器。 */
     @Scheduled(fixedDelayString = "${app.scheduled.dispatch-interval-ms:20000}", initialDelay = 30000)
     public void dispatchDue() {
         List<ScheduledMessage> due = repository
@@ -151,6 +344,10 @@ public class ScheduledMessageService {
     }
 
     private void queue(ScheduledMessage message) {
+        if (message.getKind() == ScheduledKind.REMINDER) {
+            queueReminder(message);
+            return;
+        }
         List<String> parts = split(message.getContent(), message.isSplitLines());
         if (parts.isEmpty()) {
             markFailed(message, "消息内容为空");
@@ -168,19 +365,8 @@ public class ScheduledMessageService {
         }
 
         OffsetDateTime now = OffsetDateTime.now();
-        UUID lastOutboxId = null;
-        for (String part : filtered) {
-            OutboxMessage outbox = new OutboxMessage();
-            outbox.setBotId(message.getBotId());
-            outbox.setConversationId(message.getConversationId());
-            outbox.setChatId(message.getChatId());
-            outbox.setContent(part);
-            outbox.setStatus(OutboxStatus.PENDING);
-            outbox.setNextAttemptAt(now);
-            lastOutboxId = outboxRepository.save(outbox).getId();
-        }
+        message.setOutboxId(enqueue(message, filtered, now));
 
-        message.setOutboxId(lastOutboxId);
         message.setSentAt(now);
         message.setSentCount(message.getSentCount() + 1);
         message.setLastError(null);
@@ -194,6 +380,132 @@ public class ScheduledMessageService {
             message.setStatus(ScheduledStatus.PENDING);
         }
         repository.save(message);
+    }
+
+    /**
+     * 提醒：催一次，然后按间隔排下一次；次数用完补一句收尾。
+     *
+     * <p>撞上免打扰时段（半夜 / 离开）**不发送也不计数**——人在睡觉时催六次，
+     * 醒来就只剩「6 次都没回」，等于白催。</p>
+     */
+    private void queueReminder(ScheduledMessage message) {
+        OffsetDateTime now = OffsetDateTime.now();
+        Instant instant = now.toInstant();
+        if (!clock.canReply(instant)) {
+            Instant resume = clock.resumeWithJitter(clock.nextActiveAt(instant));
+            message.setScheduledAt(OffsetDateTime.ofInstant(resume, now.getOffset()));
+            message.setStatus(ScheduledStatus.PENDING);
+            repository.save(message);
+            FlowTraceService.mark(FlowTraceService.Stage.SKIP, message.getChatId(), message.getChatName(),
+                    "提醒撞上免打扰时段，改到 " + resume.atOffset(now.getOffset()).toLocalTime()
+                            .withNano(0).toString().substring(0, 5) + " 再催", safeTitle(message));
+            return;
+        }
+        if (message.getRepeatUntil() != null && now.isAfter(message.getRepeatUntil())) {
+            message.setStatus(ScheduledStatus.EXPIRED);
+            repository.save(message);
+            return;
+        }
+
+        ContentFilterService.Result result = contentFilter.apply(reminderText(message));
+        if (result.blocked()) {
+            markFailed(message, "敏感词拦截：" + result.note());
+            return;
+        }
+
+        message.setOutboxId(enqueue(message, List.of(result.content()), now));
+        message.setSentAt(now);
+        message.setSentCount(message.getSentCount() + 1);
+        message.setLastError(null);
+
+        int maxTimes = clampMaxTimes(message.getMaxTimes());
+        boolean exhausted = message.getSentCount() >= maxTimes;
+        if (exhausted && reminderProperties.isFinalMessage() && hasText(message.getFinalMessage())) {
+            ContentFilterService.Result closing = contentFilter.apply(message.getFinalMessage().trim());
+            if (!closing.blocked()) {
+                message.setOutboxId(enqueue(message, List.of(closing.content()), now));
+            }
+        }
+        if (exhausted) {
+            FlowTraceService.mark(FlowTraceService.Stage.REMIND, message.getChatId(), message.getChatName(),
+                    "提醒「" + safeTitle(message) + "」已催满 " + maxTimes + " 次，作罢", null);
+            finishOrReschedule(message, ScheduledStatus.EXPIRED, now);
+        } else {
+            message.setScheduledAt(now.plusMinutes(clampInterval(message.getIntervalMinutes())));
+            message.setStatus(ScheduledStatus.PENDING);
+            FlowTraceService.mark(FlowTraceService.Stage.REMIND, message.getChatId(), message.getChatName(),
+                    "提醒「" + safeTitle(message) + "」第 " + message.getSentCount() + "/" + maxTimes
+                            + " 次，等对方回话", message.getContent());
+        }
+        repository.save(message);
+    }
+
+    /**
+     * 这一轮结束了：设了每天/每周重复的，就排到下一次重新开始数次数；否则落到终态。
+     *
+     * <p>「每天 18:00 提醒我打卡，没回就 5 分钟催一次」= 每天一轮，每轮最多 6 次。</p>
+     */
+    private void finishOrReschedule(ScheduledMessage message, ScheduledStatus terminal, OffsetDateTime now) {
+        ScheduledRepeat repeat = message.getRepeatRule() == null ? ScheduledRepeat.NONE : message.getRepeatRule();
+        if (repeat != ScheduledRepeat.NONE) {
+            OffsetDateTime next = nextOccurrence(message, now);
+            if (next != null) {
+                message.setScheduledAt(next);
+                message.setSentCount(0);
+                message.setStatus(ScheduledStatus.PENDING);
+                return;
+            }
+        }
+        message.setStatus(terminal);
+    }
+
+    /** 本次该说哪句：人设生成的多句轮着用，同一句复读六遍太假。 */
+    static String reminderText(ScheduledMessage message) {
+        List<String> variants = variants(message);
+        if (variants.isEmpty()) {
+            String fallback = hasText(message.getContent())
+                    ? message.getContent().trim()
+                    : "该" + safeTitle(message) + "了";
+            return fallback + "（回「" + firstStopWord(message) + "」我就不催了）";
+        }
+        int index = Math.min(Math.max(0, message.getSentCount()), variants.size() - 1);
+        return variants.get(index);
+    }
+
+    static List<String> variants(ScheduledMessage message) {
+        if (!hasText(message.getVariants())) {
+            return List.of();
+        }
+        return message.getVariants().lines().map(String::trim).filter(line -> !line.isEmpty()).toList();
+    }
+
+    private static String firstStopWord(ScheduledMessage message) {
+        String words = message.getStopWords();
+        if (!hasText(words)) {
+            return "好了";
+        }
+        String first = words.split("[,，;；]")[0].trim();
+        return first.isEmpty() ? "好了" : first;
+    }
+
+    private static String safeTitle(ScheduledMessage message) {
+        return hasText(message.getTitle()) ? message.getTitle().trim() : "提醒";
+    }
+
+    /** 真正写 outbox：所有任务共用一条投递链路，返回最后一条的 id（便于回溯）。 */
+    private UUID enqueue(ScheduledMessage message, List<String> parts, OffsetDateTime now) {
+        UUID last = null;
+        for (String part : parts) {
+            OutboxMessage outbox = new OutboxMessage();
+            outbox.setBotId(message.getBotId());
+            outbox.setConversationId(message.getConversationId());
+            outbox.setChatId(message.getChatId());
+            outbox.setContent(part);
+            outbox.setStatus(OutboxStatus.PENDING);
+            outbox.setNextAttemptAt(now);
+            last = outboxRepository.save(outbox).getId();
+        }
+        return last;
     }
 
     /**
@@ -231,8 +543,8 @@ public class ScheduledMessageService {
             return null;
         }
         java.time.ZoneOffset offset = after.getOffset();
-        ZonedDateTime zoneTime = after.toInstant().atZone(offset);
-        ZonedDateTime next = cron.next(zoneTime);
+        java.time.ZonedDateTime zoneTime = after.toInstant().atZone(offset);
+        java.time.ZonedDateTime next = cron.next(zoneTime);
         return next == null ? null : next.toOffsetDateTime();
     }
 
@@ -303,7 +615,7 @@ public class ScheduledMessageService {
             // 只给 cron 不给时间时，从「现在之后的下一次」开始；给了过去的时间也自动顺延
             if (effectiveAt == null || effectiveAt.isBefore(OffsetDateTime.now().minusMinutes(1))) {
                 OffsetDateTime now = OffsetDateTime.now();
-                ZonedDateTime start = parsed.next(now.toInstant().atZone(now.getOffset()));
+                java.time.ZonedDateTime start = parsed.next(now.toInstant().atZone(now.getOffset()));
                 if (start == null) {
                     throw ApiException.badRequest("这个 cron 永远不会触发：" + cron);
                 }
@@ -322,15 +634,12 @@ public class ScheduledMessageService {
             throw ApiException.badRequest("重复截止时间不能早于发送时间");
         }
 
-        BotConfig bot = botId == null
-                ? botRepository.findFirstByEnabledTrueOrderByCreatedAtAsc()
-                    .orElseThrow(() -> ApiException.badRequest("没有可用的机器人配置"))
-                : botRepository.findById(botId).orElseThrow(() -> ApiException.badRequest("机器人不存在"));
-
+        BotConfig bot = requireBot(botId);
         String normalizedChatId = chatId.trim();
         Conversation conversation = conversationRepository
                 .findByBotIdAndChatId(bot.getId(), normalizedChatId).orElse(null);
 
+        message.setKind(ScheduledKind.MESSAGE);
         message.setBotId(bot.getId());
         message.setConversationId(conversation == null ? null : conversation.getId());
         message.setChatId(normalizedChatId);
@@ -345,11 +654,45 @@ public class ScheduledMessageService {
         message.setCronExpression(cron);
     }
 
+    private BotConfig requireBot(UUID botId) {
+        return botId == null
+                ? botRepository.findFirstByEnabledTrueOrderByCreatedAtAsc()
+                    .orElseThrow(() -> ApiException.badRequest("没有可用的机器人配置"))
+                : botRepository.findById(botId).orElseThrow(() -> ApiException.badRequest("机器人不存在"));
+    }
+
     private void markFailed(ScheduledMessage message, String reason) {
         message.setStatus(ScheduledStatus.FAILED);
         message.setAttempts(message.getAttempts() + 1);
         message.setLastError(abbreviate(reason, 1000));
         repository.save(message);
+    }
+
+    private int clampInterval(Integer minutes) {
+        int floor = Math.max(1, reminderProperties.getMinIntervalMinutes());
+        int value = minutes == null || minutes <= 0 ? reminderProperties.getDefaultIntervalMinutes() : minutes;
+        return Math.min(Math.max(value, floor), MAX_INTERVAL_MINUTES);
+    }
+
+    private int clampMaxTimes(Integer times) {
+        int hard = Math.max(1, reminderProperties.getHardMaxTimes());
+        int value = times == null || times <= 0 ? reminderProperties.getDefaultMaxTimes() : times;
+        return Math.min(Math.max(value, 1), hard);
+    }
+
+    private static boolean hasText(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    private static String trimTo(String value, int max) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+        return trimmed.length() <= max ? trimmed : trimmed.substring(0, max);
     }
 
     private String abbreviate(String text, int max) {

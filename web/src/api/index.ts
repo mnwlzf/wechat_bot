@@ -35,6 +35,8 @@ import type {
   ProviderTestResult,
   ScheduledMessage,
   ScheduledMessageInput,
+  ScheduledKind,
+  ReminderParseResult,
   SearchSettings,
   SearchSettingsInput,
   SearchTestResult,
@@ -264,10 +266,23 @@ export const adminApi = {
   async resetMemorySummary(chatId: string) {
     await http.delete('/api/admin/memories/summaries', { params: { chatId } })
   },
-  async scheduledMessages(page = 0, size = 20) {
+  async scheduledMessages(page = 0, size = 20, kind?: ScheduledKind) {
     const { data } = await http.get<PageResult<ScheduledMessage>>('/api/admin/scheduled-messages', {
-      params: { page, size },
+      params: { page, size, kind },
     })
+    return data
+  },
+  /** 一句话创建：只解析成草稿，确认后才保存 */
+  async parseReminderInstruction(instruction: string, botId?: string) {
+    const { data } = await http.post<ReminderParseResult>('/api/admin/scheduled-messages/parse', {
+      instruction,
+      botId,
+    })
+    return data
+  },
+  /** 停止：待发的消息和正在等回执的提醒都能停 */
+  async stopScheduledMessage(id: string) {
+    const { data } = await http.post<ScheduledMessage>(`/api/admin/scheduled-messages/${id}/stop`)
     return data
   },
   async createScheduledMessage(payload: ScheduledMessageInput) {

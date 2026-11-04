@@ -261,7 +261,7 @@ public final class AdminDtos {
             UUID botId,
             @NotBlank @Size(max = 180) String chatId,
             @Size(max = 180) String chatName,
-            @NotBlank @Size(max = 5000) String content,
+            @Size(max = 5000) String content,
             @NotNull OffsetDateTime scheduledAt,
             /** NONE / DAILY / WEEKLY / CRON */
             @Size(max = 20) String repeatRule,
@@ -269,7 +269,19 @@ public final class AdminDtos {
             /** 按行拆成多条依次发送 */
             Boolean splitLines,
             /** repeatRule = CRON 时必填：5 段（分 时 日 月 周）或 6 段（带秒） */
-            @Size(max = 120) String cronExpression
+            @Size(max = 120) String cronExpression,
+            /** MESSAGE（默认）/ REMINDER：等回执的提醒 */
+            @Size(max = 20) String kind,
+            @Size(max = 120) String title,
+            /** 提醒间隔（分钟） */
+            Integer intervalMinutes,
+            /** 提醒次数上限 */
+            Integer maxTimes,
+            /** 停止词，逗号分隔 */
+            @Size(max = 500) String stopWords,
+            /** 人设生成的提醒文案（每行一句）；留空则发送时用模板 */
+            @Size(max = 4000) String variants,
+            @Size(max = 500) String finalMessage
     ) {}
 
     public record ScheduledMessageView(
@@ -288,7 +300,36 @@ public final class AdminDtos {
             int attempts,
             String lastError,
             OffsetDateTime createdAt,
-            OffsetDateTime sentAt
+            OffsetDateTime sentAt,
+            String kind,
+            String title,
+            Integer intervalMinutes,
+            Integer maxTimes,
+            String stopWords,
+            String variants,
+            String finalMessage,
+            OffsetDateTime ackAt,
+            String ackContent,
+            String source,
+            String rawInstruction
+    ) {}
+
+    /** 管理端「一句话创建」：只解析成草案，不落库，人确认后再保存。 */
+    public record ReminderParseInput(UUID botId, @NotBlank @Size(max = 500) String instruction) {}
+
+    public record ReminderParseView(
+            boolean ok,
+            String kind,
+            String title,
+            OffsetDateTime firstAt,
+            String repeatRule,
+            Integer intervalMinutes,
+            Integer maxTimes,
+            String stopWords,
+            String variants,
+            String finalMessage,
+            /** 没解析出来时的一行提示（缺时间 / 不像提醒指令） */
+            String message
     ) {}
 
     public record AutoReplyRuleInput(

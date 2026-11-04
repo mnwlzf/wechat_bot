@@ -32,6 +32,8 @@ public class InboxService {
     private final ReplyPolicyService replyPolicies;
     private final ReplyDispatcher replyDispatcher;
     private final PersonaSwitchService personaSwitch;
+    private final ReminderAckService reminderAck;
+    private final ReminderIntentService reminderIntent;
 
     public InboxService(BotConfigRepository botRepository,
                         ConversationRepository conversationRepository,
@@ -42,7 +44,9 @@ public class InboxService {
                         RuntimeSettingsService settings,
                         ReplyPolicyService replyPolicies,
                         ReplyDispatcher replyDispatcher,
-                        PersonaSwitchService personaSwitch) {
+                        PersonaSwitchService personaSwitch,
+                        ReminderAckService reminderAck,
+                        ReminderIntentService reminderIntent) {
         this.botRepository = botRepository;
         this.conversationRepository = conversationRepository;
         this.messageRepository = messageRepository;
@@ -53,6 +57,8 @@ public class InboxService {
         this.replyPolicies = replyPolicies;
         this.replyDispatcher = replyDispatcher;
         this.personaSwitch = personaSwitch;
+        this.reminderAck = reminderAck;
+        this.reminderIntent = reminderIntent;
     }
 
     @Transactional
@@ -217,6 +223,21 @@ public class InboxService {
             return new AgentDtos.EventAccepted("PAUSED", "人工接管中，未自动回复", conversation.getId());
         }
 
+        // 提醒任务：先看是不是「回执」（回话了就把等着的那条收掉），再看是不是在建/停/查提醒。
+        // 两条都只在私聊里生效——群里谁都在说话，提醒会变成广播，也判不清该谁回执。
+        if (!media && conversation.getChatType() == ChatType.PRIVATE) {
+            Optional<String> ackReply = reminderAck.handle(bot, conversation, content);
+            if (ackReply.isPresent()) {
+                sendReminderReply(bot, conversation, inbound, ackReply.get(), "提醒已被回执停掉");
+                return new AgentDtos.EventAccepted("REMINDER_ACK", "提醒收到回执，已停止", conversation.getId());
+            }
+            Optional<String> reminderReply = reminderIntent.handle(bot, conversation, content);
+            if (reminderReply.isPresent()) {
+                sendReminderReply(bot, conversation, inbound, reminderReply.get(), "按对方的话安排了提醒");
+                return new AgentDtos.EventAccepted("REMINDER", "已处理提醒指令", conversation.getId());
+            }
+        }
+
         // 聊天对象自己挑人设：命令式（「换人设」）和自然语言（「换成大肥鱼」）都认。
         // 这条回复不走聚合队列：它是控制指令的答复，被后面的消息合并掉就永远发不出去了；
         // 而且必须原样单条发出，编号和换行拆条后在手机上会变成一堆碎片。
@@ -262,6 +283,20 @@ public class InboxService {
             dispatchReply(chatKey, botId, conversationId, inboundId, ackReply, ackText);
         }
         return new AgentDtos.EventAccepted("ACCEPTED", "消息已接收，正在生成回复", conversationId);
+    }
+
+    /**
+     * 提醒相关的回复走「原样单条」：它是控制答复，被聚合掉或者被拆成好几条都会看不懂。
+     */
+    private void sendReminderReply(BotConfig bot, Conversation conversation, MessageLog inbound,
+                                   String text, String note) {
+        FlowTraceService.mark(FlowTraceService.Stage.ACK, conversation.getChatId(),
+                conversation.getChatName(), note, text);
+        try {
+            chatOrchestrator.generateVerbatimReply(bot.getId(), conversation.getId(), inbound.getId(), text);
+        } catch (RuntimeException ex) {
+            log.warn("提醒回复发送失败: conversation={}", conversation.getId(), ex);
+        }
     }
 
     /**

@@ -39,8 +39,12 @@ public class BotConfig {
     @Column(name = "group_wake_words", nullable = false, length = 500)
     private String groupWakeWords = "@机器人";
 
+    /**
+     * 带多少条历史消息进上下文。默认 48：20 条只够十几轮对话，一个活跃私聊半天就滚完了，
+     * 表现就是「上午说的事下午就忘」；48 大约能覆盖一两个小时的连续聊天。
+     */
     @Column(name = "context_window", nullable = false)
-    private int contextWindow = 20;
+    private int contextWindow = 48;
 
     @Column(nullable = false)
     private double temperature = 0.7;

@@ -30,7 +30,8 @@ class InboxServiceMediaPolicyTest {
             botRepository, conversationRepository, messageRepository,
             dedupeService, rateLimitService, chatOrchestrator, settings,
             new ReplyPolicyService(mock(com.example.wechatbot.repository.ReplyPolicyRepository.class)),
-            new InlineReplyDispatcher(), mock(PersonaSwitchService.class));
+            new InlineReplyDispatcher(), mock(PersonaSwitchService.class),
+            mock(ReminderAckService.class), mock(ReminderIntentService.class));
 
     private BotConfig bot() {
         BotConfig bot = new BotConfig();

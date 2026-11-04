@@ -25,9 +25,14 @@ class ScheduledMessageServiceTest {
     private final ConversationRepository conversationRepository = mock(ConversationRepository.class);
     private final BotConfigRepository botRepository = mock(BotConfigRepository.class);
     private final ContentFilterService contentFilter = mock(ContentFilterService.class);
+    private final com.example.wechatbot.disguise.DisguiseClock clock =
+            mock(com.example.wechatbot.disguise.DisguiseClock.class);
+    private final com.example.wechatbot.config.ReminderProperties reminderProperties =
+            new com.example.wechatbot.config.ReminderProperties();
 
     private final ScheduledMessageService service = new ScheduledMessageService(
-            repository, outboxRepository, conversationRepository, botRepository, contentFilter);
+            repository, outboxRepository, conversationRepository, botRepository, contentFilter,
+            clock, reminderProperties);
 
     private BotConfig bot() {
         BotConfig bot = new BotConfig();

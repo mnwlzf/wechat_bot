@@ -134,10 +134,12 @@ $headers = @{ Authorization = "Bearer dev-admin-token" }
 | PUT/DELETE | `/api/admin/memories/{id}` | 修改内容 / 启停 / 删除记忆条目 |
 | POST | `/api/admin/memories/summaries?chatId=…` | 立即按现有历史重算一次滚动摘要（同步） |
 | DELETE | `/api/admin/memories/summaries?chatId=…` | 清空摘要，下次重新压缩（人工要点保留） |
-| GET/POST | `/api/admin/scheduled-messages` | 定时消息列表 / 新建（支持 `repeatRule`、`cronExpression`、`splitLines`） |
+| GET/POST | `/api/admin/scheduled-messages` | 任务列表 / 新建。`?kind=REMINDER` 只看提醒；新建时 `kind` 为 `MESSAGE`（定时消息）或 `REMINDER`（提醒），后者可带 `title`、`intervalMinutes`、`maxTimes`、`stopWords`、`variants`、`finalMessage` |
 | PUT | `/api/admin/scheduled-messages/{id}` | 编辑待发送的定时消息（时间、接收人、内容、重复规则） |
 | POST | `/api/admin/scheduled-messages/{id}/cancel` | 取消待发送的定时消息 |
-| DELETE | `/api/admin/scheduled-messages/{id}` | 删除定时消息记录 |
+| POST | `/api/admin/scheduled-messages/{id}/stop` | 停止任务（消息和正在等回执的提醒都能停） |
+| POST | `/api/admin/scheduled-messages/parse` | **一句话创建**：`{"instruction","botId"}` → 草稿（字段同新建，外加 `ok` / `message`），不落库 |
+| DELETE | `/api/admin/scheduled-messages/{id}` | 删除任务记录 |
 | PUT | `/api/admin/settings/media` | 媒体消息策略（enabled / replyMode / ackText） |
 | PUT | `/api/admin/settings/pricing` | 用量计价（每千 token 单价，用于估算成本） |
 | GET | `/api/admin/usage?days=7` | 用量统计：收发量、token、耗时、模型分布 |
@@ -716,6 +718,62 @@ SILK 单独失败不影响 WAV，会多一个 `silkError` 字段说明原因。
 - `splitLines=true`：内容按行拆成多条依次入队（最多 10 条），适合群通知分条发
 - 状态机：`PENDING`（待发送）→ `SENT`（已转投递队列）/ `CANCELLED` / `FAILED`（命中敏感词拦截或入队异常）；重复消息在两次发送之间保持 `PENDING`
 - 只有 `PENDING` 可以编辑或取消；已入队的消息请到诊断中心的失败投递里重试
+
+### 提醒任务（等回执的定时催促）
+
+同一条表、同一套投递链路，只是 `kind=REMINDER` 时语义从「到点发一条」变成「到点开始催，收到回执才停」：
+
+```json
+{
+  "kind": "REMINDER",
+  "chatId": "wxid_c345asxv4df322",
+  "chatName": "深海",
+  "title": "打卡",
+  "scheduledAt": "2026-11-05T18:00:00+08:00",
+  "intervalMinutes": 5,
+  "maxTimes": 6,
+  "stopWords": "已打卡,打完了,好了",
+  "variants": "到点了，今天的卡打了吗？\n还没打吧？回「已打卡」我就不催了。",
+  "finalMessage": "算了，6 次都没回，我先不催了。",
+  "repeatRule": "DAILY"
+}
+```
+
+- **只支持私聊**：`chatId` 是 `@chatroom` 直接 400（群里谁都在说话，提醒会变成广播，也判不清该谁回执）
+- `intervalMinutes`：催促间隔，服务端夹在 `[REMINDER_MIN_INTERVAL_MINUTES, 1440]`
+- `maxTimes`：最多催几次，服务端夹在 `[1, REMINDER_HARD_MAX_TIMES]`；催满（且 `REMINDER_FINAL_MESSAGE=true`）会补一句 `finalMessage` 然后 `EXPIRED`
+- `stopWords`：逗号分隔，命中即停；`REMINDER_NL_ACK=true` 时还有模型兜底判断（「刚弄完了」也算）
+- `variants`：多行文案，第 N 次催用第 N 行（不够就循环），留空则用 `content` + 模板兜底
+- 每个私聊同时最多 `REMINDER_MAX_WAITING_PER_CHAT` 个提醒在等回执、每天最多新建 `REMINDER_MAX_PER_DAY_PER_CHAT` 个，超了直接 400 并说明原因
+- **免打扰时段（00:30–07:30）不发送也不消耗次数**：直接把 `scheduledAt` 推到下一个可发送时间（带随机抖动）
+- 状态机：`PENDING` → `ACKED`（对方回话，`ackAt` / `ackContent` 记下原话）/ `EXPIRED`（催满）/ `CANCELLED`（停止）/ `FAILED`；重复提醒收到回执时只结束当轮，`sentCount` 归零并推下一次
+- 停止：`POST /{id}/stop`；聊天里说「别催了」走的是同一段逻辑（`stopWaiting`，同会话所有等待中的提醒一起取消）
+
+**一句话创建**：`POST /api/admin/scheduled-messages/parse`
+
+```json
+{ "botId": "可省略，默认取第一个启用的机器人", "instruction": "每天下午六点提醒我打卡，没回就五分钟催一次，最多六次" }
+```
+
+```json
+{
+  "ok": true,
+  "kind": "REMINDER",
+  "title": "打卡",
+  "firstAt": "2026-11-05T18:00:00+08:00",
+  "repeatRule": "DAILY",
+  "intervalMinutes": 5,
+  "maxTimes": 6,
+  "stopWords": "已打卡,打完了,好了",
+  "variants": "到点了，今天的卡打了吗？\n还没打吧？回「已打卡」我就不催了。",
+  "finalMessage": "算了，6 次都没回，我先不催了。",
+  "message": null
+}
+```
+
+- 只解析、不落库：确认后再用同一个 JSON 调 `POST /api/admin/scheduled-messages`（`kind=REMINDER`）
+- 缺时间时返回 `ok=false` + `message`（反问内容），不会瞎猜；聊天里建的走同样的解析，`source=CHAT` 且保留 `rawInstruction`
+- 没提「没回就催」时只建**定时消息**（`kind=MESSAGE`），不会自作主张变成催命循环
 
 
 ## 4. 外部集成 API

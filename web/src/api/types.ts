@@ -339,8 +339,11 @@ export interface ChatMemoryInput {
   enabled?: boolean
 }
 
-export type ScheduledStatus = 'PENDING' | 'SENT' | 'CANCELLED' | 'FAILED'
+export type ScheduledStatus = 'PENDING' | 'SENT' | 'ACKED' | 'EXPIRED' | 'CANCELLED' | 'FAILED'
 export type ScheduledRepeat = 'NONE' | 'DAILY' | 'WEEKLY' | 'CRON'
+/** MESSAGE=定时消息，REMINDER=等回执的提醒 */
+export type ScheduledKind = 'MESSAGE' | 'REMINDER'
+export type ScheduleSource = 'ADMIN' | 'CHAT'
 
 export interface ScheduledMessage {
   id: string
@@ -359,18 +362,51 @@ export interface ScheduledMessage {
   lastError?: string
   createdAt: string
   sentAt?: string
+  kind: ScheduledKind
+  title?: string | null
+  intervalMinutes?: number | null
+  maxTimes?: number | null
+  stopWords?: string | null
+  variants?: string | null
+  finalMessage?: string | null
+  ackAt?: string | null
+  ackContent?: string | null
+  source: ScheduleSource
+  rawInstruction?: string | null
+}
+
+/** 「一句话创建」的解析结果：只是草稿，确认后才真正保存 */
+export interface ReminderParseResult {
+  ok: boolean
+  kind?: string | null
+  title?: string | null
+  firstAt?: string | null
+  repeatRule?: string | null
+  intervalMinutes?: number | null
+  maxTimes?: number | null
+  stopWords?: string | null
+  variants?: string | null
+  finalMessage?: string | null
+  message?: string | null
 }
 
 export interface ScheduledMessageInput {
   botId?: string
   chatId: string
   chatName?: string
-  content: string
+  content?: string
   scheduledAt: string
   repeatRule?: ScheduledRepeat
   repeatUntil?: string | null
   cronExpression?: string | null
   splitLines?: boolean
+  kind?: ScheduledKind
+  title?: string | null
+  intervalMinutes?: number | null
+  maxTimes?: number | null
+  stopWords?: string | null
+  variants?: string | null
+  finalMessage?: string | null
 }
 
 export interface Message {
