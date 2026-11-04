@@ -35,6 +35,11 @@ import static org.mockito.Mockito.when;
  * 这几条错了，表现就是机器人要么忘事，要么把刚说过的话又总结一遍浪费 token。
  */
 class ChatMemoryServiceTest {
+    /** 一份「像摘要」的摘要：够长、全中文、没有模型自言自语。 */
+    private static final String GOOD_SUMMARY =
+            "对方周一提到周五群里聚餐，定了六点半在老地方，张伟负责订位，其余人摊钱；"
+            + "还说过最近加班多，周末想找个地方躺一天。";
+
     private final ChatMemoryRepository repository = mock(ChatMemoryRepository.class);
     private final MessageLogRepository messageRepository = mock(MessageLogRepository.class);
     private final LlmGateway llmGateway = mock(LlmGateway.class);
@@ -132,14 +137,14 @@ class ChatMemoryServiceTest {
         when(messageRepository.findByConversationIdAndCreatedAtLessThanOrderByCreatedAtAsc(
                 eq(conversation.getId()), any(), any(Pageable.class)))
                 .thenReturn(List.of(older1, older2, older3));
-        when(llmGateway.chat(any(), anyList())).thenReturn(LlmReply.rule("合并后的摘要"));
+        when(llmGateway.chat(any(), anyList())).thenReturn(LlmReply.rule(GOOD_SUMMARY));
         when(repository.save(any(ChatMemory.class))).thenAnswer(inv -> inv.getArgument(0));
 
         ChatMemory saved = service.summarize(bot, conversation, false);
 
         assertThat(saved).isNotNull();
         assertThat(saved.getKind()).isEqualTo(MemoryKind.SUMMARY);
-        assertThat(saved.getContent()).isEqualTo("合并后的摘要");
+        assertThat(saved.getContent()).isEqualTo(GOOD_SUMMARY);
         assertThat(saved.getMessageCount()).isEqualTo(3);
         assertThat(saved.getCoveredUntil()).isEqualTo(older3.getCreatedAt());
     }
@@ -211,14 +216,14 @@ class ChatMemoryServiceTest {
         when(messageRepository.findByConversationIdAndCreatedAtLessThanOrderByCreatedAtAsc(
                 eq(conversation.getId()), any(), any(Pageable.class)))
                 .thenReturn(List.of(message("对方说：深海不错", now.minusHours(6))));
-        when(llmGateway.chat(any(), anyList())).thenReturn(LlmReply.rule("对方给我起名深海"));
+        when(llmGateway.chat(any(), anyList())).thenReturn(LlmReply.rule(GOOD_SUMMARY));
         when(repository.save(any(ChatMemory.class))).thenAnswer(inv -> inv.getArgument(0));
 
         assertThat(service.summarizeIfIdle(bot, conversation)).isTrue();
 
         ArgumentCaptor<ChatMemory> captor = ArgumentCaptor.forClass(ChatMemory.class);
         verify(repository).save(captor.capture());
-        assertThat(captor.getValue().getContent()).isEqualTo("对方给我起名深海");
+        assertThat(captor.getValue().getContent()).isEqualTo(GOOD_SUMMARY);
     }
 
     @Test
@@ -260,18 +265,80 @@ class ChatMemoryServiceTest {
                         message("窗口外 3", now.minusMinutes(7)),
                         message("窗口外 4", now.minusMinutes(6)),
                         message("窗口外 5", now.minusMinutes(5))));
-        when(llmGateway.chat(any(), anyList())).thenReturn(LlmReply.rule("压缩后的摘要"));
+        when(llmGateway.chat(any(), anyList())).thenReturn(LlmReply.rule(GOOD_SUMMARY));
         when(repository.save(any(ChatMemory.class))).thenAnswer(inv -> inv.getArgument(0));
 
         ChatMemory saved = service.summarize(bot, conversation, false);
 
         assertThat(saved).isNotNull();
-        assertThat(saved.getContent()).isEqualTo("压缩后的摘要");
+        assertThat(saved.getContent()).isEqualTo(GOOD_SUMMARY);
     }
 
     @Test
-    void newNoteIsManualAndEnabledByDefault() {
-        when(repository.save(any(ChatMemory.class))).thenAnswer(inv -> {
+    void promptBlockSaysOldIdentityInMemoryIsNotAuthoritative() {
+        // 真事：摘要里留着「我叫大肥鱼，喊肥鱼就行」，换了人设之后模型照样自称大肥鱼。
+        // 摘要自己改不了历史，只能明确告诉模型「记忆里的自称和口吻以当前人设为准」。
+        when(repository.findFirstByChatIdAndKind("123@chatroom", MemoryKind.SUMMARY))
+                .thenReturn(Optional.of(memory(MemoryKind.SUMMARY, "我叫大肥鱼，喊肥鱼就行", true)));
+        when(repository.findByChatIdAndKindAndEnabledTrueOrderByUpdatedAtDesc("123@chatroom", MemoryKind.NOTE))
+                .thenReturn(List.of());
+
+        String block = service.promptBlock("123@chatroom", ChatType.GROUP);
+
+        assertThat(block).contains("一律以当前人设为准");
+    }
+
+    @Test
+    void summaryThatLeaksModelAnalysisIsRejected() {
+        // 线上真实出现过：摘要里全是「We need answer in Chinese…要合并？用户说如果已有摘要…」
+        assertThat(ChatMemoryService.usableSummary(
+                "We need answer in Chinese, plain text, 200-400 chars. Need compress chat.")).isNull();
+        assertThat(ChatMemoryService.usableSummary(
+                "需要写长期记忆摘要，200-400字中文纯文本，无标题无列表符号。只写确实出现的信息。")).isNull();
+        assertThat(ChatMemoryService.usableSummary("内容提取：\n- 群/会话，多个成员。\n- 机器人被称为小助手。")).isNull();
+        assertThat(ChatMemoryService.usableSummary(GOOD_SUMMARY)).isEqualTo(GOOD_SUMMARY);
+    }
+
+    @Test
+    void tooShortOrEnglishSummaryIsRejected() {
+        assertThat(ChatMemoryService.usableSummary("好的")).isNull();
+        assertThat(ChatMemoryService.usableSummary("")).isNull();
+        assertThat(ChatMemoryService.usableSummary(null)).isNull();
+        assertThat(ChatMemoryService.usableSummary(
+                "The user discussed dinner plans with the group and agreed on Friday evening at six thirty.")).isNull();
+    }
+
+    @Test
+    void summaryHeadingIsStripped() {
+        assertThat(ChatMemoryService.usableSummary("摘要：" + GOOD_SUMMARY)).isEqualTo(GOOD_SUMMARY);
+    }
+
+    @Test
+    void dirtySummaryKeepsTheOldOneInsteadOfPoisoningEveryReply() {
+        Conversation conversation = group();
+        BotConfig bot = bot(1);
+        properties.setTriggerMessages(1);
+        OffsetDateTime now = OffsetDateTime.now();
+        ChatMemory existing = memory(MemoryKind.SUMMARY, GOOD_SUMMARY, true);
+        existing.setUpdatedAt(now.minusDays(1));
+
+        when(repository.findFirstByChatIdAndKind("123@chatroom", MemoryKind.SUMMARY)).thenReturn(Optional.of(existing));
+        when(messageRepository.findByConversationIdOrderByCreatedAtDesc(eq(conversation.getId()), any(Pageable.class)))
+                .thenReturn(List.of(message("最新", now)));
+        when(messageRepository.findByConversationIdAndCreatedAtLessThanOrderByCreatedAtAsc(
+                eq(conversation.getId()), any(), any(Pageable.class)))
+                .thenReturn(List.of(message("更早", now.minusHours(1))));
+        when(llmGateway.chat(any(), anyList())).thenReturn(LlmReply.rule(
+                "We need to merge. The user said the group has dinner on Friday. Let's write the summary."));
+        when(repository.save(any(ChatMemory.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        ChatMemory saved = service.summarize(bot, conversation, false);
+
+        assertThat(saved.getContent()).isEqualTo(GOOD_SUMMARY);
+    }
+
+    @Test
+    void newNoteIsManualAndEnabledByDefault() {        when(repository.save(any(ChatMemory.class))).thenAnswer(inv -> {
             ChatMemory memory = inv.getArgument(0);
             memory.setId(UUID.randomUUID());
             return memory;

@@ -430,8 +430,15 @@ public final class AdminDtos {
             String personaSource,
             boolean personaBuiltin,
             String personaContent,
+            /** 人设字数：太短的人设在模型眼里几乎等于没写，页面上要能直接看出来 */
+            int personaChars,
+            boolean personaThin,
+            /** 换人设后注入的「别学旧语气」提醒；没有则为 null */
+            String switchNote,
             String memoryBlock,
-            String styleBlock
+            String styleBlock,
+            /** 页面直接列出来的提醒事项，比让人自己逐段找强 */
+            List<String> warnings
     ) {}
 
     public record DebugResponse(String reply, String provider, String model, long latencyMs) {}

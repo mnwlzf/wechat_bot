@@ -128,7 +128,7 @@ $headers = @{ Authorization = "Bearer dev-admin-token" }
 | DELETE | `/api/admin/prompt-templates/default` | 取消默认人设，回退到机器人 `systemPrompt` |
 | POST | `/api/admin/conversations/{id}/persona` | 会话/群单独绑定人设：`{"promptTemplateId":"…"}`，传 `null` 回退默认 |
 | POST | `/api/admin/personas/bind` | 按 chatId 绑定（私聊填 wxid、群填 `@chatroom` 结尾）：`{"chatId":"…","promptTemplateId":"…"}`，会话不存在时自动补一条 |
-| GET | `/api/admin/personas/preview/{conversationId}` | 该会话实际会发给模型的提示词：人设正文、`personaSource`（chat / default / bot）、记忆块、风格块 |
+| GET | `/api/admin/personas/preview/{conversationId}` | 该会话实际会发给模型的提示词：人设正文、`personaSource`（chat / default / bot）、记忆块、格式块、`personaChars` / `personaThin` / `switchNote` / `warnings` |
 | GET | `/api/admin/memories?chatId=…` | 会话（群）共享记忆：滚动摘要 + 人工要点 |
 | POST | `/api/admin/memories` | 新增人工记忆要点：`{"chatId","chatName","content","enabled"}` |
 | PUT/DELETE | `/api/admin/memories/{id}` | 修改内容 / 启停 / 删除记忆条目 |
@@ -661,12 +661,16 @@ SILK 单独失败不影响 WAV，会多一个 `silkError` 字段说明原因。
 - 按 chatId 绑定（会话还没出现过也行）：`POST /api/admin/personas/bind`，`{"chatId":"wxid_x","promptTemplateId":"0b1f…"}`，
   `@chatroom` 结尾按群聊建会话，其余按私聊
 - 生效预览：`GET /api/admin/personas/preview/{conversationId}` 返回人设正文、`personaSource`（`chat` / `default` / `bot`）、
-  记忆块与风格块 —— 就是这条会话真正会发给模型的那几段系统提示词
+  记忆块与风格块 —— 就是这条会话真正会发给模型的那几段系统提示词；另带 `personaChars` / `personaThin`（人设是否短到
+  模型看不出区别）、`switchNote`（换人设后注入的「别学旧语气」）、`warnings`（页面直接列出来的坑）
 - 会话列表的 `effectivePersonaName` 会显示实际生效的人设（继承默认时带「（默认）」后缀）
 - **让聊天对象自己选**：群里/私聊里发「换人设」，或者自然语言说「换成客服语气」「有哪些人设」都可以。
   点名了人设就直接换，没点名就回一份人设名称列表（一行一个编号），对方回数字或说名字即改绑该会话
   （等价于上面那条按会话绑定），下一条消息立刻生效。名单 5 分钟内有效，回别的话就当普通消息；
   开关是 `PERSONA_SWITCH_ENABLED`
+- 换人设时记下时间点（`conversation.persona_switched_at`）：之后只要对话窗口里还有切换前的旧回复，
+  生成时就会额外注入一句「那些是旧人设说的，只当事实、别学语气」；窗口滚完自动失效，不需要清理
+- 换人设的**确认语按新人设的口气生成**（模型不可用时退回固定模板），刚切完就能听出差别
 - 名单这类控制回复走 `generateVerbatimReply`：**原样单条**发出，不清洗文风、不按行拆条，
   所以编号与换行在手机上不会丢（普通回复仍然走文风清洗 + 分条）
 

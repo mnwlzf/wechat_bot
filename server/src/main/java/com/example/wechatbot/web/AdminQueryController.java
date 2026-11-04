@@ -56,5 +56,9 @@ public class AdminQueryController {
         return service.setPersona(id, request.promptTemplateId());
     }
 
+    /**
+     * 「它到底收到了什么提示词」：见 {@code GET /api/admin/personas/preview/{conversationId}}。
+     * 人设是否生效只能看那个接口，看聊天记录只能猜。
+     */
     public record PingResponse(boolean ok) {}
 }

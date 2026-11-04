@@ -127,14 +127,14 @@ class InboxServiceReplyPolicyTest {
         BotConfig bot = bot();
         stubCommon(bot);
         when(personaSwitch.enabled()).thenReturn(true);
-        when(personaSwitch.handle(any(Conversation.class), eq("换人设")))
+        when(personaSwitch.handle(any(BotConfig.class), any(Conversation.class), eq("换人设")))
                 .thenReturn(Optional.of("1. 大肥鱼"));
 
         AgentDtos.EventAccepted result = service.accept(event(bot.getId(), "换人设"));
 
         // 关键词唤醒模式下没说暗号也能换人设：这条要交给固定话术回列表，而不是被丢掉
         assertThat(result.status()).isEqualTo("PERSONA");
-        verify(personaSwitch).handle(any(Conversation.class), eq("换人设"));
+        verify(personaSwitch).handle(any(BotConfig.class), any(Conversation.class), eq("换人设"));
     }
 
     @Test

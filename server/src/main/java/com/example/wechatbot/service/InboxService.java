@@ -242,7 +242,7 @@ public class InboxService {
         // 这条回复不走聚合队列：它是控制指令的答复，被后面的消息合并掉就永远发不出去了；
         // 而且必须原样单条发出，编号和换行拆条后在手机上会变成一堆碎片。
         if (!media && personaSwitch.enabled()) {
-            Optional<String> personaReply = personaSwitch.handle(conversation, content);
+            Optional<String> personaReply = personaSwitch.handle(bot, conversation, content);
             if (personaReply.isPresent()) {
                 try {
                     chatOrchestrator.generateVerbatimReply(bot.getId(), conversation.getId(),

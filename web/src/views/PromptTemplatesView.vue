@@ -456,23 +456,45 @@ onMounted(async () => {
             人设：<b>{{ preview.personaName }}</b>
             <el-tag size="small" type="info" effect="plain">来源 {{ sourceLabel(preview.personaSource) }}</el-tag>
             <el-tag v-if="preview.personaBuiltin" size="small" effect="plain">内置</el-tag>
+            <el-tag
+              size="small"
+              :type="preview.personaThin ? 'warning' : 'info'"
+              effect="plain"
+            >
+              {{ preview.personaChars }} 字
+            </el-tag>
           </p>
+
+          <el-alert
+            v-for="warning in preview.warnings || []"
+            :key="warning"
+            :title="warning"
+            type="warning"
+            :closable="false"
+            show-icon
+            class="preview-warning"
+          />
 
           <div class="preview-block">
             <span class="block-label">① 人设（system）</span>
             <pre>{{ preview.personaContent }}</pre>
           </div>
+          <div v-if="preview.switchNote" class="preview-block">
+            <span class="block-label">② 刚换过人设的提醒（system）</span>
+            <pre>{{ preview.switchNote }}</pre>
+          </div>
           <div v-if="preview.memoryBlock" class="preview-block">
-            <span class="block-label">② 长期记忆（system）</span>
+            <span class="block-label">③ 长期记忆（system）</span>
             <pre>{{ preview.memoryBlock }}</pre>
           </div>
           <div v-if="preview.styleBlock" class="preview-block">
-            <span class="block-label">③ 微信口语风格约束（system）</span>
+            <span class="block-label">④ 微信格式约束（system，只管格式不管性格）</span>
             <pre>{{ preview.styleBlock }}</pre>
           </div>
           <p class="field-hint">
-            这三段就是模型每轮最先看到的内容，顺序也是先人设、再记忆、最后风格。
-            改完人设如果这里显示的已经是新内容，说明配置已经生效，剩下的差异来自模型本身和最近的聊天上下文。
+            这几段就是模型每轮最先看到的内容，顺序是先人设、再记忆、最后格式。
+            人设换了但语气没变，通常就出在这几段里：人设太短、记忆里还留着旧名字旧口吻、
+            或者窗口里几十条旧回复把语气带回去了。
           </p>
         </template>
       </div>
@@ -599,6 +621,10 @@ onMounted(async () => {
   margin: 0 0 12px;
   color: var(--ink-soft);
   font-size: var(--fs-xs);
+}
+
+.preview-warning {
+  margin-bottom: 10px;
 }
 
 .preview-block {

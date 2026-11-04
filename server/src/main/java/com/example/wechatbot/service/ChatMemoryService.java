@@ -28,6 +28,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.regex.Pattern;
 
 /**
  * 会话（群）共享的长期记忆。
@@ -43,6 +44,9 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 @Service
 public class ChatMemoryService {
+    /** 短于这个长度的「摘要」基本是模型敷衍的一句废话，不如不更新。 */
+    private static final int MIN_SUMMARY_CHARS = 30;
+
     private static final Logger log = LoggerFactory.getLogger(ChatMemoryService.class);
     private static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("MM-dd HH:mm");
     /** 注入提示词时单条要点最多带多少字，防止一堆长要点把 token 吃光。 */
@@ -54,7 +58,17 @@ public class ChatMemoryService {
             1. 只写聊天里确实出现过的信息：人物与称呼、约定与时间、待办、偏好、关键事实、正在讨论的话题。
             2. 不编造、不推测、不评价、不给建议，也不写「以上」「总之」这类总结套话。
             3. 用中文，纯文本，不要标题、不要列表符号，200-400 字。
-            4. 如果已有摘要，把新内容合并进去，保留仍然有效的旧信息，删掉已经被推翻或过期的内容。""";
+            4. 如果已有摘要，把新内容合并进去，保留仍然有效的旧信息，删掉已经被推翻或过期的内容。
+            5. 只写对方和群友：不要记录机器人自己的名字、自称、口吻、语气、口头禅、人设或身份设定。
+               机器人随时会换人设，把这些写进摘要，只会让以后的口吻和设定前后打架。
+            6. 只输出摘要正文，第一句就开始写事实。不要输出思考过程、分析、提纲、英文说明，
+               也不要复述本要求，不要写「摘要：」「内容提取：」「需要写…」这类话。""";
+
+    /** 摘要里一旦出现这些，说明模型把「分析过程」当正文输出了，宁可整段丢掉。 */
+    private static final Pattern SUMMARY_META = Pattern.compile(
+            "We need|We have|Let's|Let us|I need|I will|The user|The summary|Need to|"
+                    + "需要写|我们要|我们要写|内容提取|要合并|按照要求|以下是|如下|摘要如下|好的[，,]|Sure[，,]|Here is",
+            Pattern.CASE_INSENSITIVE);
 
     private final ChatMemoryRepository repository;
     private final MessageLogRepository messageRepository;
@@ -153,7 +167,11 @@ public class ChatMemoryService {
         String title = chatType == ChatType.GROUP ? "本群共享记忆｜群内所有成员共用" : "关于这个人的记忆";
         StringBuilder text = new StringBuilder("【").append(title).append("】\n")
                 .append("下面是之前聊过、但已经不在最近对话窗口里的事。可以自然引用，不要生硬复述，")
-                .append("也不要把它当成对方刚发的新消息。\n");
+                .append("也不要把它当成对方刚发的新消息。\n")
+                // 摘要里可能残留旧人设时期的自称、口吻（「我叫大肥鱼」「我否认…」）。
+                // 不点明这一点，模型会把记忆里的旧身份当成事实，换了人设也照旧那么说话。
+                .append("这里只记录对方说过什么、约好过什么。如果里面出现关于「我」叫什么、什么口吻、")
+                .append("什么身份的旧说法，一律以当前人设为准，不要沿用。\n");
         if (hasSummary) {
             text.append("摘要：").append(abbreviate(summary.getContent().trim(), properties.getMaxSummaryChars()))
                     .append('\n');
@@ -281,7 +299,7 @@ public class ChatMemoryService {
         }
     }
 
-    /** 让模型把「旧摘要 + 新聊天」合并成一份新摘要；失败时退回旧摘要，不丢记忆。 */
+    /** 让模型把「旧摘要 + 新聊天」合并成一份新摘要；失败或输出不像摘要时退回旧摘要，不丢记忆。 */
     private String merge(BotConfig bot, String previous, String transcript) {
         StringBuilder user = new StringBuilder();
         if (previous != null && !previous.isBlank()) {
@@ -292,11 +310,60 @@ public class ChatMemoryService {
             LlmReply reply = llmGateway.chat(bot, List.of(
                     ChatMessage.system(SUMMARY_SYSTEM),
                     ChatMessage.user(user.toString())));
-            return abbreviate(reply.content() == null ? "" : reply.content().trim(), properties.getMaxSummaryChars());
+            String cleaned = usableSummary(reply.content());
+            if (cleaned == null) {
+                log.warn("摘要输出不可用，保留旧摘要: chat={}", bot == null ? "" : bot.getName());
+                return previous == null ? "" : previous.trim();
+            }
+            return abbreviate(cleaned, properties.getMaxSummaryChars());
         } catch (RuntimeException ex) {
             log.warn("摘要模型调用失败，保留旧摘要: {}", ex.getMessage());
             return previous == null ? "" : previous.trim();
         }
+    }
+
+    /**
+     * 摘要正文是否可用。
+     *
+     * <p>问过模型「压成摘要」，它有时会把思考过程一起吐出来（线上真的见过
+     * 「We need answer in Chinese… 要合并？用户说如果已有摘要…」这种），而摘要会被塞进每一次回复的
+     * 系统提示里——脏摘要不只是难看，它会直接把机器人带偏。所以宁可整段丢掉，保留上一版。</p>
+     *
+     * @return 清理后的正文；返回 null 表示这段输出不能用
+     */
+    static String usableSummary(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        String text = raw.trim();
+        // 去掉模型爱加的抬头和包裹
+        text = text.replaceAll("^```[a-zA-Z]*\\s*", "").replaceAll("```\\s*$", "").trim();
+        text = text.replaceFirst("^(摘要|长期记忆摘要|记忆摘要)\\s*[:：]\\s*", "");
+        if (text.length() < MIN_SUMMARY_CHARS) {
+            return null;
+        }
+        if (SUMMARY_META.matcher(text).find()) {
+            return null;
+        }
+        if (!looksChinese(text)) {
+            return null;
+        }
+        return text;
+    }
+
+    /** 摘要是给中文对话用的：英文字母占压倒多数时，基本就是模型在自言自语。 */
+    private static boolean looksChinese(String text) {
+        int cjk = 0;
+        int latin = 0;
+        for (int i = 0; i < text.length(); i++) {
+            char ch = text.charAt(i);
+            if (ch >= 0x4E00 && ch <= 0x9FFF) {
+                cjk++;
+            } else if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')) {
+                latin++;
+            }
+        }
+        return cjk >= latin;
     }
 
     private String transcript(List<MessageLog> messages) {

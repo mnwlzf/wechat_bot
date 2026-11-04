@@ -1,6 +1,10 @@
 package com.example.wechatbot.service;
 
+import com.example.wechatbot.ai.ChatMessage;
+import com.example.wechatbot.ai.LlmGateway;
+import com.example.wechatbot.ai.LlmReply;
 import com.example.wechatbot.config.PersonaSwitchProperties;
+import com.example.wechatbot.domain.BotConfig;
 import com.example.wechatbot.domain.Conversation;
 import com.example.wechatbot.domain.PromptTemplate;
 import com.example.wechatbot.repository.ConversationRepository;
@@ -11,6 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -58,6 +63,7 @@ public class PersonaSwitchService {
     private final PromptTemplateRepository repository;
     private final ConversationRepository conversationRepository;
     private final PersonaSwitchProperties properties;
+    private final LlmGateway llmGateway;
 
     /** chatId → 这份名单与过期时间。 */
     private final Map<String, Pending> pending = new ConcurrentHashMap<>();
@@ -66,10 +72,12 @@ public class PersonaSwitchService {
 
     public PersonaSwitchService(PromptTemplateRepository repository,
                                 ConversationRepository conversationRepository,
-                                PersonaSwitchProperties properties) {
+                                PersonaSwitchProperties properties,
+                                LlmGateway llmGateway) {
         this.repository = repository;
         this.conversationRepository = conversationRepository;
         this.properties = properties;
+        this.llmGateway = llmGateway;
     }
 
     public boolean enabled() {
@@ -85,7 +93,7 @@ public class PersonaSwitchService {
      * @return 需要回复给用户的文本；empty 表示不是人设指令，按正常流程生成回复
      */
     @Transactional
-    public Optional<String> handle(Conversation conversation, String content) {
+    public Optional<String> handle(BotConfig bot, Conversation conversation, String content) {
         if (!enabled() || conversation == null || content == null) {
             return Optional.empty();
         }
@@ -105,7 +113,7 @@ public class PersonaSwitchService {
         PromptTemplate named = matchByName(usable, text);
         if (named != null && !isNegated(text)) {
             pending.remove(chatId);
-            return Optional.of(applyPersona(conversation, named));
+            return Optional.of(applyPersona(bot, conversation, named));
         }
 
         // 2) 名单已经发过：回数字、或者直接说名字都行
@@ -117,7 +125,7 @@ public class PersonaSwitchService {
                 Integer index = matchNumber(text, current.ids().size());
                 if (index != null) {
                     pending.remove(chatId);
-                    return Optional.of(applyPersona(conversation, current.ids().get(index),
+                    return Optional.of(applyPersona(bot, conversation, current.ids().get(index),
                             current.names().get(index)));
                 }
                 if (isListIntent(text)) {
@@ -170,15 +178,52 @@ public class PersonaSwitchService {
         return reply.toString().strip();
     }
 
-    private String applyPersona(Conversation conversation, PromptTemplate template) {
-        return applyPersona(conversation, template.getId(), template.getName());
+    private String applyPersona(BotConfig bot, Conversation conversation, PromptTemplate template) {
+        return applyPersona(bot, conversation, template.getId(), template.getName(), template.getContent());
     }
 
-    private String applyPersona(Conversation conversation, UUID templateId, String name) {
+    private String applyPersona(BotConfig bot, Conversation conversation, UUID templateId, String name) {
+        String content = repository.findById(templateId).map(PromptTemplate::getContent).orElse(null);
+        return applyPersona(bot, conversation, templateId, name, content);
+    }
+
+    private String applyPersona(BotConfig bot, Conversation conversation, UUID templateId, String name,
+                                String templateContent) {
         conversation.setPromptTemplateId(templateId);
+        // 记下切换时间：窗口里那些旧口吻的回复要被标成「别学」（见 ChatOrchestrator.personaSwitchNote）
+        conversation.setPersonaSwitchedAt(OffsetDateTime.now());
         conversationRepository.save(conversation);
         log.info("聊天对象自选人设: chat={} persona={}", conversation.getChatId(), name);
-        return "好，从现在开始用「" + name + "」。";
+        return confirmationInVoice(bot, name, templateContent);
+    }
+
+    /**
+     * 换人设的确认语，用**新的人设**说一句。
+     *
+     * <p>固定模板「好，从现在开始用「X」。」是系统口吻：用户刚换完人设，听到的第一句还是原来那个腔调，
+     * 自然觉得「换了没效果」。让模型按新人设说一句，切换当场就能听出来。
+     * 模型不可用、或者输出不像一句话时退回模板——确认语宁可是模板，也不能乱说。</p>
+     */
+    private String confirmationInVoice(BotConfig bot, String name, String templateContent) {
+        String fallback = "好，从现在开始用「" + name + "」。";
+        if (llmGateway == null || bot == null || templateContent == null || templateContent.isBlank()) {
+            return fallback;
+        }
+        try {
+            LlmReply reply = llmGateway.chat(bot, List.of(
+                    ChatMessage.system(templateContent),
+                    ChatMessage.user("从现在起你就是上面设定里的这个人。对方刚刚要求换个说法，"
+                            + "用你自己的口吻应一句（一句话，不超过 20 字），照办即可；"
+                            + "不要复述设定，不要解释，不要提「人设」这两个字，只输出你要发出去的那句话。")));
+            String text = reply == null || reply.content() == null ? "" : reply.content().trim();
+            if (text.isEmpty() || text.length() > 60 || text.contains(ChatOrchestrator.NO_REPLY_TOKEN)) {
+                return fallback;
+            }
+            return text;
+        } catch (RuntimeException ex) {
+            log.warn("人设确认语生成失败，退回模板: {}", ex.getMessage());
+            return fallback;
+        }
     }
 
     /** 这条消息是不是「换人设」指令（供回复策略判断：人设指令免唤醒）。 */

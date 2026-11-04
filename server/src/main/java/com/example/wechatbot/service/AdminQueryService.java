@@ -183,7 +183,11 @@ public class AdminQueryService {
         if (promptTemplateId != null && !promptTemplateRepository.existsById(promptTemplateId)) {
             throw ApiException.badRequest("提示词模板不存在");
         }
-        conversation.setPromptTemplateId(promptTemplateId);
+        if (!java.util.Objects.equals(conversation.getPromptTemplateId(), promptTemplateId)) {
+            conversation.setPromptTemplateId(promptTemplateId);
+            // 和聊天里自选人设一样：记下切换时间，让窗口里的旧口吻回复被标成「别学」
+            conversation.setPersonaSwitchedAt(java.time.OffsetDateTime.now());
+        }
         return toConversationView(conversationRepository.save(conversation));
     }
 

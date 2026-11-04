@@ -47,6 +47,16 @@ public class Conversation {
     @Column(name = "prompt_template_id")
     private UUID promptTemplateId;
 
+    /**
+     * 上一次换人设的时间。
+     *
+     * <p>用途只有一个：换人设之后，窗口里还留着几十条「旧口吻」的回复，模型会照着学，
+     * 于是换了人设也像没换。有这个时间点，就能在提示词里明确告诉模型「下面那些是旧人设说的，
+     * 只当事实，不学它的语气」，等窗口里的消息全部晚于这个时间点，这句提醒自然消失。</p>
+     */
+    @Column(name = "persona_switched_at")
+    private OffsetDateTime personaSwitchedAt;
+
     @Column(name = "created_at", nullable = false)
     private OffsetDateTime createdAt;
 

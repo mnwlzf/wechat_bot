@@ -312,8 +312,15 @@ export interface PersonaPreview {
   personaSource: 'chat' | 'default' | 'bot'
   personaBuiltin: boolean
   personaContent: string
+  /** 人设字数：太短的人设在模型眼里几乎等于没写 */
+  personaChars: number
+  personaThin: boolean
+  /** 换人设后注入的「别学旧语气」提醒；没有则为空 */
+  switchNote?: string | null
   memoryBlock?: string | null
   styleBlock?: string | null
+  /** 页面直接列出来的提醒事项 */
+  warnings?: string[]
 }
 
 export type MemoryKind = 'SUMMARY' | 'NOTE'

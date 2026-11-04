@@ -169,13 +169,14 @@ public class ChatOrchestrator {
                     markSkipped(inbound, "拟人模式：判定冷却中（" + policy.humanCooldownSeconds() + " 秒），本条只记录");
                     return null;
                 }
-                List<ChatMessage> context = buildContext(bot, conversation, inbound);
+                Built built = buildContext(bot, conversation, inbound);
+                List<ChatMessage> context = built.messages();
                 if (human) {
                     context = withHumanHint(context);
                 }
                 long llmStart = System.currentTimeMillis();
                 FlowTraceService.mark(FlowTraceService.Stage.LLM, conversation.getChatId(),
-                        conversation.getChatName(), "请求模型", null);
+                        conversation.getChatName(), "请求模型（人设：" + built.personaName() + "）", null);
                 try {
                     reply = llmGateway.chat(bot, context);
                 } finally {
@@ -435,7 +436,10 @@ public class ChatOrchestrator {
         log.info("拟人模式未回复: conversation={} note={}", inbound.getConversationId(), note);
     }
 
-    private List<ChatMessage> buildContext(BotConfig bot, Conversation conversation, MessageLog currentInbound) {
+    /** 拼好的上下文，外加「这次用的是哪份人设」（流水页要显示，出问题时要能一眼看出来）。 */
+    record Built(List<ChatMessage> messages, String personaName) {}
+
+    private Built buildContext(BotConfig bot, Conversation conversation, MessageLog currentInbound) {
         int size = Math.max(1, bot.getContextWindow());
         var pageable = PageRequest.of(0, size, Sort.by(Sort.Direction.DESC, "createdAt"));
         List<MessageLog> recent = new ArrayList<>(messageRepository.findByConversationIdOrderByCreatedAtDesc(
@@ -500,8 +504,13 @@ public class ChatOrchestrator {
         PromptTemplateService.Persona persona = personaService.resolve(bot, conversation);
         String memoryBlock = memoryService.promptBlock(conversation.getChatId(), conversation.getChatType());
 
-        List<ChatMessage> withStyle = new ArrayList<>(messages.size() + 6);
+        List<ChatMessage> withStyle = new ArrayList<>(messages.size() + 7);
         withStyle.add(ChatMessage.system(persona.content()));
+        // 刚换过人设时先把话说明白：窗口里的旧回复是旧人设说的，学它们等于白换
+        String switchNote = personaSwitchNote(conversation, recent);
+        if (switchNote != null) {
+            withStyle.add(ChatMessage.system(switchNote));
+        }
         if (!memoryBlock.isBlank()) {
             withStyle.add(ChatMessage.system(memoryBlock));
         }
@@ -519,7 +528,30 @@ public class ChatOrchestrator {
             withStyle.add(ChatMessage.system(searchContext));
         }
         withStyle.addAll(messages);
-        return List.copyOf(withStyle);
+        return new Built(List.copyOf(withStyle), persona.name() == null ? "机器人默认提示词" : persona.name());
+    }
+
+    /**
+     * 人设刚换过、而窗口里还留着换之前的回复时，加一句「别学旧语气」。
+     *
+     * <p>为什么需要：模型的语气主要被上下文里「自己以前怎么说话」的样本带跑，48 条窗口里全是旧人设的
+     * 口头禅，光在系统提示里写新人设，它照样会滑回老腔调——用户看到的就是「人设切了但语气没变」。
+     * 等窗口里的消息全部晚于切换时间，这个提醒自动消失，不用清理任何状态。</p>
+     */
+    static String personaSwitchNote(Conversation conversation, List<MessageLog> recent) {
+        var switchedAt = conversation.getPersonaSwitchedAt();
+        if (switchedAt == null || recent == null || recent.isEmpty()) {
+            return null;
+        }
+        boolean stale = recent.stream().anyMatch(item -> item.getDirection() == MessageDirection.OUTBOUND
+                && item.getCreatedAt() != null && item.getCreatedAt().isBefore(switchedAt));
+        if (!stale) {
+            return null;
+        }
+        return """
+                【刚换过人设】下面这些历史回复是换之前的旧人设说的。从现在这条开始，称呼、口吻、性格、
+                说话长短、用不用语气词，全部按当前人设来，不要模仿旧回复的语气和口癖；
+                但旧对话里的事实（对方说过什么、约好过什么、聊到哪一步）照样算数，不要当没发生过。""";
     }
 
     /**
