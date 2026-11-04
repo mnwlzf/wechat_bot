@@ -135,7 +135,7 @@ $headers = @{ Authorization = "Bearer dev-admin-token" }
 | POST | `/api/admin/memories/summaries?chatId=…` | 立即按现有历史重算一次滚动摘要（同步） |
 | DELETE | `/api/admin/memories/summaries?chatId=…` | 清空摘要，下次重新压缩（人工要点保留） |
 | GET/POST | `/api/admin/scheduled-messages` | 任务列表 / 新建。`?kind=REMINDER` 只看提醒；新建时 `kind` 为 `MESSAGE`（定时消息）或 `REMINDER`（提醒），后者可带 `title`、`intervalMinutes`、`maxTimes`、`stopWords`、`variants`、`finalMessage` |
-| PUT | `/api/admin/scheduled-messages/{id}` | 编辑待发送的定时消息（时间、接收人、内容、重复规则） |
+| PUT | `/api/admin/scheduled-messages/{id}` | 编辑待发送的定时消息（时间、接收人、内容、重复规则）；提醒走补丁，可改 `title` / `intervalMinutes` / `maxTimes` / `stopWords` / `variants` / `finalMessage`，没传的字段保持原样 |
 | POST | `/api/admin/scheduled-messages/{id}/cancel` | 取消待发送的定时消息 |
 | POST | `/api/admin/scheduled-messages/{id}/stop` | 停止任务（消息和正在等回执的提醒都能停） |
 | POST | `/api/admin/scheduled-messages/parse` | **一句话创建**：`{"instruction","botId"}` → 草稿（字段同新建，外加 `ok` / `message`），不落库 |
@@ -778,6 +778,27 @@ SILK 单独失败不影响 WAV，会多一个 `silkError` 字段说明原因。
 - 只解析、不落库：确认后再用同一个 JSON 调 `POST /api/admin/scheduled-messages`（`kind=REMINDER`）
 - 缺时间时返回 `ok=false` + `message`（反问内容），不会瞎猜；聊天里建的走同样的解析，`source=CHAT` 且保留 `rawInstruction`
 - 没提「没回就催」时只建**定时消息**（`kind=MESSAGE`），不会自作主张变成催命循环
+
+**聊天里改 / 删任务**（私聊，只对 `source=CHAT` 的任务生效）
+
+同一句话入口（`REMINDER_CREATE_IN_CHAT`）现在也认 `update` / `delete` 两种意图：
+
+```text
+「把打卡改到明天早上九点」   → intent=update，change.firstAt
+「打卡改成每十分钟催一次」   → intent=update，change.everyMinutes
+「少催两次」「停止词改成已提交」→ intent=update，change.maxTimes / change.stopWords
+「删掉打卡」                → intent=delete
+```
+
+- 模型只返回**要改的那几项**（`change` 里没出现的键 = 保持原样），后端用
+  `ScheduledMessageService.patch(id, ReminderPatch)` 局部更新，不会把标题、停止词、重复规则清空
+- 定位任务：先按 `target` 关键词匹配标题（双向包含），再按 `targetIndex`；都对不上且只有一条就直接用它，
+  多条则回一份编号清单，对方回数字（`2` / `第 2 个` / `第二个`）直接落，不再调模型
+- 等序号期间 `awaitingChoice` 为真，回执识别会让路，避免把「2」当成「我回话了」把提醒收掉
+- 说的时间已经过去 → 反问补一个之后的时间，不硬改
+- 后台建的任务（`source=ADMIN`）不给改：回一句「没有能改的提醒」；要停说「别再催了」（`stopWaiting`）
+- 删除 = `CANCELLED`（记录留档，管理端可再真删）
+- 管理端 `PUT /api/admin/scheduled-messages/{id}` 现在也能改提醒（同样走补丁，只改填过的字段）
 
 
 ## 4. 外部集成 API

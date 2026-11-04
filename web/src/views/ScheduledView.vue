@@ -435,7 +435,7 @@ onMounted(async () => {
           <el-table-column label="" width="196" align="right">
             <template #default="{ row }">
               <el-button
-                v-if="row.status === 'PENDING' && row.kind === 'MESSAGE'"
+                v-if="row.status === 'PENDING'"
                 text
                 type="primary"
                 size="small"

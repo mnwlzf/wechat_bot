@@ -223,10 +223,13 @@ public class InboxService {
             return new AgentDtos.EventAccepted("PAUSED", "人工接管中，未自动回复", conversation.getId());
         }
 
-        // 提醒任务：先看是不是「回执」（回话了就把等着的那条收掉），再看是不是在建/停/查提醒。
+        // 提醒任务：先看是不是「回执」（回话了就把等着的那条收掉），再看是不是在建/停/查/改/删提醒。
         // 两条都只在私聊里生效——群里谁都在说话，提醒会变成广播，也判不清该谁回执。
         if (!media && conversation.getChatType() == ChatType.PRIVATE) {
-            Optional<String> ackReply = reminderAck.handle(bot, conversation, content);
+            // 刚问过「要改哪个」，等的是序号：先让序号落到任务上，别被回执逻辑抢走
+            Optional<String> ackReply = reminderIntent.awaitingChoice(conversation.getChatId())
+                    ? Optional.empty()
+                    : reminderAck.handle(bot, conversation, content);
             if (ackReply.isPresent()) {
                 sendReminderReply(bot, conversation, inbound, ackReply.get(), "提醒已被回执停掉");
                 return new AgentDtos.EventAccepted("REMINDER_ACK", "提醒收到回执，已停止", conversation.getId());

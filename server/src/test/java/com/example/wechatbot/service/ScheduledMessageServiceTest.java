@@ -133,6 +133,61 @@ class ScheduledMessageServiceTest {
     }
 
     @Test
+    void patchOnlyTouchesTheFieldsItCarries() {
+        ScheduledMessage message = scheduled("打卡");
+        message.setKind(ScheduledKind.REMINDER);
+        message.setTitle("打卡");
+        message.setIntervalMinutes(5);
+        message.setMaxTimes(6);
+        message.setStopWords("已打卡,好了");
+        message.setScheduledAt(OffsetDateTime.now().plusHours(3));
+        when(repository.findById(message.getId())).thenReturn(Optional.of(message));
+        when(repository.save(any(ScheduledMessage.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        service.patch(message.getId(), new ScheduledMessageService.ReminderPatch(
+                null, null, 10, 3, null, null, null, null, null, null, null));
+
+        assertThat(message.getIntervalMinutes()).isEqualTo(10);
+        assertThat(message.getMaxTimes()).isEqualTo(3);
+        // 没传的字段一律保持原样，否则「改成十分钟」会把停止词和标题清空
+        assertThat(message.getTitle()).isEqualTo("打卡");
+        assertThat(message.getStopWords()).isEqualTo("已打卡,好了");
+        assertThat(message.getScheduledAt()).isAfter(OffsetDateTime.now().plusHours(2));
+    }
+
+    @Test
+    void patchClampsOutOfRangeValuesAndRefusesPastTimes() {
+        ScheduledMessage message = scheduled("打卡");
+        message.setKind(ScheduledKind.REMINDER);
+        message.setScheduledAt(OffsetDateTime.now().plusHours(3));
+        when(repository.findById(message.getId())).thenReturn(Optional.of(message));
+        when(repository.save(any(ScheduledMessage.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        service.patch(message.getId(), new ScheduledMessageService.ReminderPatch(
+                null, null, 1, 99, null, null, null, null, null, null, null));
+
+        assertThat(message.getIntervalMinutes()).isGreaterThanOrEqualTo(5);
+        assertThat(message.getMaxTimes()).isLessThanOrEqualTo(20);
+
+        assertThatThrownBy(() -> service.patch(message.getId(),
+                new ScheduledMessageService.ReminderPatch(null, OffsetDateTime.now().minusHours(2),
+                        null, null, null, null, null, null, null, null, null)))
+                .hasMessageContaining("已经过去");
+    }
+
+    @Test
+    void patchRefusesTasksThatAreNoLongerWaiting() {
+        ScheduledMessage message = scheduled("打卡");
+        message.setStatus(ScheduledStatus.EXPIRED);
+        when(repository.findById(message.getId())).thenReturn(Optional.of(message));
+
+        assertThatThrownBy(() -> service.patch(message.getId(),
+                new ScheduledMessageService.ReminderPatch(null, null, 10, null,
+                        null, null, null, null, null, null, null)))
+                .hasMessageContaining("不在等待中");
+    }
+
+    @Test
     void dailyRepeatStaysPendingAndAdvancesToNextDay() {
         ScheduledMessage message = scheduled("每天九点提醒");
         message.setRepeatRule(ScheduledRepeat.DAILY);

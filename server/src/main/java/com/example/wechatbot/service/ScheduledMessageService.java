@@ -20,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.OffsetDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -231,6 +232,82 @@ public class ScheduledMessageService {
         }
         message.setStatus(ScheduledStatus.CANCELLED);
         return repository.save(message);
+    }
+
+    /**
+     * 要改哪几项就传哪几项，其余字段保持原样。
+     *
+     * <p>聊天里说「把打卡改成每天九点」「改成十分钟催一次」时，我们只知道要改的那一两项；
+     * 用这个补丁而不是整行覆盖，避免把没提到的字段（停止词、文案、重复规则）顺手清空。</p>
+     */
+    public record ReminderPatch(String title,
+                                OffsetDateTime firstAt,
+                                Integer intervalMinutes,
+                                Integer maxTimes,
+                                String stopWords,
+                                String content,
+                                String variants,
+                                String finalMessage,
+                                ScheduledRepeat repeatRule,
+                                String cronExpression,
+                                OffsetDateTime repeatUntil) {}
+
+    /** 局部更新：只改传进来的非空字段。 */
+    @Transactional
+    public ScheduledMessage patch(UUID id, ReminderPatch patch) {
+        ScheduledMessage message = get(id);
+        if (message.getStatus() != ScheduledStatus.PENDING) {
+            throw ApiException.badRequest("这个任务已经不在等待中了，改不了");
+        }
+        if (patch == null) {
+            return message;
+        }
+        if (patch.firstAt() != null) {
+            // 只拒绝「把时间改到过去」；原样保存（前端把 +08:00 转成了 Z）不算改
+            boolean sameInstant = patch.firstAt().toInstant().equals(message.getScheduledAt().toInstant());
+            if (patch.firstAt().isBefore(OffsetDateTime.now().minusMinutes(1)) && !sameInstant) {
+                throw ApiException.badRequest("改的时间已经过去了");
+            }
+            message.setScheduledAt(patch.firstAt());
+        }
+        if (hasText(patch.title())) {
+            message.setTitle(trimTo(patch.title(), 120));
+        }
+        if (patch.content() != null) {
+            message.setContent(trimTo(patch.content(), 2000));
+        }
+        if (patch.intervalMinutes() != null) {
+            message.setIntervalMinutes(clampInterval(patch.intervalMinutes()));
+        }
+        if (patch.maxTimes() != null) {
+            message.setMaxTimes(clampMaxTimes(patch.maxTimes()));
+        }
+        if (hasText(patch.stopWords())) {
+            message.setStopWords(trimTo(patch.stopWords(), 500));
+        }
+        if (patch.variants() != null) {
+            message.setVariants(trimTo(patch.variants(), 4000));
+        }
+        if (patch.finalMessage() != null) {
+            message.setFinalMessage(trimTo(patch.finalMessage(), 500));
+        }
+        if (patch.repeatRule() != null) {
+            message.setRepeatRule(patch.repeatRule());
+        }
+        if (patch.cronExpression() != null) {
+            message.setCronExpression(trimTo(patch.cronExpression(), 120));
+        }
+        if (patch.repeatUntil() != null) {
+            message.setRepeatUntil(patch.repeatUntil());
+        }
+        ScheduledMessage saved = repository.save(message);
+        FlowTraceService.mark(FlowTraceService.Stage.REMIND, message.getChatId(), message.getChatName(),
+                "提醒「" + safeTitle(message) + "」的设置被改了："
+                        + message.getScheduledAt().atZoneSameInstant(java.time.ZoneId.of("Asia/Shanghai"))
+                                .format(DateTimeFormatter.ofPattern("MM-dd HH:mm"))
+                        + " 起，每 " + message.getIntervalMinutes() + " 分钟，最多 " + message.getMaxTimes() + " 次",
+                null);
+        return saved;
     }
 
     @Transactional

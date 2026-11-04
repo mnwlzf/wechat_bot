@@ -59,6 +59,13 @@ public class ScheduledMessageController {
     @PutMapping("/{id}")
     public AdminDtos.ScheduledMessageView update(@PathVariable UUID id,
                                                  @RequestBody AdminDtos.ScheduledMessageInput input) {
+        // 提醒的「内容」是文案、时间之外还有间隔/次数/停止词，走整行覆盖会把它们清空，所以单独走补丁
+        if (service.get(id).getKind() == ScheduledKind.REMINDER) {
+            return toView(service.patch(id, new ScheduledMessageService.ReminderPatch(
+                    input.title(), input.scheduledAt(), input.intervalMinutes(), input.maxTimes(),
+                    input.stopWords(), input.content(), input.variants(), input.finalMessage(),
+                    ScheduledRepeat.parse(input.repeatRule()), input.cronExpression(), input.repeatUntil())));
+        }
         return toView(service.update(id,
                 input.botId(), input.chatId(), input.chatName(), input.content(), input.scheduledAt(),
                 ScheduledRepeat.parse(input.repeatRule()), input.repeatUntil(),
