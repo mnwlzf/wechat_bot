@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.OffsetDateTime;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -35,4 +36,11 @@ public interface ConversationRepository extends JpaRepository<Conversation, UUID
 
     /** 按 chatId 批量取会话：目录里按昵称 / 群名搜到一批 ID 后，再回表拿会话。 */
     List<Conversation> findByChatIdIn(Collection<String> chatIds);
+
+    /**
+     * 找「已经安静下来」的会话：最后一条消息早于 {@code before}、又不早于 {@code after}
+     * （太老的历史没必要再补摘要，省一次模型调用）。
+     */
+    List<Conversation> findByLastMessageAtBeforeAndLastMessageAtAfterOrderByLastMessageAtDesc(
+            OffsetDateTime before, OffsetDateTime after, Pageable pageable);
 }

@@ -37,6 +37,21 @@ public class MemoryProperties {
     /** 同一会话两次自动摘要之间的最小间隔（分钟）。 */
     private int minIntervalMinutes = 5;
 
+    /**
+     * 会话安静超过这么多分钟，就算窗口外没攒够 {@code triggerMessages} 也压一次摘要。
+     *
+     * <p>为什么需要它：只按条数触发时，一段聊完就散的对话（上午聊名字、下午再问）
+     * 会一直卡在「窗口里已经没有了、摘要里也还没有」的真空里，直到下次聊够条数才补上——
+     * 那时人早就发现你忘了。</p>
+     */
+    private int idleMinutes = 30;
+
+    /** 后台补摘要的扫描间隔（毫秒）。 */
+    private long sweepIntervalMs = 300_000;
+
+    /** 每轮扫描最多处理多少个会话，避免一次扫太多库。 */
+    private int sweepBatch = 20;
+
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
     public boolean isSummaryEnabled() { return summaryEnabled; }
@@ -55,4 +70,10 @@ public class MemoryProperties {
     public void setNoteMaxChars(int noteMaxChars) { this.noteMaxChars = noteMaxChars; }
     public int getMinIntervalMinutes() { return minIntervalMinutes; }
     public void setMinIntervalMinutes(int minIntervalMinutes) { this.minIntervalMinutes = minIntervalMinutes; }
+    public int getIdleMinutes() { return idleMinutes; }
+    public void setIdleMinutes(int idleMinutes) { this.idleMinutes = idleMinutes; }
+    public long getSweepIntervalMs() { return sweepIntervalMs; }
+    public void setSweepIntervalMs(long sweepIntervalMs) { this.sweepIntervalMs = sweepIntervalMs; }
+    public int getSweepBatch() { return sweepBatch; }
+    public void setSweepBatch(int sweepBatch) { this.sweepBatch = sweepBatch; }
 }

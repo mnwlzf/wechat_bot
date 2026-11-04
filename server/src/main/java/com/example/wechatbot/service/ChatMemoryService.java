@@ -185,6 +185,32 @@ public class ChatMemoryService {
         return summarize(bot, conversation, true);
     }
 
+    /**
+     * 给「已经聊完、静下来了」的会话补一份摘要，供后台定时扫描调用。
+     *
+     * <p>为什么必须由后台来做：{@link #summarizeAsync} 只在回复之后触发，而一段对话聊完
+     * 就没人再触发它了。上午聊的内容于是卡在窗口之外、摘要之内都没有，下午对方回来问一句，
+     * 机器人只能失忆。定时扫一遍，等于在「聊完」和「下次开口」之间补上记忆。</p>
+     *
+     * @return 是否已经「安静够久」并尝试过压缩（供后台扫描统计）
+     */
+    public boolean summarizeIfIdle(BotConfig bot, Conversation conversation) {
+        if (!idleLongEnough(conversation)) {
+            return false;
+        }
+        summarize(bot, conversation, false);
+        return true;
+    }
+
+    /** 这个会话是否已经安静够久（久到可以认定「这段聊完了」）。 */
+    private boolean idleLongEnough(Conversation conversation) {
+        int minutes = properties.getIdleMinutes();
+        if (minutes <= 0 || conversation.getLastMessageAt() == null) {
+            return false;
+        }
+        return conversation.getLastMessageAt().isBefore(OffsetDateTime.now().minusMinutes(minutes));
+    }
+
     @Transactional
     public ChatMemory summarize(BotConfig bot, Conversation conversation, boolean force) {
         if (!properties.isEnabled() || !properties.isSummaryEnabled() || bot == null || conversation == null) {
@@ -222,9 +248,14 @@ public class ChatMemoryService {
             if (pending.isEmpty()) {
                 return summary;
             }
-            // 阈值同时受窗口大小约束：已经滚出窗口的消息不该无限期地既不在窗口里、也不在摘要里
-            int threshold = Math.min(Math.max(1, properties.getTriggerMessages()), Math.max(1, keep));
-            if (!force && pending.size() < threshold) {
+            // 阈值同时受窗口大小约束：已经滚出窗口的消息不该无限期地既不在窗口里、也不在摘要里。
+            // 但也不能等到「整整一个窗口」都滚出去才压——那等于 20 条消息（十几轮）的真空期，
+            // 中间只要有人隔一段时间回来问一句，机器人的回答就是失忆的。
+            // 折中：窗口的 1/4、最少 4 条，这样一两轮对话之后窗口外的内容就会进摘要。
+            int threshold = Math.min(Math.max(1, properties.getTriggerMessages()),
+                    Math.max(4, Math.max(1, keep) / 4));
+            boolean idle = idleLongEnough(conversation);
+            if (!force && !idle && pending.size() < threshold) {
                 return summary;
             }
 

@@ -187,6 +187,12 @@ app:
     note-max-chars: ${MEMORY_NOTE_MAX_CHARS:500}
     # 同一会话两次自动摘要的最小间隔（分钟）
     min-interval-minutes: ${MEMORY_MIN_INTERVAL_MINUTES:5}
+    # 会话安静超过这么多分钟就补一次摘要（0 = 关掉按时间补，只按条数触发）
+    # 只按条数触发时，一段聊完就散的对话会卡在「窗口里没有、摘要里也没有」的真空里
+    idle-minutes: ${MEMORY_IDLE_MINUTES:30}
+    # 后台补摘要的扫描间隔（毫秒）与每轮最多处理几个会话
+    sweep-interval-ms: ${MEMORY_SWEEP_INTERVAL_MS:300000}
+    sweep-batch: ${MEMORY_SWEEP_BATCH:20}
   # 群消息常常几秒好几条：先攒一小会儿再回一次，别一条一条抢话
   reply:
     enabled: ${REPLY_DEBOUNCE_ENABLED:true}

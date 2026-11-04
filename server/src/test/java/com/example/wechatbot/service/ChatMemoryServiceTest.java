@@ -195,6 +195,81 @@ class ChatMemoryServiceTest {
     }
 
     @Test
+    void quietConversationGetsSummarizedEvenWithOneMessageOutsideWindow() {
+        // 真实场景：上午聊完就散了，窗口外只有一条没进摘要的消息，下午对方回来问一句。
+        // 按条数阈值永远等不到，按「安静够久」就该立刻压。
+        Conversation conversation = group();
+        conversation.setLastMessageAt(OffsetDateTime.now().minusHours(6));
+        BotConfig bot = bot(20);
+        properties.setTriggerMessages(24);
+        properties.setIdleMinutes(30);
+        OffsetDateTime now = OffsetDateTime.now();
+
+        when(repository.findFirstByChatIdAndKind("123@chatroom", MemoryKind.SUMMARY)).thenReturn(Optional.empty());
+        when(messageRepository.findByConversationIdOrderByCreatedAtDesc(eq(conversation.getId()), any(Pageable.class)))
+                .thenReturn(List.of(message("最新", now)));
+        when(messageRepository.findByConversationIdAndCreatedAtLessThanOrderByCreatedAtAsc(
+                eq(conversation.getId()), any(), any(Pageable.class)))
+                .thenReturn(List.of(message("对方说：深海不错", now.minusHours(6))));
+        when(llmGateway.chat(any(), anyList())).thenReturn(LlmReply.rule("对方给我起名深海"));
+        when(repository.save(any(ChatMemory.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        assertThat(service.summarizeIfIdle(bot, conversation)).isTrue();
+
+        ArgumentCaptor<ChatMemory> captor = ArgumentCaptor.forClass(ChatMemory.class);
+        verify(repository).save(captor.capture());
+        assertThat(captor.getValue().getContent()).isEqualTo("对方给我起名深海");
+    }
+
+    @Test
+    void activeConversationWaitsForTheCountThreshold() {
+        Conversation conversation = group();
+        conversation.setLastMessageAt(OffsetDateTime.now()); // 刚聊过，不算安静
+        BotConfig bot = bot(20);
+        properties.setTriggerMessages(24);
+        properties.setIdleMinutes(30);
+        OffsetDateTime now = OffsetDateTime.now();
+
+        when(repository.findFirstByChatIdAndKind("123@chatroom", MemoryKind.SUMMARY)).thenReturn(Optional.empty());
+        when(messageRepository.findByConversationIdOrderByCreatedAtDesc(eq(conversation.getId()), any(Pageable.class)))
+                .thenReturn(List.of(message("最新", now)));
+        when(messageRepository.findByConversationIdAndCreatedAtLessThanOrderByCreatedAtAsc(
+                eq(conversation.getId()), any(), any(Pageable.class)))
+                .thenReturn(List.of(message("窗口外一条", now.minusMinutes(2))));
+
+        assertThat(service.summarize(bot, conversation, false)).isNull();
+        verify(llmGateway, never()).chat(any(), anyList());
+    }
+
+    @Test
+    void smallWindowSummarizesAfterAFewMessagesNotAFullWindow() {
+        // 窗口 20 条时，阈值不该是 20 条（十几轮真空期），窗口的 1/4 就该压一次
+        Conversation conversation = group();
+        BotConfig bot = bot(20);
+        properties.setTriggerMessages(24);
+        OffsetDateTime now = OffsetDateTime.now();
+
+        when(repository.findFirstByChatIdAndKind("123@chatroom", MemoryKind.SUMMARY)).thenReturn(Optional.empty());
+        when(messageRepository.findByConversationIdOrderByCreatedAtDesc(eq(conversation.getId()), any(Pageable.class)))
+                .thenReturn(List.of(message("最新", now)));
+        when(messageRepository.findByConversationIdAndCreatedAtLessThanOrderByCreatedAtAsc(
+                eq(conversation.getId()), any(), any(Pageable.class)))
+                .thenReturn(List.of(
+                        message("窗口外 1", now.minusMinutes(9)),
+                        message("窗口外 2", now.minusMinutes(8)),
+                        message("窗口外 3", now.minusMinutes(7)),
+                        message("窗口外 4", now.minusMinutes(6)),
+                        message("窗口外 5", now.minusMinutes(5))));
+        when(llmGateway.chat(any(), anyList())).thenReturn(LlmReply.rule("压缩后的摘要"));
+        when(repository.save(any(ChatMemory.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        ChatMemory saved = service.summarize(bot, conversation, false);
+
+        assertThat(saved).isNotNull();
+        assertThat(saved.getContent()).isEqualTo("压缩后的摘要");
+    }
+
+    @Test
     void newNoteIsManualAndEnabledByDefault() {
         when(repository.save(any(ChatMemory.class))).thenAnswer(inv -> {
             ChatMemory memory = inv.getArgument(0);
