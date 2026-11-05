@@ -7,6 +7,7 @@ import com.example.wechatbot.config.ReminderProperties;
 import com.example.wechatbot.domain.BotConfig;
 import com.example.wechatbot.domain.Conversation;
 import com.example.wechatbot.domain.ScheduledMessage;
+import com.example.wechatbot.domain.ScheduledStatus;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
@@ -119,7 +120,15 @@ public class ReminderAckService {
 
     private static String done(ScheduledMessage task) {
         String title = task.getTitle() == null || task.getTitle().isBlank() ? "" : "「" + task.getTitle() + "」";
-        return "好，" + title + "不催了。";
+        String text = "好，" + title + "不催了。";
+        // 每天/每周的任务下一轮还会来：把回到的那个钟点说清楚。
+        // 这里读的是 ack 重排后的时间——它会回到最初要求的 18:00，而不是催出来的 18:25
+        if (task.getStatus() == ScheduledStatus.PENDING && task.getScheduledAt() != null) {
+            text += "下次 " + task.getScheduledAt()
+                    .atZoneSameInstant(java.time.ZoneId.of("Asia/Shanghai"))
+                    .format(java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm")) + "。";
+        }
+        return text;
     }
 
     /** 停止词命中：去掉空格和标点再比，避免「已 打卡」这种分段写法漏掉。 */

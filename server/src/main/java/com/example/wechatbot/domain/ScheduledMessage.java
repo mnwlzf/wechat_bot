@@ -88,6 +88,17 @@ public class ScheduledMessage {
     @Column(name = "scheduled_at", nullable = false)
     private OffsetDateTime scheduledAt;
 
+    /**
+     * 这一系列提醒「本来该在几点」——下一轮从它算，不从 {@link #scheduledAt} 算。
+     *
+     * <p>催命循环会把 {@code scheduledAt} 推成「18:00、18:05、18:10…」，
+     * 如果拿最后那次去加一天，明天就变成 18:10，后天 18:15，越来越晚。
+     * 有了这个锚点，对方回话（或次数用尽）之后下一轮永远回到 18:00。
+     * 为空表示不重复，按 {@code scheduledAt} 处理。</p>
+     */
+    @Column(name = "anchor_at")
+    private OffsetDateTime anchorAt;
+
     /** 重复规则；重复发送时每发一次就把 scheduledAt 往后推一个周期。 */
     @Enumerated(EnumType.STRING)
     @Column(name = "repeat_rule", nullable = false, length = 20)

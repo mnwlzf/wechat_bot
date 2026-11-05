@@ -314,6 +314,25 @@ class ScheduledMessageServiceTest {
     }
 
     @Test
+    void patchingTheTimeReanchorsTheSeries() {
+        // 「改成九点」之后，以后每轮都该从九点起，不能延续之前催出来的偏移
+        ScheduledMessage message = scheduled("每天打卡");
+        message.setRepeatRule(ScheduledRepeat.DAILY);
+        message.setScheduledAt(OffsetDateTime.now().plusHours(1));
+        message.setAnchorAt(OffsetDateTime.now().plusHours(1));
+        when(repository.findById(message.getId())).thenReturn(Optional.of(message));
+        when(repository.save(any(ScheduledMessage.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        OffsetDateTime nine = OffsetDateTime.now().plusDays(1)
+                .withHour(9).withMinute(0).withSecond(0).withNano(0);
+        service.patch(message.getId(), new ScheduledMessageService.ReminderPatch(
+                null, nine, null, null, null, null, null, null, null, null, null));
+
+        assertThat(message.getScheduledAt().toInstant()).isEqualTo(nine.toInstant());
+        assertThat(message.getAnchorAt().toInstant()).isEqualTo(nine.toInstant());
+    }
+
+    @Test
     void invalidCronIsRejectedWithAHint() {
         assertThatThrownBy(() -> service.create(null, "123@chatroom", "群", "内容",
                 OffsetDateTime.now().plusHours(1), ScheduledRepeat.CRON, null, false, "这不是 cron"))

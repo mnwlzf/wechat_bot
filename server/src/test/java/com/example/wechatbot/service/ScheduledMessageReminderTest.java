@@ -172,6 +172,61 @@ class ScheduledMessageReminderTest {
     }
 
     @Test
+    void ackComesBackToTheOriginalClockNotTheLastNudge() {
+        // 每天 18:00 起、每 5 分钟催一次，催到 18:10 对方才回话：
+        // 明天必须还是 18:00，不能变成 18:10（那样一天比一天晚）
+        ScheduledMessage task = reminder(3, 6, 5);
+        task.setRepeatRule(ScheduledRepeat.DAILY);
+        java.time.ZoneId zone = java.time.ZoneId.of("Asia/Shanghai");
+        OffsetDateTime anchor = OffsetDateTime.now().atZoneSameInstant(zone)
+                .withHour(18).withMinute(0).withSecond(0).withNano(0).toOffsetDateTime();
+        task.setAnchorAt(anchor);
+        task.setScheduledAt(anchor.plusMinutes(10));
+
+        service.ack(task, "已打卡");
+
+        java.time.ZonedDateTime next = task.getScheduledAt().atZoneSameInstant(zone);
+        assertThat(next.toLocalTime().toString()).isEqualTo("18:00");
+        assertThat(next.toLocalDate()).isEqualTo(anchor.atZoneSameInstant(zone).toLocalDate().plusDays(1));
+        assertThat(task.getSentCount()).isZero();
+    }
+
+    @Test
+    void nudgingNeverMovesTheAnchor() {
+        ScheduledMessage task = reminder(0, 6, 5);
+        task.setRepeatRule(ScheduledRepeat.DAILY);
+        OffsetDateTime anchor = OffsetDateTime.now().withSecond(0).withNano(0);
+        task.setAnchorAt(anchor);
+        task.setScheduledAt(anchor);
+
+        dispatch(task);
+        dispatch(task);
+
+        // 只有 scheduledAt 在往后走，锚点一动不动
+        assertThat(task.getAnchorAt()).isEqualTo(anchor);
+        assertThat(task.getScheduledAt()).isAfter(anchor);
+        assertThat(task.getSentCount()).isEqualTo(2);
+    }
+
+    @Test
+    void theCapAlsoReturnsToTheOriginalClock() {
+        ScheduledMessage task = reminder(1, 2, 5);
+        task.setRepeatRule(ScheduledRepeat.DAILY);
+        java.time.ZoneId zone = java.time.ZoneId.of("Asia/Shanghai");
+        OffsetDateTime anchor = OffsetDateTime.now().atZoneSameInstant(zone)
+                .withHour(18).withMinute(0).withSecond(0).withNano(0).toOffsetDateTime();
+        task.setAnchorAt(anchor);
+        task.setScheduledAt(anchor.plusMinutes(5));
+
+        dispatch(task);
+
+        // 催满 2 次也不结束，明天 18:00 重开一轮
+        assertThat(task.getStatus()).isEqualTo(ScheduledStatus.PENDING);
+        assertThat(task.getSentCount()).isZero();
+        assertThat(task.getScheduledAt().atZoneSameInstant(zone).toLocalTime().toString()).isEqualTo("18:00");
+    }
+
+    @Test
     void stopWaitingCancelsEverythingLeftInTheChat() {
         ScheduledMessage first = reminder(1, 6, 5);
         ScheduledMessage second = reminder(0, 6, 5);

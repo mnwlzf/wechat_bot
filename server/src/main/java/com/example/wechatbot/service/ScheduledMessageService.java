@@ -189,6 +189,8 @@ public class ScheduledMessageService {
         message.setStopWords(trimTo(stopWords, 500));
         message.setScheduledAt(firstAt);
         message.setRepeatRule(spec.repeatRule() == null ? ScheduledRepeat.NONE : spec.repeatRule());
+        // 记下这一系列本来该在的钟点：催到 18:25 之后明天还得是 18:00
+        message.setAnchorAt(message.getRepeatRule() == ScheduledRepeat.NONE ? null : firstAt);
         message.setCronExpression(trimTo(spec.cronExpression(), 120));
         message.setRepeatUntil(spec.repeatUntil());
         message.setIntervalMinutes(clampInterval(spec.intervalMinutes()));
@@ -271,6 +273,10 @@ public class ScheduledMessageService {
                 throw ApiException.badRequest("改的时间已经过去了");
             }
             message.setScheduledAt(patch.firstAt());
+            // 改成九点就是重新锚到九点：以后每轮都从九点起，不会延续之前催出来的偏移
+            if (message.getRepeatRule() != null && message.getRepeatRule() != ScheduledRepeat.NONE) {
+                message.setAnchorAt(patch.firstAt());
+            }
         }
         if (hasText(patch.title())) {
             message.setTitle(trimTo(patch.title(), 120));
@@ -295,6 +301,11 @@ public class ScheduledMessageService {
         }
         if (patch.repeatRule() != null) {
             message.setRepeatRule(patch.repeatRule());
+            if (patch.repeatRule() == ScheduledRepeat.NONE) {
+                message.setAnchorAt(null);
+            } else if (message.getAnchorAt() == null) {
+                message.setAnchorAt(message.getScheduledAt());
+            }
         }
         if (patch.cronExpression() != null) {
             message.setCronExpression(trimTo(patch.cronExpression(), 120));
@@ -367,8 +378,11 @@ public class ScheduledMessageService {
         message.setStatus(rescheduled ? ScheduledStatus.PENDING : ScheduledStatus.ACKED);
         repository.save(message);
         FlowTraceService.mark(FlowTraceService.Stage.ACK, message.getChatId(), message.getChatName(),
-                "对方回话了，提醒「" + safeTitle(message) + "」本轮结束（催了 " + rounds
-                        + " 次" + (rescheduled ? "，明天继续" : "") + "）",
+                "对方回话了，提醒「" + safeTitle(message) + "」本轮结束（催了 " + rounds + " 次"
+                        + (rescheduled ? "，下次 "
+                        + message.getScheduledAt().atZoneSameInstant(ZONE)
+                                .format(DateTimeFormatter.ofPattern("MM-dd HH:mm")) : "")
+                        + "）",
                 ackContent);
         return true;
     }
@@ -590,12 +604,17 @@ public class ScheduledMessageService {
     /**
      * 下一次发送时间。
      *
-     * <p>停机或配额延迟可能让 scheduledAt 落后好几轮，这里直接跳到未来最近的一次，
+     * <p><b>从锚点算，不从 {@code scheduledAt} 算。</b>催命循环会把时间推成
+     * 「18:00、18:05、18:10…」，拿最后那次加一天就成了明天 18:10、后天 18:15，
+     * 越催越晚——用户说的「每天六点」被悄悄改掉了。锚点记的是「本来该在的钟点」，
+     * 所以对方回话之后下一轮永远回到 18:00。</p>
+     *
+     * <p>停机或配额延迟可能让锚点落后好几轮，这里直接跳到未来最近的一次，
      * 不会补发一串过期的消息。</p>
      */
     private static OffsetDateTime nextOccurrence(ScheduledMessage message, OffsetDateTime now) {
         ScheduledRepeat repeat = message.getRepeatRule() == null ? ScheduledRepeat.NONE : message.getRepeatRule();
-        OffsetDateTime current = message.getScheduledAt();
+        OffsetDateTime current = message.getAnchorAt() != null ? message.getAnchorAt() : message.getScheduledAt();
         if (repeat == ScheduledRepeat.NONE || current == null) {
             return null;
         }
@@ -746,6 +765,11 @@ public class ScheduledMessageService {
         Conversation conversation = conversationRepository
                 .findByBotIdAndChatId(bot.getId(), normalizedChatId).orElse(null);
 
+        // 时间没动（只改了内容 / 接收人）就保留原来的锚点：否则在管理端点一次保存，
+        // 会把「每天 18:00」重锚成当前这一次的 18:10
+        OffsetDateTime previous = message.getScheduledAt();
+        boolean timeChanged = previous == null || !previous.toInstant().equals(effectiveAt.toInstant());
+
         message.setKind(ScheduledKind.MESSAGE);
         message.setBotId(bot.getId());
         message.setConversationId(conversation == null ? null : conversation.getId());
@@ -756,6 +780,8 @@ public class ScheduledMessageService {
         message.setContent(content.trim());
         message.setScheduledAt(effectiveAt);
         message.setRepeatRule(repeat);
+        message.setAnchorAt(repeat == ScheduledRepeat.NONE ? null
+                : (timeChanged || message.getAnchorAt() == null ? effectiveAt : message.getAnchorAt()));
         message.setRepeatUntil(repeatUntil);
         message.setSplitLines(splitLines);
         message.setCronExpression(cron);
