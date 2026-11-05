@@ -68,6 +68,18 @@ public class ChatOrchestrator {
             - 要接：直接写你要发出去的那句话，像群成员一样自然、简短、口语化；不要写「我来回答」「作为 AI」这类话。
             判断标准像真人：没被点到也可以插一句，但别每条都刷存在感；不确定时宁可 [[NO_REPLY]]。""";
 
+    /**
+     * 提醒类操作由系统执行，模型不许替系统许诺。
+     *
+     * <p>真事：用户说「修改打卡时间」，这句话没被识别成指令、直接进了聊天，模型回了句
+     * 「行。9:40 起，每 5 分钟一次」——听起来像已经改好了，实际数据库一个字都没动，
+     * 到点当然不会响。这种「嘴上改好了」比明确说做不到更糟，所以每轮都提醒一句。</p>
+     */
+    private static final String REMINDER_HINT = """
+            定时提醒、闹钟、定时消息这类事由系统处理，不是你回一句话就能设上或改掉的。\
+            不要声称「已经改好了」「到点我会提醒你」「我记着了」；系统真的改成功时会单独回一条确认，
+            不需要你转述。不确定就照实说，并让对方说清楚要改哪一条、改成几点。""";
+
     /** 模型表示「这次不回复」的标记。 */
     static final String NO_REPLY_TOKEN = "[[NO_REPLY]]";
 
@@ -504,7 +516,7 @@ public class ChatOrchestrator {
         PromptTemplateService.Persona persona = personaService.resolve(bot, conversation);
         String memoryBlock = memoryService.promptBlock(conversation.getChatId(), conversation.getChatType());
 
-        List<ChatMessage> withStyle = new ArrayList<>(messages.size() + 7);
+        List<ChatMessage> withStyle = new ArrayList<>(messages.size() + 8);
         withStyle.add(ChatMessage.system(persona.content()));
         // 刚换过人设时先把话说明白：窗口里的旧回复是旧人设说的，学它们等于白换
         String switchNote = personaSwitchNote(conversation, recent);
@@ -516,6 +528,10 @@ public class ChatOrchestrator {
         }
         if (!style.isBlank()) {
             withStyle.add(ChatMessage.system(style));
+        }
+        // 提醒只在私聊里生效，所以这句也只对私聊说
+        if (conversation.getChatType() == ChatType.PRIVATE) {
+            withStyle.add(ChatMessage.system(REMINDER_HINT));
         }
         if (hasQuote(currentInbound)) {
             withStyle.add(ChatMessage.system(QUOTE_HINT));

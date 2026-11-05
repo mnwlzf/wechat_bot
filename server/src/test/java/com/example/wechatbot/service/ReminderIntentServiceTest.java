@@ -81,6 +81,47 @@ class ReminderIntentServiceTest {
     }
 
     @Test
+    void vagueWaysOfAskingToChangeATaskStillReachTheModel() {
+        // 线上真事：用户说「修改打卡时间」，预筛没认出来，这句话直接进了聊天，
+        // 模型回了句「行。9:40 起」——听着像改好了，其实一个字都没动
+        assertThat(service.mightBeInstruction("修改打卡时间")).isTrue();
+        assertThat(service.mightBeInstruction("把提醒时间改一下")).isTrue();
+        assertThat(service.mightBeInstruction("调整一下打卡提醒")).isTrue();
+        assertThat(service.mightBeInstruction("改时间")).isTrue();
+        assertThat(service.mightBeInstruction("换个时间催我")).isTrue();
+        assertThat(service.mightBeInstruction("删掉打卡")).isTrue();
+
+        // 普通聊天还是要挡住：只有「改」没有任务名词
+        assertThat(service.mightBeInstruction("改天聊")).isFalse();
+        assertThat(service.mightBeInstruction("这个方案我改了一下")).isFalse();
+        assertThat(service.mightBeInstruction("今天有点忙")).isFalse();
+    }
+
+    @Test
+    void askingWhichPartToChangeKeepsTheConversationGoing() {
+        ScheduledMessage task = task("企业微信打卡", OffsetDateTime.now().plusHours(8));
+        when(scheduled.waitingReminders("wxid_demo")).thenReturn(List.of(task));
+        stubPatch(task);
+        when(llmGateway.chat(any(), anyList()))
+                .thenReturn(LlmReply.rule("""
+                        {"intent":"update","target":"打卡","change":{},"confidence":0.7}
+                        """))
+                .thenReturn(LlmReply.rule("""
+                        {"intent":"update","target":"打卡","change":{"firstAt":"%s"},"confidence":0.9}
+                        """.formatted(iso(9, 40))));
+
+        Optional<String> ask = service.handle(bot(), chat(), "修改打卡时间");
+        assertThat(ask.orElse("")).contains("要改成什么");
+        assertThat(service.hasPendingAsk("wxid_demo")).isTrue();
+
+        Optional<String> done = service.handle(bot(), chat(), "早上九点四十");
+
+        assertThat(done.orElse("")).contains("09:40");
+        assertThat(task.getScheduledAt().atZoneSameInstant(java.time.ZoneId.of("Asia/Shanghai")).getHour())
+                .isEqualTo(9);
+    }
+
+    @Test
     void chatterNeverCallsTheModel() {
         assertThat(service.handle(bot(), chat(), "记得早点睡")).isEmpty();
         verify(llmGateway, never()).chat(any(), anyList());

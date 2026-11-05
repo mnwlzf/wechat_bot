@@ -61,14 +61,20 @@ public class ReminderIntentService {
             "别提醒", "不要提醒", "取消提醒", "不用提醒", "停掉提醒", "停止提醒", "把提醒停", "提醒停掉", "别再催");
     /** 「把打卡改到九点」这类改期 / 改频率的说法。 */
     private static final List<String> MODIFY_WORDS = List.of(
-            "改成", "改到", "改一下", "改个时间", "换成", "推迟", "延后", "提前到", "提前半", "调成",
-            "调晚", "调早", "多催", "少催", "催得", "催多", "催少", "次数改", "间隔改", "别催那么");
+            "改成", "改到", "改一下", "改个时间", "换个时间", "换成", "修改", "调整", "推迟", "延后",
+            "提前到", "提前半", "调成", "调晚", "调早", "多催", "少催", "催得", "催多", "催少",
+            "次数改", "间隔改", "别催那么");
     /** 「删掉打卡」——删掉和停掉对用户是一回事，都会让它不再响。 */
     private static final List<String> DELETE_WORDS = List.of(
             "删掉", "删除", "删了", "去掉这个提醒", "不要这个提醒", "这个提醒不要了");
     /** 判断「改」是不是在说任务：光有「改」不算（「改天聊」天天都有）。 */
     private static final List<String> TASK_NOUNS = List.of(
-            "提醒", "定时", "闹钟", "任务", "催");
+            "提醒", "定时", "闹钟", "任务", "催", "时间");
+
+    /** 预筛用的动词：和下面的名词同时出现，才值得去问模型。 */
+    private static final List<String> TASK_VERBS = List.of(
+            "改", "修改", "调整", "换", "调", "推迟", "提前", "延后", "删", "去掉", "取消", "停",
+            "多催", "少催", "建", "设", "加个", "加一个");
 
     private static final String SYSTEM = """
             你把用户的一句话解析成「提醒任务」的操作。只输出 JSON，不要解释，不要 Markdown。
@@ -170,6 +176,11 @@ public class ReminderIntentService {
         // 改期 / 改频率：光有「改」不算（「改天聊」），得带上任务名词或时间点
         if (containsAny(text, MODIFY_WORDS)
                 && (containsAny(text, TASK_NOUNS) || containsAny(text, TIME_WORDS))) {
+            return true;
+        }
+        // 「修改打卡时间」这种：动词 + 名词就够。多问模型一次的代价，比漏掉它、
+        // 让模型自己编一句「改好了」小得多
+        if (containsAny(text, TASK_VERBS) && containsAny(text, TASK_NOUNS)) {
             return true;
         }
         return text.contains("提醒") && containsAny(text, TIME_WORDS);
@@ -475,6 +486,12 @@ public class ReminderIntentService {
         ScheduledMessage target = pick(draft.target(), draft.targetIndex(), own);
         if (target == null) {
             return askWhich(conversation.getChatId(), own, draft, combined, "改");
+        }
+        if (draft.change() == null || draft.change().isEmpty()) {
+            // 「修改打卡时间」只说改哪项没说改成什么：记下这句，等对方补一句时间再一起解析
+            pending.put(conversation.getChatId(), new PendingAsk(combined,
+                    Instant.now().plusSeconds(Math.max(30, properties.getAskBackSeconds())), null));
+            return "要改成什么？时间、间隔、次数、停止词都能改，比如「改成明天九点」。";
         }
         return applyUpdate(bot, conversation, target, draft);
     }
