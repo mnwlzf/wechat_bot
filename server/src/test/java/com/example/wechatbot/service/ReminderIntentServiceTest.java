@@ -28,6 +28,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -341,6 +342,8 @@ class ReminderIntentServiceTest {
             if (patch.stopWords() != null) target.setStopWords(patch.stopWords());
             if (patch.title() != null) target.setTitle(patch.title());
             if (patch.variants() != null) target.setVariants(patch.variants());
+            if (patch.cronExpression() != null) target.setCronExpression(patch.cronExpression());
+            if (patch.repeatRule() != null) target.setRepeatRule(patch.repeatRule());
             return target;
         });
     }
@@ -406,19 +409,122 @@ class ReminderIntentServiceTest {
     }
 
     @Test
-    void adminTasksAreNotEditableFromChat() {
+    void adminTasksAreEditableFromChatToo() {
+        // 早先只放开「聊天里自己建的」，结果同一个私聊里两条提醒一条能改一条不能改，
+        // 用户看到的就是「改了没反应」。既然「别再催了」本来就能停掉后台任务，改也放开了
         ScheduledMessage task = task("周报", OffsetDateTime.now().plusHours(3));
         task.setSource(ScheduleSource.ADMIN);
         task.setCreatorChatId(null);
         when(scheduled.waitingReminders("wxid_demo")).thenReturn(List.of(task));
+        stubPatch(task);
         when(llmGateway.chat(any(), anyList())).thenReturn(LlmReply.rule("""
                 {"intent":"update","target":"周报","change":{"everyMinutes":10},"confidence":0.9}
                 """));
 
         Optional<String> reply = service.handle(bot(), chat(), "把周报提醒改成十分钟催一次");
 
-        assertThat(reply.orElse("")).contains("没有能改的");
+        assertThat(reply.orElse("")).contains("每 10 分钟");
+        assertThat(task.getIntervalMinutes()).isEqualTo(10);
+    }
+
+    @Test
+    void mentioningTheTaskNameIsEnoughToBeParsed() {
+        // 「企业微信打卡不用了」里既没有「改成」也没有「提醒」，靠动词词表永远补不全；
+        // 名字被提到就该让模型看一次
+        ScheduledMessage task = task("企业微信打卡", OffsetDateTime.now().plusHours(3));
+        when(scheduled.waitingReminders("wxid_demo")).thenReturn(List.of(task));
+        when(llmGateway.chat(any(), anyList())).thenReturn(LlmReply.rule("""
+                {"intent":"delete","target":"企业微信打卡","confidence":0.9}
+                """));
+
+        Optional<String> reply = service.handle(bot(), chat(), "企业微信打卡不用了");
+
+        assertThat(reply.orElse("")).contains("删掉了");
+        verify(scheduled).stop(task.getId(), "聊天里让人删掉");
+    }
+
+    @Test
+    void chatterThatHappensToMentionNothingStillSkipsTheModel() {
+        ScheduledMessage task = task("企业微信打卡", OffsetDateTime.now().plusHours(3));
+        when(scheduled.waitingReminders("wxid_demo")).thenReturn(List.of(task));
+
+        assertThat(service.handle(bot(), chat(), "今天好累啊")).isEmpty();
+        verifyNoInteractions(llmGateway);
+    }
+
+    @Test
+    void sayingAllOfThemChangesEveryWaitingTask() {
+        ScheduledMessage first = task("打卡", OffsetDateTime.now().plusHours(2));
+        ScheduledMessage second = task("交周报", OffsetDateTime.now().plusHours(4));
+        when(scheduled.waitingReminders("wxid_demo")).thenReturn(List.of(first, second));
+        stubPatch(first);
+        stubPatch(second);
+        when(llmGateway.chat(any(), anyList())).thenReturn(LlmReply.rule("""
+                {"intent":"update","target":null,"change":{"maxTimes":2},"confidence":0.8}
+                """));
+
+        Optional<String> reply = service.handle(bot(), chat(), "把提醒都改成最多催两次");
+
+        assertThat(reply.orElse("")).contains("打卡").contains("交周报");
+        assertThat(first.getMaxTimes()).isEqualTo(2);
+        assertThat(second.getMaxTimes()).isEqualTo(2);
+    }
+
+    @Test
+    void aTimeThatAlreadyPassedRollsForwardWhenTheTaskRepeats() {
+        // 「改成九点」而今天九点已经过了：每天的任务应该顺到明天，不是反问「说个之后的」
+        ScheduledMessage task = task("打卡", OffsetDateTime.now().plusHours(3));
+        task.setRepeatRule(ScheduledRepeat.DAILY);
+        when(scheduled.waitingReminders("wxid_demo")).thenReturn(List.of(task));
+        stubPatch(task);
+        String past = OffsetDateTime.now().minusHours(2)
+                .atZoneSameInstant(java.time.ZoneId.of("Asia/Shanghai"))
+                .withSecond(0).withNano(0).format(java.time.format.DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+        when(llmGateway.chat(any(), anyList())).thenReturn(LlmReply.rule("""
+                {"intent":"update","target":"打卡","change":{"firstAt":"%s"},"confidence":0.9}
+                """.formatted(past)));
+
+        Optional<String> reply = service.handle(bot(), chat(), "把打卡改成两小时前那个点");
+
+        assertThat(reply.orElse("")).doesNotContain("已经过去了");
+        assertThat(task.getScheduledAt()).isAfter(OffsetDateTime.now());
+    }
+
+    @Test
+    void aPastTimeOnAOneShotTaskStillAsksBack() {
+        ScheduledMessage task = task("开会", OffsetDateTime.now().plusHours(3));
+        when(scheduled.waitingReminders("wxid_demo")).thenReturn(List.of(task));
+        String past = OffsetDateTime.now().minusHours(2)
+                .atZoneSameInstant(java.time.ZoneId.of("Asia/Shanghai"))
+                .withSecond(0).withNano(0).format(java.time.format.DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+        when(llmGateway.chat(any(), anyList())).thenReturn(LlmReply.rule("""
+                {"intent":"update","target":"开会","change":{"firstAt":"%s"},"confidence":0.9}
+                """.formatted(past)));
+
+        Optional<String> reply = service.handle(bot(), chat(), "把开会改到两小时前");
+
+        assertThat(reply.orElse("")).contains("已经过去了");
         verify(scheduled, never()).patch(any(), any());
+    }
+
+    @Test
+    void changingTheTimeOfACronTaskAlsoRewritesTheExpression() {
+        ScheduledMessage task = task("下班打卡", OffsetDateTime.now().plusHours(3));
+        task.setRepeatRule(ScheduledRepeat.CRON);
+        task.setCronExpression("0 18 * * 1-6");
+        when(scheduled.waitingReminders("wxid_demo")).thenReturn(List.of(task));
+        stubPatch(task);
+        when(llmGateway.chat(any(), anyList())).thenReturn(LlmReply.rule("""
+                {"intent":"update","target":"下班打卡","change":{"firstAt":"%s"},"confidence":0.9}
+                """.formatted(iso(17, 30))));
+
+        Optional<String> reply = service.handle(bot(), chat(), "把下班打卡改到十七点半");
+
+        assertThat(reply.orElse("")).contains("0 30 17 * * 1-6");
+        ArgumentCaptor<ScheduledMessageService.ReminderPatch> captor =
+                ArgumentCaptor.forClass(ScheduledMessageService.ReminderPatch.class);
+        verify(scheduled).patch(eq(task.getId()), captor.capture());
+        assertThat(captor.getValue().cronExpression()).isEqualTo("0 30 17 * * 1-6");
     }
 
     @Test

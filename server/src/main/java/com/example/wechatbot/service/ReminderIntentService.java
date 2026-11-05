@@ -116,8 +116,11 @@ public class ReminderIntentService {
             6. 改已有任务用 update：「改成九点」「推迟到明天」「提前半小时」「换成每十分钟催一次」「多催几次」
                「少催两次」「停止词改成已提交」都算。change 里**只放用户真正要改的字段**，
                没提到的字段一律不要出现（不要写 null，也不要写默认值），否则会把原来的设置覆盖掉。
+               「修改打卡时间」「把提醒改一下」这种只说改哪项、没说改成什么，也算 update，
+               但 change 留空（写成 {}），系统会反问要改成什么。
             7. 删掉任务用 delete：「删掉打卡」「这个不要了」「不用再提醒了」。用户指所有任务时 target 留 null。
             8. 完全不像在安排提醒（闲聊、问句、聊别的）时 intent 填 chat，其余留空。
+               拿不准但提到了提醒 / 时间 / 某个任务的名字时，宁可填 update，让系统去反问。
             9. create 缺时间就 askBack 反问，别猜。
             """;
 
@@ -230,7 +233,7 @@ public class ReminderIntentService {
                 // 否则把「下午六点」接到刚才那句指令后面，一起重新解析
                 combined = ask.instruction() + " " + text;
             }
-        } else if (!mightBeInstruction(text)) {
+        } else if (!mightBeInstruction(text) && !mentionsWaitingTask(chatId, text)) {
             return Optional.empty();
         }
 
@@ -256,6 +259,10 @@ public class ReminderIntentService {
         }
         if (draft.intent() == Intent.LIST) {
             return Optional.of(list(chatId));
+        }
+        // 「改成九点四十」而今天已经过了九点四十：重复的任务顺到下一次，别反问
+        if (draft.intent() == Intent.UPDATE) {
+            draft = rollPastUpdateForward(draft, chatId);
         }
         // 时间没说清 / 说的时间已经过去：先反问，别硬改也别硬建
         if (needsAskBack(draft)) {
@@ -466,38 +473,77 @@ public class ReminderIntentService {
     // ------------------------------------------------------------------ 改 / 删
 
     /**
-     * 聊天里能动哪些任务：这个会话、由聊天建的、还在等回执的提醒。
+     * 聊天里能动哪些任务：这个会话、还在等回执的提醒——后台建的也算。
      *
-     * <p>后台建的任务不给动——那是运营配的，聊天对象一句「改到九点」就把它改了，
-     * 出了事没人说得清是谁改的。要停可以，说「别再催了」走全局停止。</p>
+     * <p>早先只放开「聊天里自己建的」，理由是怕运营配的任务被一句「改到九点」改掉。
+     * 实际用起来这条限制只会让人困惑：同一个私聊里两个提醒长得一模一样，
+     * 一个能改一个不能改，用户看到的就是「改了没反应」。何况「别再催了」本来就能把
+     * 后台任务一起停掉，改和停的风险等级是一样的。</p>
      */
-    private List<ScheduledMessage> chatOwned(String chatId) {
-        return scheduled.waitingReminders(chatId).stream()
-                .filter(item -> item.getSource() == ScheduleSource.CHAT)
-                .filter(item -> item.getCreatorChatId() == null || item.getCreatorChatId().equals(chatId))
-                .toList();
+    private List<ScheduledMessage> chatTasks(String chatId) {
+        return scheduled.waitingReminders(chatId);
+    }
+
+    /**
+     * 这句话里提到了某条在等的任务的名字吗。
+     *
+     * <p>用户不会照着模板说话：「企业微信打卡不用了」「那个打卡往后挪挪」里既没有「改成」
+     * 也没有「提醒」，光靠动词词表永远补不全。既然这个会话里就有一条叫「企业微信打卡」的提醒，
+     * 名字被提到（哪怕只是其中两个字）就值得让模型解析一次——解析成闲聊也没损失。</p>
+     */
+    private boolean mentionsWaitingTask(String chatId, String text) {
+        if (chatId == null || text == null || text.isBlank() || text.length() > 60) {
+            return false;
+        }
+        for (ScheduledMessage item : chatTasks(chatId)) {
+            String title = normalizeTitle(titleOf(item));
+            for (int i = 0; i + 2 <= title.length(); i++) {
+                if (text.contains(title.substring(i, i + 2))) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     private String update(BotConfig bot, Conversation conversation, Draft draft, String combined) {
-        List<ScheduledMessage> own = chatOwned(conversation.getChatId());
+        List<ScheduledMessage> own = chatTasks(conversation.getChatId());
         if (own.isEmpty()) {
             return "现在没有能改的提醒。要建就说「每天六点提醒我打卡」。";
         }
-        ScheduledMessage target = pick(draft.target(), draft.targetIndex(), own);
-        if (target == null) {
-            return askWhich(conversation.getChatId(), own, draft, combined, "改");
-        }
         if (draft.change() == null || draft.change().isEmpty()) {
+            ScheduledMessage target = pick(draft.target(), draft.targetIndex(), own);
+            if (target == null) {
+                return askWhich(conversation.getChatId(), own, draft, combined, "改");
+            }
             // 「修改打卡时间」只说改哪项没说改成什么：记下这句，等对方补一句时间再一起解析
             pending.put(conversation.getChatId(), new PendingAsk(combined,
                     Instant.now().plusSeconds(Math.max(30, properties.getAskBackSeconds())), null));
             return "要改成什么？时间、间隔、次数、停止词都能改，比如「改成明天九点」。";
         }
+        if (wantsAll(combined)) {
+            return own.stream()
+                    .map(item -> applyUpdate(bot, conversation, item, draft))
+                    .collect(java.util.stream.Collectors.joining("\n"));
+        }
+        ScheduledMessage target = pick(draft.target(), draft.targetIndex(), own);
+        if (target == null) {
+            return askWhich(conversation.getChatId(), own, draft, combined, "改");
+        }
         return applyUpdate(bot, conversation, target, draft);
     }
 
+    /** 「都改成九点」「全部推迟半小时」：一次改完，不用逐个问。 */
+    private static boolean wantsAll(String text) {
+        if (text == null) {
+            return false;
+        }
+        return text.contains("全部") || text.contains("所有") || text.contains("都改")
+                || text.contains("都调") || text.contains("都推") || text.contains("都换");
+    }
+
     private String remove(Conversation conversation, Draft draft, String combined) {
-        List<ScheduledMessage> own = chatOwned(conversation.getChatId());
+        List<ScheduledMessage> own = chatTasks(conversation.getChatId());
         if (own.isEmpty()) {
             return "现在没有能删的提醒。";
         }
@@ -510,7 +556,7 @@ public class ReminderIntentService {
 
     /** 对方回了序号：落到第 N 条任务上，按原来那句指令的意图改或删。 */
     private String applyChoice(BotConfig bot, Conversation conversation, Draft draft, int index) {
-        List<ScheduledMessage> own = chatOwned(conversation.getChatId());
+        List<ScheduledMessage> own = chatTasks(conversation.getChatId());
         if (own.isEmpty()) {
             return "现在没有在等的提醒了。";
         }
@@ -543,6 +589,14 @@ public class ReminderIntentService {
         int maxTimes = change.maxTimes() == null
                 ? clampMaxTimes(target.getMaxTimes()) : clampMaxTimes(change.maxTimes());
         String cron = cronFor(change.firstAt(), change.weekdays());
+        // 本来就是 cron 排的任务、这次只说了改时间：表达式里的时分也得跟着改，
+        // 否则这一轮按新时间发了，下一轮又被表达式拉回老时间
+        if (cron.isEmpty() && target.getRepeatRule() == ScheduledRepeat.CRON && change.firstAt() != null) {
+            String retimed = ScheduledMessageService.retimeCron(target.getCronExpression(), change.firstAt());
+            if (retimed != null) {
+                cron = retimed;
+            }
+        }
         ScheduledRepeat repeat = change.repeat();
         if (repeat == null && !cron.isEmpty()) {
             repeat = ScheduledRepeat.CRON;
@@ -583,7 +637,12 @@ public class ReminderIntentService {
         StringBuilder text = new StringBuilder("好，「").append(titleOf(task)).append("」改成 ");
         if (repeat == ScheduledRepeat.DAILY) {
             text.append("每天 ").append(task.getScheduledAt().atZoneSameInstant(ZONE).format(CLOCK)).append(" 起，");
-        } else if (repeat == ScheduledRepeat.WEEKLY || repeat == ScheduledRepeat.CRON) {
+        } else if (repeat == ScheduledRepeat.CRON) {
+            // cron 排的：把表达式也读一遍，改了时分对方能立刻看出对没对
+            String cron = task.getCronExpression();
+            text.append(when).append(" 起，按 ").append(cron == null ? "原来的 cron" : "「" + cron + "」")
+                    .append(" 排，");
+        } else if (repeat == ScheduledRepeat.WEEKLY) {
             text.append(when).append(" 起按重复规则排，");
         } else {
             text.append(when).append(" 起，");
@@ -688,12 +747,50 @@ public class ReminderIntentService {
                     && stopWords == null && title == null && repeat == null
                     && (weekdays == null || weekdays.isEmpty());
         }
+
+        Change withFirstAt(OffsetDateTime at) {
+            return new Change(at, everyMinutes, maxTimes, stopWords, title, repeat, weekdays);
+        }
     }
 
     private record Draft(Intent intent, String title, OffsetDateTime firstAt, ScheduledRepeat repeat,
                          List<Integer> weekdays, boolean reminderEnabled, Integer everyMinutes,
                          Integer maxTimes, List<String> stopWords, String askBack, double confidence,
-                         String target, Integer targetIndex, Change change) {}
+                         String target, Integer targetIndex, Change change) {
+
+        Draft with(Change newChange, String newAskBack) {
+            return new Draft(intent, title, firstAt, repeat, weekdays, reminderEnabled, everyMinutes,
+                    maxTimes, stopWords, newAskBack, confidence, target, targetIndex, newChange);
+        }
+    }
+
+    /**
+     * 「改成九点四十」而今天九点四十已经过了：每天 / 每周的任务顺到下一次，一次性的才反问。
+     *
+     * <p>说「改到九点」的人要的是下一次九点，不是「这个时间过去了」。顺延只发生在任务本来就
+     * 会重复的情况下，一次性的提醒仍然老实反问，免得把「今天下午三点」悄悄变成明天。</p>
+     */
+    private Draft rollPastUpdateForward(Draft draft, String chatId) {
+        if (draft == null || draft.intent() != Intent.UPDATE || draft.change() == null) {
+            return draft;
+        }
+        OffsetDateTime at = draft.change().firstAt();
+        if (at == null || at.isAfter(OffsetDateTime.now())) {
+            return draft;
+        }
+        ScheduledMessage target = pick(draft.target(), draft.targetIndex(), chatTasks(chatId));
+        ScheduledRepeat repeat = target == null || target.getRepeatRule() == null
+                ? ScheduledRepeat.NONE : target.getRepeatRule();
+        if (repeat == ScheduledRepeat.NONE) {
+            return draft.with(draft.change(), "这个时间已经过去了，说个之后的？");
+        }
+        OffsetDateTime next = at;
+        int guard = 0;
+        while (!next.isAfter(OffsetDateTime.now()) && guard++ < 400) {
+            next = repeat == ScheduledRepeat.WEEKLY ? next.plusWeeks(1) : next.plusDays(1);
+        }
+        return draft.with(draft.change().withFirstAt(next), null);
+    }
 
     private Draft parse(BotConfig bot, String instruction) {
         ZonedDateTime now = ZonedDateTime.now(ZONE);
@@ -770,13 +867,8 @@ public class ReminderIntentService {
         OffsetDateTime changeAt = changeNode.hasNonNull("firstAt")
                 ? parseTime(changeNode.path("firstAt").asText("")) : null;
         String askBack = askBackOf(node);
-        if (changeAt != null && changeAt.isBefore(OffsetDateTime.now().minusMinutes(2))) {
-            // 说的时间已经过去了：不硬改，反问一句让他补个之后的时间
-            changeAt = null;
-            if (askBack == null || askBack.isBlank()) {
-                askBack = "这个时间已经过去了，说个之后的？";
-            }
-        }
+        // 时间已经过去时先别急着反问：能不能顺到下一次要看任务是不是重复的，
+        // 交给 rollPastUpdateForward 决定（顺延 or 反问）
         List<Integer> changeDays = changeNode.has("weekdays") ? weekdaysOf(changeNode.path("weekdays")) : null;
         List<String> changeStops = changeNode.has("stopWords") ? stopWordsOf(changeNode.path("stopWords")) : null;
         Change change = new Change(

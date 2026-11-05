@@ -299,6 +299,21 @@ class ScheduledMessageServiceTest {
     }
 
     @Test
+    void retimingACronKeepsTheDaysAndOnlyMovesTheClock() {
+        // 改时间只该动「几点几分」：星期几、日、月都留着，否则「周一到周六 18:00」
+        // 改个点就变成了「每天」
+        assertThat(ScheduledMessageService.retimeCron("0 18 * * 1-6",
+                OffsetDateTime.parse("2026-11-05T17:30:00+08:00")))
+                .isEqualTo("0 30 17 * * 1-6");
+        // 6 段写法（带秒）也要能改
+        assertThat(ScheduledMessageService.retimeCron("30 18 0 * * 1-5",
+                OffsetDateTime.parse("2026-11-05T09:05:00+08:00")))
+                .isEqualTo("0 5 9 * * 1-5");
+        assertThat(ScheduledMessageService.retimeCron("这不是 cron", OffsetDateTime.now())).isNull();
+        assertThat(ScheduledMessageService.retimeCron(null, OffsetDateTime.now())).isNull();
+    }
+
+    @Test
     void invalidCronIsRejectedWithAHint() {
         assertThatThrownBy(() -> service.create(null, "123@chatroom", "群", "内容",
                 OffsetDateTime.now().plusHours(1), ScheduledRepeat.CRON, null, false, "这不是 cron"))

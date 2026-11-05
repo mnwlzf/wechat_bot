@@ -633,6 +633,29 @@ public class ScheduledMessageService {
     }
 
     /**
+     * 只改「几点几分」，日期和星期几原样保留：{@code 0 18 * * 1-6} + 17:30 → {@code 30 17 * * 1-6}。
+     *
+     * <p>为什么需要：cron 任务改时间时如果只挪 {@code scheduledAt}，这一轮按新时间发了，
+     * 下一轮又被表达式拉回老时间——用户会以为「改了只生效一次」。</p>
+     */
+    static String retimeCron(String expression, OffsetDateTime at) {
+        if (expression == null || expression.isBlank() || at == null) {
+            return null;
+        }
+        String[] parts = expression.trim().replaceAll("\\s+", " ").split(" ");
+        java.time.ZonedDateTime local = at.atZoneSameInstant(ZONE);
+        int minute = local.getMinute();
+        int hour = local.getHour();
+        if (parts.length == 5) {
+            return "0 " + minute + " " + hour + " " + parts[2] + " " + parts[3] + " " + parts[4];
+        }
+        if (parts.length == 6) {
+            return "0 " + minute + " " + hour + " " + parts[3] + " " + parts[4] + " " + parts[5];
+        }
+        return null;
+    }
+
+    /**
      * 解析 cron 表达式，兼容两种写法：
      * 5 段「分 时 日 月 周」（例如 {@code 0 9 * * 1-5}）会自动补上秒位。
      */
