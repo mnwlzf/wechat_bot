@@ -68,6 +68,29 @@ const statusTypes: Record<string, string> = {
   FAILED: 'danger',
 }
 
+// 今天这一列：今天发没发、催了几次、对方回没回（后端按 Asia/Shanghai 现算）
+const todayLabels: Record<string, string> = {
+  PENDING: '待发送',
+  SENT: '已发送',
+  NUDGING: '催收中',
+  DONE: '已完成',
+  GAVE_UP: '已作罢',
+  IDLE: '今天不发',
+  STOPPED: '已停止',
+  FAILED: '发送失败',
+}
+
+const todayTypes: Record<string, string> = {
+  PENDING: 'warning',
+  SENT: 'success',
+  NUDGING: 'primary',
+  DONE: 'success',
+  GAVE_UP: 'info',
+  IDLE: 'info',
+  STOPPED: 'info',
+  FAILED: 'danger',
+}
+
 const repeatLabels: Record<ScheduledRepeat, string> = {
   NONE: '',
   DAILY: '每天',
@@ -418,6 +441,29 @@ onMounted(async () => {
               </template>
             </template>
           </el-table-column>
+          <el-table-column label="今天" width="126">
+            <template #default="{ row }">
+              <el-tooltip :content="row.todayText" placement="top">
+                <el-tag :type="todayTypes[row.todayStatus]" size="small" effect="plain">
+                  {{ todayLabels[row.todayStatus] || row.todayText }}
+                </el-tag>
+              </el-tooltip>
+              <span v-if="row.todaySentCount > 0" class="sent-count">
+                今天 {{ row.todaySentCount }} 次
+              </span>
+            </template>
+          </el-table-column>
+          <el-table-column label="回话" width="112">
+            <template #default="{ row }">
+              <span v-if="row.todayReplied === true" class="replied-yes">
+                ✓ {{ row.todayRepliedText || '今天回话了' }}
+              </span>
+              <span v-else-if="row.todayReplied === false" class="replied-no">
+                {{ row.todayRepliedText || '还没回' }}
+              </span>
+              <span v-else class="replied-none">—</span>
+            </template>
+          </el-table-column>
           <el-table-column label="状态" width="104">
             <template #default="{ row }">
               <el-tag :type="statusTypes[row.status]" size="small" effect="light">
@@ -697,6 +743,21 @@ onMounted(async () => {
   margin-top: 4px;
   color: var(--muted-soft);
   font-size: 10px;
+}
+
+.replied-yes {
+  color: var(--el-color-success);
+  font-size: 12px;
+}
+
+.replied-no {
+  color: var(--muted-soft);
+  font-size: 12px;
+}
+
+.replied-none {
+  color: var(--muted-soft);
+  font-size: 12px;
 }
 
 .ack-hint {

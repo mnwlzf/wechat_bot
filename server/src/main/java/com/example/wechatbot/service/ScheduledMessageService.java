@@ -90,6 +90,71 @@ public class ScheduledMessageService {
         return repository.countByStatus(ScheduledStatus.PENDING);
     }
 
+    /**
+     * 「今天」这条任务走到哪一步了。
+     *
+     * @param status      PENDING / SENT / NUDGING / DONE / GAVE_UP / IDLE / STOPPED / FAILED
+     * @param text        给列表直接显示的一句话（「已催 3 次，等回话」）
+     * @param sentCount   今天发出去几次（跨零点的一轮按整轮算，够用）
+     * @param replied     今天对方回话了吗；null = 这类任务不用回（定时消息）
+     * @param repliedText 回话那一列的文案
+     */
+    public record Today(String status, String text, int sentCount, Boolean replied, String repliedText) {}
+
+    /**
+     * 把「今天」算出来给列表看：今天发没发、催了几次、对方回没回。
+     *
+     * <p>不存库、每次现算——存字段就得在每个分支（催、回话、收尾、停止）里同步维护，
+     * 漏一处列表就会长期显示错的状态；而这些东西全在 {@code sentAt} / {@code ackAt} /
+     * {@code status} 里，算一次就够了。日期一律按 Asia/Shanghai 切。</p>
+     */
+    public static Today today(ScheduledMessage message, OffsetDateTime now) {
+        ScheduledStatus status = message.getStatus() == null ? ScheduledStatus.PENDING : message.getStatus();
+        boolean reminder = message.getKind() == ScheduledKind.REMINDER;
+        java.time.LocalDate today = now.atZoneSameInstant(ZONE).toLocalDate();
+        boolean sentToday = message.getSentAt() != null
+                && message.getSentAt().atZoneSameInstant(ZONE).toLocalDate().isEqual(today);
+        boolean ackedToday = message.getAckAt() != null
+                && message.getAckAt().atZoneSameInstant(ZONE).toLocalDate().isEqual(today);
+        boolean dueToday = message.getScheduledAt() != null
+                && message.getScheduledAt().atZoneSameInstant(ZONE).toLocalDate().isEqual(today);
+        int count = sentToday ? Math.max(0, message.getSentCount()) : 0;
+
+        switch (status) {
+            case CANCELLED:
+                return new Today("STOPPED", "已停止", 0, null, null);
+            case FAILED:
+                return new Today("FAILED", "发送失败", count, null, null);
+            case ACKED:
+                return new Today("DONE", ackedToday ? "今天已完成" : "已完成", 0,
+                        ackedToday, ackedToday ? "今天回话了" : null);
+            case EXPIRED:
+                return sentToday
+                        ? new Today("GAVE_UP", "催满 " + (message.getMaxTimes() == null ? 0 : message.getMaxTimes())
+                        + " 次，作罢", count, reminder ? Boolean.FALSE : null, reminder ? "一直没回" : null)
+                        : new Today("IDLE", "今天不发", 0, null, null);
+            case SENT:
+                return sentToday
+                        ? new Today("SENT", "今天已发送", count, null, null)
+                        : new Today("IDLE", "今天不发", 0, null, null);
+            default:
+                break;
+        }
+        // PENDING：今天已经回话（每天的任务回完话就排到明天了）> 今天已经发过 > 今天还没到点
+        if (ackedToday) {
+            return new Today("DONE", "今天已完成", count, true, "今天回话了");
+        }
+        if (sentToday) {
+            return reminder
+                    ? new Today("NUDGING", "已催 " + count + " 次，等回话", count, false, "还没回")
+                    : new Today("SENT", "今天已发送", count, null, null);
+        }
+        if (dueToday) {
+            return new Today("PENDING", "待发送", 0, null, null);
+        }
+        return new Today("IDLE", "今天不发", 0, null, null);
+    }
+
     public ScheduledMessage get(UUID id) {
         return repository.findById(id).orElseThrow(() -> ApiException.notFound("定时消息不存在"));
     }

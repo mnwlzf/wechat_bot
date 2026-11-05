@@ -311,7 +311,16 @@ public final class AdminDtos {
             OffsetDateTime ackAt,
             String ackContent,
             String source,
-            String rawInstruction
+            String rawInstruction,
+            /** 今天走到哪一步：PENDING / SENT / NUDGING / DONE / GAVE_UP / IDLE / STOPPED / FAILED */
+            String todayStatus,
+            /** 上面那个状态的一句话（「已催 3 次，等回话」） */
+            String todayText,
+            /** 今天发出去几次 */
+            int todaySentCount,
+            /** 今天对方回话了吗；null = 这类任务不用回 */
+            Boolean todayReplied,
+            String todayRepliedText
     ) {}
 
     /** 管理端「一句话创建」：只解析成草案，不落库，人确认后再保存。 */

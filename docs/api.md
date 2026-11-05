@@ -134,7 +134,7 @@ $headers = @{ Authorization = "Bearer dev-admin-token" }
 | PUT/DELETE | `/api/admin/memories/{id}` | 修改内容 / 启停 / 删除记忆条目 |
 | POST | `/api/admin/memories/summaries?chatId=…` | 立即按现有历史重算一次滚动摘要（同步） |
 | DELETE | `/api/admin/memories/summaries?chatId=…` | 清空摘要，下次重新压缩（人工要点保留） |
-| GET/POST | `/api/admin/scheduled-messages` | 任务列表 / 新建。`?kind=REMINDER` 只看提醒；新建时 `kind` 为 `MESSAGE`（定时消息）或 `REMINDER`（提醒），后者可带 `title`、`intervalMinutes`、`maxTimes`、`stopWords`、`variants`、`finalMessage` |
+| GET/POST | `/api/admin/scheduled-messages` | 任务列表 / 新建。`?kind=REMINDER` 只看提醒；新建时 `kind` 为 `MESSAGE`（定时消息）或 `REMINDER`（提醒），后者可带 `title`、`intervalMinutes`、`maxTimes`、`stopWords`、`variants`、`finalMessage`。列表每行另带今天的状态：`todayStatus`（`PENDING` 待发送 / `SENT` 已发送 / `NUDGING` 催收中 / `DONE` 已完成 / `GAVE_UP` 已作罢 / `IDLE` 今天不发 / `STOPPED` / `FAILED`）、`todayText`、`todaySentCount`、`todayReplied`（`null` 表示这类任务不用回）、`todayRepliedText`，全部按 Asia/Shanghai 现算 |
 | PUT | `/api/admin/scheduled-messages/{id}` | 编辑待发送的定时消息（时间、接收人、内容、重复规则）；提醒走补丁，可改 `title` / `intervalMinutes` / `maxTimes` / `stopWords` / `variants` / `finalMessage`，没传的字段保持原样 |
 | POST | `/api/admin/scheduled-messages/{id}/cancel` | 取消待发送的定时消息 |
 | POST | `/api/admin/scheduled-messages/{id}/stop` | 停止任务（消息和正在等回执的提醒都能停） |

@@ -10,6 +10,7 @@ import com.example.wechatbot.web.dto.AdminDtos;
 import org.springframework.data.domain.Page;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.OffsetDateTime;
 import java.util.UUID;
 
 /**
@@ -95,6 +96,8 @@ public class ScheduledMessageController {
     }
 
     private AdminDtos.ScheduledMessageView toView(ScheduledMessage message) {
+        // 「今天」按请求时刻现算：整页用同一个 now，避免翻页时前后半秒算出不同日期
+        ScheduledMessageService.Today today = ScheduledMessageService.today(message, OffsetDateTime.now());
         return new AdminDtos.ScheduledMessageView(
                 message.getId(),
                 message.getBotId(),
@@ -122,7 +125,12 @@ public class ScheduledMessageController {
                 message.getAckAt(),
                 message.getAckContent(),
                 message.getSource() == null ? ScheduleSource.ADMIN.name() : message.getSource().name(),
-                message.getRawInstruction()
+                message.getRawInstruction(),
+                today.status(),
+                today.text(),
+                today.sentCount(),
+                today.replied(),
+                today.repliedText()
         );
     }
 }

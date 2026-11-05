@@ -380,7 +380,26 @@ export interface ScheduledMessage {
   ackContent?: string | null
   source: ScheduleSource
   rawInstruction?: string | null
+  /** 今天走到哪一步：PENDING / SENT / NUDGING / DONE / GAVE_UP / IDLE / STOPPED / FAILED */
+  todayStatus: TodayStatus
+  /** 上面那个状态的一句话（「已催 3 次，等回话」） */
+  todayText: string
+  todaySentCount: number
+  /** 今天对方回话了吗；null = 这类任务不用回 */
+  todayReplied?: boolean | null
+  todayRepliedText?: string | null
 }
+
+/** 列表里的「今天」一列：今天发没发、催了几次、对方回没回 */
+export type TodayStatus =
+  | 'PENDING'
+  | 'SENT'
+  | 'NUDGING'
+  | 'DONE'
+  | 'GAVE_UP'
+  | 'IDLE'
+  | 'STOPPED'
+  | 'FAILED'
 
 /** 「一句话创建」的解析结果：只是草稿，确认后才真正保存 */
 export interface ReminderParseResult {
