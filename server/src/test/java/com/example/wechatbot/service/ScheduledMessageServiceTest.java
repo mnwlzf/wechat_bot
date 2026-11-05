@@ -259,6 +259,46 @@ class ScheduledMessageServiceTest {
     }
 
     @Test
+    void cronIsReadInBusinessZoneNotInTheOffsetOfTheStoredValue() {
+        // 线上事故：timestamptz 读出来带 +00:00，按这个 offset 去问 cron「下一次 18 点」，
+        // 得到的是 UTC 18 点 = 北京时间第二天凌晨 2 点。「0 18 * * 1-6 下班打卡」
+        // 第一次 18:01 发对了，之后每轮都跑到凌晨 2 点。
+        OffsetDateTime utcAfter = OffsetDateTime.parse("2026-11-04T10:01:00Z");
+
+        OffsetDateTime next = ScheduledMessageService.nextCron("0 18 * * 1-6", utcAfter);
+
+        assertThat(next).isNotNull();
+        assertThat(next.atZoneSameInstant(java.time.ZoneId.of("Asia/Shanghai")).getHour()).isEqualTo(18);
+        assertThat(next.atZoneSameInstant(java.time.ZoneId.of("Asia/Shanghai")).toLocalDate())
+                .isEqualTo(java.time.LocalDate.of(2026, 11, 5));
+    }
+
+    @Test
+    void cronRescheduleStaysOnTheSameWallClockEvenIfTheLoadedValueIsUtc() {
+        ScheduledMessage message = scheduled("下班打卡！！！");
+        message.setRepeatRule(ScheduledRepeat.CRON);
+        message.setCronExpression("0 18 * * 1-6");
+        // 模拟从库里读回来的样子：同一个瞬间，但 offset 是 +00:00
+        message.setScheduledAt(OffsetDateTime.now().minusMinutes(1).withOffsetSameInstant(java.time.ZoneOffset.UTC));
+        when(repository.findByStatusAndScheduledAtLessThanEqualOrderByScheduledAtAsc(
+                eq(ScheduledStatus.PENDING), any(), any(Pageable.class))).thenReturn(List.of(message));
+        when(contentFilter.apply(any())).thenAnswer(inv -> ContentFilterService.Result.pass(inv.getArgument(0)));
+        when(outboxRepository.save(any(OutboxMessage.class))).thenAnswer(inv -> {
+            OutboxMessage outbox = inv.getArgument(0);
+            outbox.setId(UUID.randomUUID());
+            return outbox;
+        });
+        when(repository.save(any(ScheduledMessage.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        service.dispatchDue();
+
+        java.time.ZonedDateTime next = message.getScheduledAt()
+                .atZoneSameInstant(java.time.ZoneId.of("Asia/Shanghai"));
+        assertThat(next.getHour()).isEqualTo(18);
+        assertThat(next.getMinute()).isZero();
+    }
+
+    @Test
     void invalidCronIsRejectedWithAHint() {
         assertThatThrownBy(() -> service.create(null, "123@chatroom", "群", "内容",
                 OffsetDateTime.now().plusHours(1), ScheduledRepeat.CRON, null, false, "这不是 cron"))

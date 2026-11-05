@@ -48,6 +48,8 @@ public class ScheduledMessageService {
     private static final int MAX_PARTS = 10;
     /** 提醒间隔的硬上限：一天催一次已经是极限了。 */
     private static final int MAX_INTERVAL_MINUTES = 24 * 60;
+    /** cron 的「几点几分」按这个时区算：业务时区固定，不跟着入参 offset 或 JVM 默认时区漂。 */
+    private static final java.time.ZoneId ZONE = java.time.ZoneId.of("Asia/Shanghai");
 
     private final ScheduledMessageRepository repository;
     private final OutboxMessageRepository outboxRepository;
@@ -613,15 +615,20 @@ public class ScheduledMessageService {
         return next;
     }
 
-    /** cron 的下一次触发时间；表达式非法时返回 null（保存时已经校验过，这里只防御历史数据）。 */
+    /**
+     * cron 的下一次触发时间；表达式非法时返回 null（保存时已经校验过，这里只防御历史数据）。
+     *
+     * <p><b>cron 必须按业务时区算，不能按入参自带的 offset 算。</b>
+     * {@code timestamptz} 读出来是 UTC（+00:00），如果照着这个 offset 去问 cron「下一次 18 点」，
+     * 得到的是 UTC 18 点，也就是北京时间第二天凌晨 2 点——线上真的这么错过一次：
+     * 「0 18 * * 1-6 下班打卡」第一次 18:01 发对了，之后每轮都跑到凌晨 2 点。</p>
+     */
     static OffsetDateTime nextCron(String expression, OffsetDateTime after) {
         CronExpression cron = parseCronOrNull(expression);
         if (cron == null || after == null) {
             return null;
         }
-        java.time.ZoneOffset offset = after.getOffset();
-        java.time.ZonedDateTime zoneTime = after.toInstant().atZone(offset);
-        java.time.ZonedDateTime next = cron.next(zoneTime);
+        java.time.ZonedDateTime next = cron.next(after.toInstant().atZone(ZONE));
         return next == null ? null : next.toOffsetDateTime();
     }
 
@@ -689,10 +696,10 @@ public class ScheduledMessageService {
         OffsetDateTime effectiveAt = scheduledAt;
         if (repeat == ScheduledRepeat.CRON) {
             CronExpression parsed = requireCron(cron);
-            // 只给 cron 不给时间时，从「现在之后的下一次」开始；给了过去的时间也自动顺延
+            // 只给 cron 不给时间时，从「现在之后的下一次」开始；给了过去的时间也自动顺延。
+            // 这里同样按业务时区算，否则 JVM 跑在 UTC 的机器上会整体偏 8 小时。
             if (effectiveAt == null || effectiveAt.isBefore(OffsetDateTime.now().minusMinutes(1))) {
-                OffsetDateTime now = OffsetDateTime.now();
-                java.time.ZonedDateTime start = parsed.next(now.toInstant().atZone(now.getOffset()));
+                java.time.ZonedDateTime start = parsed.next(java.time.Instant.now().atZone(ZONE));
                 if (start == null) {
                     throw ApiException.badRequest("这个 cron 永远不会触发：" + cron);
                 }
